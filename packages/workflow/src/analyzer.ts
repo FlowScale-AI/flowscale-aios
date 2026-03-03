@@ -239,8 +239,8 @@ function isApiFormat(json: unknown): boolean {
   })
 }
 
-// UI-only node types that have no ComfyUI backend — skip during conversion
-const UI_ONLY_NODES = new Set(['Note', 'PrimitiveNode', 'Reroute'])
+// UI-only node types that have no ComfyUI backend — skip during conversion & queuing
+const UI_ONLY_NODES = new Set(['Note', 'PrimitiveNode', 'Reroute', 'MarkdownNote'])
 
 /** Convert graph-format workflow to API format.
  *  Pass objectInfoMap (from ComfyUI GET /object_info) for dynamic widget-param
@@ -455,6 +455,13 @@ export function normalizeWorkflow(
   json: ComfyUIWorkflow | GraphFormat,
   objectInfoMap?: ObjectInfoMap
 ): ComfyUIWorkflow {
-  if (isGraphFormat(json)) return graphToApi(json, objectInfoMap)
-  return json as ComfyUIWorkflow
+  const api = isGraphFormat(json) ? graphToApi(json, objectInfoMap) : { ...json as ComfyUIWorkflow }
+  // Strip UI-only nodes that have no ComfyUI backend (e.g. MarkdownNote, Note)
+  for (const nodeId of Object.keys(api)) {
+    const node = api[nodeId] as { class_type?: string }
+    if (node.class_type && UI_ONLY_NODES.has(node.class_type)) {
+      delete api[nodeId]
+    }
+  }
+  return api
 }
