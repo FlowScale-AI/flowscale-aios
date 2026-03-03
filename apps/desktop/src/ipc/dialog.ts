@@ -1,4 +1,4 @@
-import { ipcMain, dialog } from 'electron'
+import { ipcMain, dialog, shell } from 'electron'
 import { readFileSync } from 'fs'
 
 export function registerDialogIpc(): void {
@@ -22,5 +22,9 @@ export function registerDialogIpc(): void {
       console.error('[dialog] Failed to read file:', err)
       return null
     }
+  })
+
+  ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+    await shell.openExternal(url)
   })
 }

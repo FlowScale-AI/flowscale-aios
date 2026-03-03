@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('desktop', {
   dialog: {
     openFile: (): Promise<string | null> => ipcRenderer.invoke('dialog:openFile'),
   },
+  shell: {
+    openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
+  },
   auth: {
     startFlowscaleOAuth: (): Promise<void> =>
       ipcRenderer.invoke('auth:startFlowscaleOAuth'),

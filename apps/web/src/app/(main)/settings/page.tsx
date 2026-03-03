@@ -1,7 +1,8 @@
 'use client'
 
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Monitor, HardDrive, ArrowCounterClockwise, CheckCircle, Warning } from 'phosphor-react'
+import { Monitor, HardDrive, ArrowCounterClockwise, CheckCircle, Warning, Globe, ArrowSquareOut, Copy, Check } from 'phosphor-react'
 import { PageTransition, LottieSpinner, StaggerGrid, StaggerItem } from '@/components/ui'
 
 interface ComfyInstance {
@@ -12,6 +13,11 @@ interface ComfyInstance {
 interface RuntimeData {
   comfyInstances: ComfyInstance[]
   timestamp: number
+}
+
+interface NetworkData {
+  port: number
+  addresses: string[]
 }
 
 function getGpuName(inst: ComfyInstance): string {
@@ -42,6 +48,31 @@ export default function SettingsPage() {
     },
     refetchInterval: 30_000,
   })
+
+  const { data: network } = useQuery<NetworkData>({
+    queryKey: ['network'],
+    queryFn: async () => {
+      const res = await fetch('/api/settings/network')
+      if (!res.ok) throw new Error('Failed to fetch network info')
+      return res.json()
+    },
+  })
+
+  const [copied, setCopied] = useState<string | null>(null)
+
+  const openInBrowser = (url: string) => {
+    if (window.desktop?.shell?.openExternal) {
+      window.desktop.shell.openExternal(url)
+    } else {
+      window.open(url, '_blank')
+    }
+  }
+
+  const copyUrl = (url: string) => {
+    navigator.clipboard.writeText(url)
+    setCopied(url)
+    setTimeout(() => setCopied(null), 2000)
+  }
 
   return (
     <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
@@ -126,6 +157,71 @@ export default function SettingsPage() {
               Last scanned {new Date(data.timestamp).toLocaleTimeString()}
             </p>
           )}
+        </section>
+
+        {/* Network Access */}
+        <section className="mb-8">
+          <div className="flex items-center gap-2 mb-4">
+            <Globe size={16} className="text-zinc-400" />
+            <h2 className="font-tech text-sm font-semibold text-zinc-200">Network Access</h2>
+          </div>
+          <div className="flex flex-col gap-2">
+            {/* Local URL */}
+            <div className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg">
+              <div className="flex-1 min-w-0">
+                <div className="text-xs text-zinc-500 mb-1">Local</div>
+                <span className="text-sm font-mono-custom text-zinc-300">http://localhost:{network?.port ?? 14173}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 ml-4">
+                <button
+                  onClick={() => copyUrl(`http://localhost:${network?.port ?? 14173}`)}
+                  className="p-1.5 text-zinc-500 hover:text-white transition-colors"
+                  title="Copy URL"
+                >
+                  {copied === `http://localhost:${network?.port ?? 14173}` ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                </button>
+                <button
+                  onClick={() => openInBrowser(`http://localhost:${network?.port ?? 14173}`)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
+                >
+                  <ArrowSquareOut size={12} />
+                  Open
+                </button>
+              </div>
+            </div>
+
+            {/* Network URLs */}
+            {network?.addresses.map((ip) => {
+              const url = `http://${ip}:${network.port}`
+              return (
+                <div key={ip} className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-zinc-500 mb-1">Network</div>
+                    <span className="text-sm font-mono-custom text-zinc-300">{url}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 ml-4">
+                    <button
+                      onClick={() => copyUrl(url)}
+                      className="p-1.5 text-zinc-500 hover:text-white transition-colors"
+                      title="Copy URL"
+                    >
+                      {copied === url ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                    </button>
+                    <button
+                      onClick={() => openInBrowser(url)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
+                    >
+                      <ArrowSquareOut size={12} />
+                      Open
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-xs text-zinc-600 mt-2">
+            Use the network URL to open EIOS from any device on the same network.
+          </p>
         </section>
 
         {/* Storage */}

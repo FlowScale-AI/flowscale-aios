@@ -14,6 +14,9 @@ interface DesktopBridge {
   dialog: {
     openFile(): Promise<string | null>
   }
+  shell: {
+    openExternal(url: string): Promise<void>
+  }
   auth: {
     startFlowscaleOAuth(): Promise<void>
     getFlowscaleTokens(): Promise<FlowscaleTokens>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, session } from 'electron'
+import { app, BrowserWindow, Menu, session, shell } from 'electron'
 import path from 'path'
 import { spawn, type ChildProcess } from 'child_process'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
@@ -146,6 +146,12 @@ function createWindow(): BrowserWindow {
       .then(() => win.loadURL(url))
       .catch(() => win.loadURL(url))
   }
+
+  // Open external URLs (window.open / <a target="_blank">) in the system browser
+  win.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    shell.openExternal(targetUrl)
+    return { action: 'deny' }
+  })
 
   win.on('closed', () => { mainWindow = null })
 
