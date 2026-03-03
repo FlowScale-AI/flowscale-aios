@@ -92,9 +92,10 @@ function UploadModal({
   onNext,
 }: {
   onClose: () => void
-  onNext: (workflowJson: string) => void
+  onNext: (workflowJson: string, name: string) => void
 }) {
   const [text, setText] = useState('')
+  const [fileName, setFileName] = useState('')
   const [error, setError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -102,6 +103,7 @@ function UploadModal({
     const reader = new FileReader()
     reader.onload = (e) => { setText(e.target?.result as string); setError('') }
     reader.readAsText(file)
+    setFileName(file.name.replace(/\.json$/i, ''))
   }
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -113,7 +115,7 @@ function UploadModal({
   const handleNext = () => {
     if (!text.trim()) { setError('Paste a workflow JSON or upload a file.'); return }
     try { JSON.parse(text) } catch { setError('Invalid JSON.'); return }
-    onNext(text)
+    onNext(text, fileName)
   }
 
   return (
@@ -196,7 +198,7 @@ function UploadModal({
 function StepAttach({
   onNext,
 }: {
-  onNext: (workflowJson: string) => void
+  onNext: (workflowJson: string, name: string) => void
 }) {
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [instances, setInstances] = useState<ComfyInstance[]>([])
@@ -252,7 +254,7 @@ function StepAttach({
       if (!res.ok) throw new Error(`Failed to load workflow (${res.status})`)
       const json = await res.text()
       JSON.parse(json)
-      onNext(json)
+      onNext(json, workflowDisplayName(filename))
     } catch (e: any) {
       setError(e.message ?? 'Failed to load workflow')
     } finally {
@@ -402,7 +404,7 @@ function StepAttach({
       {uploadModalOpen && (
         <UploadModal
           onClose={() => setUploadModalOpen(false)}
-          onNext={(json) => { setUploadModalOpen(false); onNext(json) }}
+          onNext={(json, name) => { setUploadModalOpen(false); onNext(json, name) }}
         />
       )}
     </>
@@ -464,10 +466,12 @@ function EditableDefault({
 
 function StepConfigure({
   workflowJson,
+  initialName,
   onBack,
   onNext,
 }: {
   workflowJson: string
+  initialName: string
   onBack: () => void
   onNext: (tool: Tool) => void
 }) {
@@ -476,7 +480,7 @@ function StepConfigure({
   const [instances, setInstances] = useState<ComfyInstance[]>([])
   const [scanning, setScanning] = useState(false)
   const [selectedPort, setSelectedPort] = useState<number | null>(null)
-  const [name, setName] = useState('')
+  const [name, setName] = useState(initialName)
   const [description, setDescription] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -1251,6 +1255,7 @@ function StepDeploy({ tool, onBack }: { tool: Tool; onBack: () => void }) {
 export default function BuildToolPage() {
   const [step, setStep] = useState(0)
   const [workflowJson, setWorkflowJson] = useState('')
+  const [workflowName, setWorkflowName] = useState('')
   const [tool, setTool] = useState<Tool | null>(null)
 
   return (
@@ -1265,13 +1270,14 @@ export default function BuildToolPage() {
 
         {step === 0 && (
           <StepAttach
-            onNext={(json) => { setWorkflowJson(json); setStep(1) }}
+            onNext={(json, name) => { setWorkflowJson(json); setWorkflowName(name); setStep(1) }}
           />
         )}
 
         {step === 1 && (
           <StepConfigure
             workflowJson={workflowJson}
+            initialName={workflowName}
             onBack={() => setStep(0)}
             onNext={(t) => { setTool(t); setStep(2) }}
           />
