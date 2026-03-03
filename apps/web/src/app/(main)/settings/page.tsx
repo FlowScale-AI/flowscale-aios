@@ -52,14 +52,15 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="flex-1 p-8 max-w-2xl">
+      <div className="flex-1 p-8">
+        <div className="max-w-2xl mx-auto">
 
         {/* Runtime Status */}
         <section className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Monitor size={16} className="text-zinc-400" />
-              <h2 className="text-sm font-semibold text-zinc-200">ComfyUI Instances</h2>
+              <h2 className="font-tech text-sm font-semibold text-zinc-200">ComfyUI Instances</h2>
             </div>
             <button
               onClick={() => refetch()}
@@ -94,7 +95,7 @@ export default function SettingsPage() {
               {data.comfyInstances.map((inst) => (
                 <div
                   key={inst.port}
-                  className="flex items-center gap-4 p-4 bg-zinc-900/50 border border-white/5 rounded-lg"
+                  className="flex items-center gap-4 p-4 bg-zinc-900/50 border border-white/5 rounded-lg hover:border-emerald-500/30 transition-all"
                 >
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-emerald-500" />
@@ -128,7 +129,7 @@ export default function SettingsPage() {
         <section>
           <div className="flex items-center gap-2 mb-4">
             <HardDrive size={16} className="text-zinc-400" />
-            <h2 className="text-sm font-semibold text-zinc-200">Storage</h2>
+            <h2 className="font-tech text-sm font-semibold text-zinc-200">Storage</h2>
           </div>
           <div className="flex flex-col gap-3 p-4 bg-zinc-900/50 border border-white/5 rounded-lg text-sm">
             <div className="flex justify-between">
@@ -152,6 +153,8 @@ export default function SettingsPage() {
             <span className="font-mono-custom">v0.1.0</span>
           </div>
         </section>
+
+        </div>
       </div>
     </div>
   )
