@@ -149,7 +149,7 @@ export default function SettingsPage() {
         {/* App info */}
         <section className="mt-8 pt-8 border-t border-white/5">
           <div className="flex justify-between text-xs text-zinc-600">
-            <span className="font-tech">FlowScale EIOS</span>
+            <span className="font-tech">FlowScale AI OS</span>
             <span className="font-mono-custom">v0.1.0</span>
           </div>
         </section>

@@ -8,7 +8,7 @@ const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-space
 const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-jetbrains-mono' })
 
 export const metadata: Metadata = {
-  title: 'FlowScale EIOS',
+  title: 'FlowScale AI OS',
   description: 'IP-safe AI production tools for creative studios',
 }
 

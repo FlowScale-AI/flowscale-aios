@@ -30,7 +30,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         <div className="flex items-center gap-3 px-4 py-5 border-b border-white/5 shrink-0">
           <FlowArrow size={28} weight="duotone" className="text-emerald-400 shrink-0" />
           <span className="font-tech text-sm font-semibold text-zinc-100 whitespace-nowrap opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75">
-            FlowScale EIOS
+            FlowScale AI OS
           </span>
         </div>
 
