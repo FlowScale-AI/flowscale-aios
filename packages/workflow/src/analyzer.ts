@@ -1,5 +1,87 @@
 import type { ComfyUIWorkflow, WorkflowIO } from './types'
 
+// ---------------------------------------------------------------------------
+// /object_info types — mirrors ComfyUI's GET /object_info response shape
+// ---------------------------------------------------------------------------
+
+/** First element is "INT" | "FLOAT" | "STRING" | "BOOLEAN", or an array of
+ *  option strings for COMBO inputs. */
+type ObjInfoInputType = string | string[]
+
+/** [type, options?] tuple returned per input by /object_info */
+type ObjInfoInputSpec = [ObjInfoInputType, Record<string, unknown>?]
+
+export interface ObjectInfoNodeDef {
+  input?: {
+    required?: Record<string, ObjInfoInputSpec>
+    optional?: Record<string, ObjInfoInputSpec>
+  }
+  input_order?: {
+    required?: string[]
+    optional?: string[]
+  }
+}
+
+/** The full /object_info response: { NodeType: NodeDef, ... } */
+export type ObjectInfoMap = Record<string, ObjectInfoNodeDef>
+
+// ---------------------------------------------------------------------------
+
+/** Returns true if the input spec represents a widget (primitive value) rather
+ *  than a node connection link. */
+function isWidgetInputSpec(spec: ObjInfoInputSpec): boolean {
+  const type = spec[0]
+  if (Array.isArray(type)) return true // COMBO dropdown
+  return type === 'INT' || type === 'FLOAT' || type === 'STRING' || type === 'BOOLEAN'
+}
+
+/**
+ * Build the widget-param name list for a node type using live /object_info
+ * data.  Returns null when the node type isn't present in the map.
+ *
+ * Rules:
+ *  - Iterate inputs in input_order (required then optional).
+ *  - Skip link inputs (non-primitive types like MODEL, LATENT, …).
+ *  - After each INT input whose options include `control_after_generate: true`,
+ *    insert a null placeholder for the extra "control_after_generate" combo
+ *    widget that the ComfyUI frontend appends to widgets_values.
+ */
+function buildWidgetParamsFromInfo(
+  nodeType: string,
+  info: ObjectInfoMap
+): Array<string | null> | null {
+  const nodeDef = info[nodeType]
+  if (!nodeDef?.input) return null
+
+  const required = nodeDef.input.required ?? {}
+  const optional = nodeDef.input.optional ?? {}
+  const allInputs: Record<string, ObjInfoInputSpec> = { ...required, ...optional }
+
+  const requiredOrder = nodeDef.input_order?.required ?? Object.keys(required)
+  const optionalOrder = nodeDef.input_order?.optional ?? Object.keys(optional)
+  const inputOrder = [...requiredOrder, ...optionalOrder]
+
+  const params: Array<string | null> = []
+
+  for (const inputName of inputOrder) {
+    const spec = allInputs[inputName]
+    if (!spec || !isWidgetInputSpec(spec)) continue
+
+    params.push(inputName)
+
+    // INT inputs with control_after_generate get a null placeholder for the
+    // extra combo widget the ComfyUI frontend injects into widgets_values.
+    const opts = spec[1]
+    if (spec[0] === 'INT' && opts?.control_after_generate) {
+      params.push(null)
+    }
+  }
+
+  return params.length > 0 ? params : null
+}
+
+// ---------------------------------------------------------------------------
+
 // Node types commonly used as user-facing inputs
 const INPUT_NODE_TYPES = new Set([
   'CLIPTextEncode',
@@ -150,8 +232,10 @@ function isApiFormat(json: unknown): boolean {
 // UI-only node types that have no ComfyUI backend — skip during conversion
 const UI_ONLY_NODES = new Set(['Note', 'PrimitiveNode', 'Reroute'])
 
-/** Convert graph-format workflow to API format */
-function graphToApi(graph: GraphFormat): ComfyUIWorkflow {
+/** Convert graph-format workflow to API format.
+ *  Pass objectInfoMap (from ComfyUI GET /object_info) for dynamic widget-param
+ *  resolution; falls back to the static GRAPH_WIDGET_PARAMS table otherwise. */
+function graphToApi(graph: GraphFormat, objectInfoMap?: ObjectInfoMap): ComfyUIWorkflow {
   // Build link map: link_id -> [from_node_id_str, from_output_slot]
   const linkMap = new Map<number, [string, number]>()
   for (const link of graph.links ?? []) {
@@ -172,8 +256,10 @@ function graphToApi(graph: GraphFormat): ComfyUIWorkflow {
       }
     }
 
-    // Wire widget inputs (non-linked values stored in widgets_values)
-    const widgetParams = GRAPH_WIDGET_PARAMS[node.type]
+    // Wire widget inputs: prefer live /object_info map, fall back to static table
+    const widgetParams =
+      (objectInfoMap && buildWidgetParamsFromInfo(node.type, objectInfoMap)) ??
+      GRAPH_WIDGET_PARAMS[node.type]
     if (widgetParams && node.widgets_values) {
       widgetParams.forEach((name, i) => {
         if (name !== null && i < node.widgets_values!.length) {
@@ -256,8 +342,13 @@ export function isValidComfyWorkflow(json: unknown): json is ComfyUIWorkflow {
   return isApiFormat(json) || isGraphFormat(json)
 }
 
-/** Normalize any valid ComfyUI workflow format into API format for analysis */
-export function normalizeWorkflow(json: ComfyUIWorkflow | GraphFormat): ComfyUIWorkflow {
-  if (isGraphFormat(json)) return graphToApi(json)
+/** Normalize any valid ComfyUI workflow format into API format for analysis.
+ *  Optionally pass objectInfoMap (from ComfyUI GET /object_info) to resolve
+ *  widget params for custom nodes beyond the built-in static table. */
+export function normalizeWorkflow(
+  json: ComfyUIWorkflow | GraphFormat,
+  objectInfoMap?: ObjectInfoMap
+): ComfyUIWorkflow {
+  if (isGraphFormat(json)) return graphToApi(json, objectInfoMap)
   return json as ComfyUIWorkflow
 }

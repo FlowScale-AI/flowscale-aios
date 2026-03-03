@@ -208,30 +208,36 @@ function StepConfigure({
   const [saving, setSaving] = useState(false)
   const [analyzeError, setAnalyzeError] = useState('')
 
-  // Analyze workflow on mount
-  useEffect(() => {
-    const analyze = async () => {
-      try {
-        const res = await fetch('/api/workflow/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ workflowJson }),
-        })
-        if (!res.ok) {
-          const err = await res.json()
-          setAnalyzeError(err.error ?? 'Analysis failed')
-          return
-        }
-        const { schema: s, hash } = await res.json()
-        setSchema(s)
-        setWorkflowHash(hash)
-      } catch {
-        setAnalyzeError('Failed to analyze workflow')
+  const runAnalyze = useCallback(async (port?: number | null) => {
+    try {
+      const body: Record<string, unknown> = { workflowJson }
+      if (port) body.comfyPort = port
+      const res = await fetch('/api/workflow/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        setAnalyzeError(err.error ?? 'Analysis failed')
+        return
       }
+      const { schema: s, hash } = await res.json()
+      setSchema(s)
+      setWorkflowHash(hash)
+      setAnalyzeError('')
+    } catch {
+      setAnalyzeError('Failed to analyze workflow')
     }
-    analyze()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [workflowJson])
+
+  // Analyze on mount (no port yet — uses static widget-param table)
+  useEffect(() => { runAnalyze() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-analyze when a port is selected so /object_info can resolve custom nodes
+  useEffect(() => {
+    if (selectedPort) runAnalyze(selectedPort)
+  }, [selectedPort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const scanPorts = async () => {
     setScanning(true)

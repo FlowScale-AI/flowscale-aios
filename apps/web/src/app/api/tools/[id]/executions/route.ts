@@ -3,7 +3,7 @@ import { getDb } from '@/lib/db'
 import { executions, tools } from '@/lib/db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
-import { isValidComfyWorkflow, normalizeWorkflow } from '@flowscale/workflow'
+import { isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@flowscale/workflow'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const db = getDb()
@@ -37,12 +37,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const now = Date.now()
   const clientId = uuidv4()
 
-  // Parse workflow, normalize to API format, and inject inputs
+  // Parse workflow, normalize to API format, and inject inputs.
+  // Fetch /object_info from the local ComfyUI instance so we can resolve widget
+  // params for custom nodes (beyond the static built-in table). If unreachable,
+  // we fall back to the static table — execution still proceeds.
   const parsed = JSON.parse(tool.workflowJson)
   if (!isValidComfyWorkflow(parsed)) {
     return NextResponse.json({ error: 'Stored workflow is not a valid ComfyUI workflow' }, { status: 422 })
   }
-  const workflow = normalizeWorkflow(parsed) as Record<string, { inputs: Record<string, unknown> }>
+
+  let objectInfoMap: ObjectInfoMap | undefined
+  try {
+    const infoRes = await fetch(`http://localhost:${tool.comfyPort}/object_info`, {
+      signal: AbortSignal.timeout(3000),
+    })
+    if (infoRes.ok) objectInfoMap = await infoRes.json() as ObjectInfoMap
+  } catch { /* ComfyUI unreachable — fall back to static table */ }
+
+  const workflow = normalizeWorkflow(parsed, objectInfoMap) as Record<string, { inputs: Record<string, unknown> }>
   const schema = JSON.parse(tool.schemaJson) as Array<{
     nodeId: string; paramName: string; isInput: boolean; defaultValue?: unknown
   }>

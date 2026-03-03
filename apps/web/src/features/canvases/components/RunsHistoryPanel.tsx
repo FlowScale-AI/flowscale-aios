@@ -315,7 +315,7 @@ export default function RunsHistoryPanel({
   if (!isOpen) return null;
 
   return (
-    <div className="absolute top-0 right-0 h-full z-30 flex">
+    <div className="fixed top-0 right-0 h-full z-30 flex">
       {/* Backdrop - click to close */}
       <div className="fixed inset-0 z-29" onClick={onClose} />
 

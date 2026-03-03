@@ -17,13 +17,13 @@ export default function StudioLayout() {
   // Get tools data to find the project_id for the selected tool
   const { data: toolsData, isLoading: isToolsLoading, refetch: refetchTools, isRefetching: isToolsRefetching } = useCanvasTools();
 
-  // Find the project_id of the active tool
+  // Find the project_id of the active tool — always "local" in EIOS
   const activeProjectId = useMemo(() => {
-    if (!activeToolId || !toolsData?.tools) return undefined;
+    if (!activeToolId || !toolsData?.tools) return "local";
     const activeTool = toolsData.tools.find(
       (tool: any) => tool.workflow_id === activeToolId,
     );
-    return activeTool?.project_id;
+    return activeTool?.project_id ?? "local";
   }, [activeToolId, toolsData]);
 
   // Fetch deployed clusters to resolve API-mode public URL

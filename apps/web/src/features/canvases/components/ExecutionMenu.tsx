@@ -187,25 +187,20 @@ export default function ExecutionMenu({
                     : "bg-zinc-700 text-zinc-500 cursor-not-allowed"
                 }`}
               >
-                <Icon icon="solar:play-circle-bold" />
+                <Icon icon="solar:play-circle-bold" className="pointer-events-none" />
                 Run Generation
               </button>
             </Tooltip>
           )}
           <div className="w-px h-5 bg-white/10" />
 
-          {/* History Button */}
+          {/* History Button — pointer-events-none on Icon so click fires on button, not SVG internals */}
           <Tooltip content="Generation History" side="top">
             <button
               onClick={() => setIsHistoryOpen(true)}
-              disabled={!projectId || !activeToolId}
-              className={`p-1 rounded-full transition-colors ${
-                projectId && activeToolId
-                  ? "text-zinc-400 hover:text-white hover:bg-white/10"
-                  : "text-zinc-700 cursor-not-allowed"
-              }`}
+              className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
             >
-              <Icon icon="solar:clock-circle-bold" width="18" />
+              <Icon icon="solar:clock-circle-bold" width="18" className="pointer-events-none" />
             </button>
           </Tooltip>
         </div>
