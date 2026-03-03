@@ -1,0 +1,100 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getDb } from '@/lib/db'
+import { executions, tools } from '@/lib/db/schema'
+import { eq, desc } from 'drizzle-orm'
+import { v4 as uuidv4 } from 'uuid'
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const db = getDb()
+  const { id } = await params
+
+  const rows = await db
+    .select()
+    .from(executions)
+    .where(eq(executions.toolId, id))
+    .orderBy(desc(executions.createdAt))
+    .limit(100)
+
+  return NextResponse.json(rows)
+}
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const db = getDb()
+  const { id: toolId } = await params
+
+  const [tool] = await db.select().from(tools).where(eq(tools.id, toolId))
+  if (!tool) return NextResponse.json({ error: 'Tool not found' }, { status: 404 })
+  if (!tool.comfyPort) return NextResponse.json({ error: 'No ComfyUI port configured for this tool' }, { status: 400 })
+
+  const body = await req.json()
+  const { inputs } = body
+
+  // Generate a random seed if not provided in inputs
+  const seed = inputs?.seed ?? Math.floor(Math.random() * 2 ** 32)
+
+  const executionId = uuidv4()
+  const now = Date.now()
+  const clientId = uuidv4()
+
+  // Parse workflow and inject inputs
+  const workflow = JSON.parse(tool.workflowJson) as Record<string, { inputs: Record<string, unknown> }>
+  const schema = JSON.parse(tool.schemaJson) as Array<{
+    nodeId: string; paramName: string; isInput: boolean; defaultValue?: unknown
+  }>
+
+  for (const field of schema) {
+    if (!field.isInput) continue
+    if (!workflow[field.nodeId]) continue
+    // Prefer provided input → fall back to schema default → leave workflow as-is
+    let inputValue: unknown
+    if (field.paramName === 'seed') {
+      inputValue = seed
+    } else {
+      const provided = inputs?.[`${field.nodeId}__${field.paramName}`]
+      // Treat 0 and '' as "not provided" — the canvas sends 0 for unconfigured number fields.
+      // Falling back to defaultValue (or leaving the workflow's stored value) is safer.
+      const isProvided = provided !== undefined && provided !== '' && provided !== 0
+      inputValue = isProvided ? provided : field.defaultValue
+    }
+    if (inputValue !== undefined) {
+      workflow[field.nodeId].inputs[field.paramName] = inputValue
+    }
+  }
+
+  // Insert execution row
+  await db.insert(executions).values({
+    id: executionId,
+    toolId,
+    inputsJson: JSON.stringify({ ...inputs, seed }),
+    workflowHash: tool.workflowHash,
+    seed,
+    status: 'running',
+    createdAt: now,
+  })
+
+  // Queue the prompt via embedded ComfyUI proxy (non-blocking)
+  const queueRes = await fetch(`http://localhost:${tool.comfyPort}/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: workflow, client_id: clientId }),
+  })
+
+  if (!queueRes.ok) {
+    let detail = ''
+    try { detail = await queueRes.text() } catch { /* ignore */ }
+    await db.update(executions).set({ status: 'error', errorMessage: detail || 'Failed to queue prompt', completedAt: Date.now() })
+      .where(eq(executions.id, executionId))
+    return NextResponse.json({ error: `Failed to queue ComfyUI prompt: ${detail}` }, { status: 502 })
+  }
+
+  const { prompt_id: promptId } = (await queueRes.json()) as { prompt_id: string }
+  await db.update(executions).set({ promptId }).where(eq(executions.id, executionId))
+
+  return NextResponse.json({
+    executionId,
+    promptId,
+    clientId,
+    comfyPort: tool.comfyPort,
+    seed,
+  }, { status: 202 })
+}

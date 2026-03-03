@@ -1,0 +1,154 @@
+'use client'
+
+import { useQuery } from '@tanstack/react-query'
+import { Monitor, HardDrive, ArrowCounterClockwise, CheckCircle, Warning } from 'phosphor-react'
+
+interface ComfyInstance {
+  port: number
+  systemStats: Record<string, unknown> | null
+}
+
+interface RuntimeData {
+  comfyInstances: ComfyInstance[]
+  timestamp: number
+}
+
+function getGpuName(inst: ComfyInstance): string {
+  try {
+    const gpus = (inst.systemStats as { system?: { gpus?: { name: string }[] } })?.system?.gpus
+    if (gpus?.[0]?.name) return gpus[0].name
+  } catch { /* ignore */ }
+  return 'Unknown GPU'
+}
+
+function getVram(inst: ComfyInstance): string | null {
+  try {
+    const gpus = (inst.systemStats as { system?: { gpus?: { total_vram?: number }[] } })?.system?.gpus
+    if (gpus?.[0]?.total_vram) {
+      return `${(gpus[0].total_vram / 1024).toFixed(0)} GB VRAM`
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
+export default function SettingsPage() {
+  const { data, isLoading, error, refetch, isFetching } = useQuery<RuntimeData>({
+    queryKey: ['runtime'],
+    queryFn: async () => {
+      const res = await fetch('/api/settings/runtime')
+      if (!res.ok) throw new Error('Failed to fetch runtime status')
+      return res.json()
+    },
+    refetchInterval: 30_000,
+  })
+
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="max-w-2xl mx-auto px-8 py-8">
+        <div className="mb-8">
+          <h1 className="text-xl font-semibold text-zinc-100">Settings</h1>
+          <p className="text-sm text-zinc-500 mt-1">Runtime status and app configuration</p>
+        </div>
+
+        {/* Runtime Status */}
+        <section className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Monitor size={16} className="text-zinc-400" />
+              <h2 className="text-sm font-semibold text-zinc-200">ComfyUI Instances</h2>
+            </div>
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50"
+            >
+              <ArrowCounterClockwise size={12} className={isFetching ? 'animate-spin' : ''} />
+              {isFetching ? 'Scanning…' : 'Refresh'}
+            </button>
+          </div>
+
+          {isLoading && (
+            <div className="text-sm text-zinc-500">Scanning ports 8188–9188…</div>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-2 text-red-400 text-sm p-4 bg-red-950/20 border border-red-900/30 rounded-xl">
+              <Warning size={14} weight="fill" />
+              Failed to scan for ComfyUI instances.
+            </div>
+          )}
+
+          {!isLoading && !error && data?.comfyInstances.length === 0 && (
+            <div className="flex items-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 text-sm">
+              <Monitor size={16} weight="duotone" />
+              No ComfyUI instances detected. Start ComfyUI and click Refresh.
+            </div>
+          )}
+
+          {!isLoading && !error && data && data.comfyInstances.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {data.comfyInstances.map((inst) => (
+                <div
+                  key={inst.port}
+                  className="flex items-center gap-4 p-4 bg-zinc-900 border border-zinc-800 rounded-xl"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <CheckCircle size={14} weight="fill" className="text-emerald-500" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-zinc-200">
+                      Port {inst.port}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-0.5">
+                      {getGpuName(inst)}
+                      {getVram(inst) && ` · ${getVram(inst)}`}
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono text-zinc-600">
+                    localhost:{inst.port}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {data?.timestamp && (
+            <p className="text-xs text-zinc-700 mt-3">
+              Last scanned {new Date(data.timestamp).toLocaleTimeString()}
+            </p>
+          )}
+        </section>
+
+        {/* Storage */}
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <HardDrive size={16} className="text-zinc-400" />
+            <h2 className="text-sm font-semibold text-zinc-200">Storage</h2>
+          </div>
+          <div className="flex flex-col gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl text-sm">
+            <div className="flex justify-between">
+              <span className="text-zinc-500">Database</span>
+              <span className="text-zinc-300 font-mono text-xs">~/.flowscale/eios.db</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-500">Outputs</span>
+              <span className="text-zinc-300 font-mono text-xs">~/.flowscale/eios-outputs/</span>
+            </div>
+          </div>
+          <p className="text-xs text-zinc-600 mt-2">
+            All data and outputs stay on this machine. Nothing is sent to the cloud.
+          </p>
+        </section>
+
+        {/* App info */}
+        <section className="mt-8 pt-8 border-t border-zinc-800">
+          <div className="flex justify-between text-xs text-zinc-600">
+            <span>FlowScale EIOS</span>
+            <span>v0.1.0</span>
+          </div>
+        </section>
+      </div>
+    </div>
+  )
+}
