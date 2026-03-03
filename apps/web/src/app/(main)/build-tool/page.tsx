@@ -8,6 +8,7 @@ import {
   Flask as FlaskConical,
   RocketLaunch,
   CheckCircle,
+  ArrowLeft,
   ArrowRight,
   Warning,
   Spinner,
@@ -463,9 +464,11 @@ function EditableDefault({
 
 function StepConfigure({
   workflowJson,
+  onBack,
   onNext,
 }: {
   workflowJson: string
+  onBack: () => void
   onNext: (tool: Tool) => void
 }) {
   const [schema, setSchema] = useState<WorkflowIO[] | null>(null)
@@ -550,6 +553,7 @@ function StepConfigure({
 
     const visibleSchema = schema.filter((f) => enabledKeys.has(fieldKey(f)))
     if (visibleSchema.length === 0) { setError('Select at least one input or output.'); return }
+    if (!visibleSchema.some((f) => !f.isInput)) { setError('Select at least one output.'); return }
 
     setSaving(true)
     setError('')
@@ -711,25 +715,68 @@ function StepConfigure({
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-zinc-800 text-left">
+                        <th className="pl-4 pr-2 py-2.5">
+                          <input
+                            type="checkbox"
+                            checked={outputs.length > 0 && outputs.every((f) => enabledKeys.has(fieldKey(f)))}
+                            onChange={(e) => {
+                              setEnabledKeys((prev) => {
+                                const next = new Set(prev)
+                                outputs.forEach((f) => e.target.checked ? next.add(fieldKey(f)) : next.delete(fieldKey(f)))
+                                return next
+                              })
+                            }}
+                            className="accent-indigo-500 w-4 h-4"
+                            title="Toggle all outputs"
+                          />
+                        </th>
                         <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Node</th>
                         <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Field</th>
                         <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Type</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {outputs.map((f) => (
-                        <tr key={fieldKey(f)} className="border-b border-zinc-800/50 last:border-0">
-                          <td className="px-4 py-2.5 text-zinc-300 font-medium text-xs">
-                            {f.nodeTitle || f.nodeType}
-                          </td>
-                          <td className="px-4 py-2.5 text-zinc-400 font-mono text-xs">{f.paramName}</td>
-                          <td className="px-4 py-2.5">
-                            <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono">
-                              {f.paramType}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {outputs.map((f) => {
+                        const key = fieldKey(f)
+                        const enabled = enabledKeys.has(key)
+                        return (
+                          <tr
+                            key={key}
+                            onClick={() =>
+                              setEnabledKeys((prev) => {
+                                const next = new Set(prev)
+                                enabled ? next.delete(key) : next.add(key)
+                                return next
+                              })
+                            }
+                            className={`border-b border-zinc-800/50 last:border-0 cursor-pointer transition-opacity ${enabled ? '' : 'opacity-35'}`}
+                          >
+                            <td className="pl-4 pr-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={enabled}
+                                onChange={() =>
+                                  setEnabledKeys((prev) => {
+                                    const next = new Set(prev)
+                                    enabled ? next.delete(key) : next.add(key)
+                                    return next
+                                  })
+                                }
+                                className="accent-indigo-500 w-4 h-4"
+                              />
+                            </td>
+                            <td className="px-4 py-2.5 text-zinc-300 font-medium text-xs">
+                              {f.nodeTitle || f.nodeType}
+                            </td>
+                            <td className="px-4 py-2.5 text-zinc-400 font-mono text-xs">{f.paramName}</td>
+                            <td className="px-4 py-2.5">
+                              <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono">
+                                {f.paramType}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -832,7 +879,14 @@ function StepConfigure({
         </div>
       )}
 
-      <div className="flex justify-end">
+      <div className="flex justify-between items-center">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 px-4 py-2.5 text-zinc-400 hover:text-zinc-200 text-sm font-medium rounded-lg hover:bg-zinc-800 transition-colors"
+        >
+          <ArrowLeft size={14} />
+          Back
+        </button>
         <button
           onClick={handleNext}
           disabled={saving || !schema}
@@ -851,9 +905,11 @@ function StepConfigure({
 
 function StepTest({
   tool,
+  onBack,
   onNext,
 }: {
   tool: Tool
+  onBack: () => void
   onNext: () => void
 }) {
   const schema: WorkflowIO[] = tool.schemaJson
@@ -1063,7 +1119,13 @@ function StepTest({
       )}
 
       <div className="flex justify-between items-center pt-2 border-t border-zinc-800">
-        <span className="text-sm text-zinc-500">Satisfied with the output?</span>
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 px-4 py-2.5 text-zinc-400 hover:text-zinc-200 text-sm font-medium rounded-lg hover:bg-zinc-800 transition-colors"
+        >
+          <ArrowLeft size={14} />
+          Back
+        </button>
         <button
           onClick={onNext}
           className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
@@ -1078,7 +1140,7 @@ function StepTest({
 
 // ─── Step 4: Deploy ───────────────────────────────────────────────────────────
 
-function StepDeploy({ tool }: { tool: Tool }) {
+function StepDeploy({ tool, onBack }: { tool: Tool; onBack: () => void }) {
   const router = useRouter()
   const [status, setStatus] = useState<'idle' | 'deploying' | 'done' | 'error'>('idle')
   const [error, setError] = useState('')
@@ -1159,7 +1221,15 @@ function StepDeploy({ tool }: { tool: Tool }) {
         </div>
       )}
 
-      <div className="flex justify-end">
+      <div className="flex justify-between items-center">
+        <button
+          onClick={onBack}
+          disabled={status === 'deploying'}
+          className="flex items-center gap-2 px-4 py-2.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-50 text-sm font-medium rounded-lg hover:bg-zinc-800 transition-colors"
+        >
+          <ArrowLeft size={14} />
+          Back
+        </button>
         <button
           onClick={handleDeploy}
           disabled={status === 'deploying'}
@@ -1202,6 +1272,7 @@ export default function BuildToolPage() {
         {step === 1 && (
           <StepConfigure
             workflowJson={workflowJson}
+            onBack={() => setStep(0)}
             onNext={(t) => { setTool(t); setStep(2) }}
           />
         )}
@@ -1209,12 +1280,13 @@ export default function BuildToolPage() {
         {step === 2 && tool && (
           <StepTest
             tool={tool}
+            onBack={() => setStep(1)}
             onNext={() => setStep(3)}
           />
         )}
 
         {step === 3 && tool && (
-          <StepDeploy tool={tool} />
+          <StepDeploy tool={tool} onBack={() => setStep(2)} />
         )}
       </div>
     </div>
