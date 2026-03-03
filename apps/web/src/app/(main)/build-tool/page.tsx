@@ -14,6 +14,7 @@ import {
   Monitor,
   Play,
   ArrowCounterClockwise,
+  X,
 } from 'phosphor-react'
 
 interface WorkflowIO {
@@ -83,11 +84,13 @@ function StepBar({ current }: { current: number }) {
   )
 }
 
-// ─── Step 1: Attach Workflow ──────────────────────────────────────────────────
+// ─── Upload Modal ─────────────────────────────────────────────────────────────
 
-function StepAttach({
+function UploadModal({
+  onClose,
   onNext,
 }: {
+  onClose: () => void
   onNext: (workflowJson: string) => void
 }) {
   const [text, setText] = useState('')
@@ -96,11 +99,7 @@ function StepAttach({
 
   const handleFile = (file: File) => {
     const reader = new FileReader()
-    reader.onload = (e) => {
-      const content = e.target?.result as string
-      setText(content)
-      setError('')
-    }
+    reader.onload = (e) => { setText(e.target?.result as string); setError('') }
     reader.readAsText(file)
   }
 
@@ -112,79 +111,300 @@ function StepAttach({
 
   const handleNext = () => {
     if (!text.trim()) { setError('Paste a workflow JSON or upload a file.'); return }
-    try {
-      JSON.parse(text)
-    } catch {
-      setError('Invalid JSON.')
-      return
-    }
+    try { JSON.parse(text) } catch { setError('Invalid JSON.'); return }
     onNext(text)
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h2 className="text-base font-semibold text-zinc-100 mb-1">Attach Workflow</h2>
-        <p className="text-sm text-zinc-500">Upload a ComfyUI workflow JSON file or paste it below.</p>
-      </div>
-
-      {/* Hidden real file input — triggered by the button below */}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".json,application/json"
-        style={{ display: 'none' }}
-        onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]) }}
-      />
-
-      {/* Drop zone */}
-      <div
-        onDrop={handleDrop}
-        onDragOver={(e) => e.preventDefault()}
-        className="flex flex-col items-center justify-center gap-4 p-10 border-2 border-dashed border-zinc-700 rounded-xl hover:border-zinc-600 transition-colors"
-      >
-        <UploadSimple size={28} weight="duotone" className="text-zinc-500" />
-        <p className="text-sm text-zinc-400">Drop a workflow .json here, or</p>
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-sm font-medium rounded-lg transition-colors"
-        >
-          Browse file…
-        </button>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <div className="flex-1 h-px bg-zinc-800" />
-        <span className="text-xs text-zinc-600">or paste</span>
-        <div className="flex-1 h-px bg-zinc-800" />
-      </div>
-
-      <textarea
-        value={text}
-        onChange={(e) => { setText(e.target.value); setError('') }}
-        placeholder='{"last_node_id": 9, "nodes": [...]}'
-        rows={8}
-        className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-xs font-mono text-zinc-300 focus:outline-none focus:border-indigo-500 resize-none placeholder:text-zinc-700"
-      />
-
-      {error && (
-        <div className="flex items-center gap-2 text-red-400 text-sm">
-          <Warning size={14} weight="fill" />
-          {error}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl flex flex-col gap-5 p-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold text-zinc-100">Upload Workflow</h3>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/5 text-zinc-500 hover:text-zinc-200 transition-colors">
+            <X size={16} />
+          </button>
         </div>
-      )}
 
-      <div className="flex justify-end">
-        <button
-          onClick={handleNext}
-          className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".json,application/json"
+          style={{ display: 'none' }}
+          onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]) }}
+        />
+
+        {/* Drop zone */}
+        <div
+          onDrop={handleDrop}
+          onDragOver={(e) => e.preventDefault()}
+          className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-zinc-700 rounded-xl hover:border-zinc-600 transition-colors"
         >
-          Analyze Workflow
-          <ArrowRight size={14} />
-        </button>
+          <UploadSimple size={24} weight="duotone" className="text-zinc-500" />
+          <p className="text-sm text-zinc-400">Drop a workflow .json here, or</p>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-sm font-medium rounded-lg transition-colors"
+          >
+            Browse file…
+          </button>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-zinc-800" />
+          <span className="text-xs text-zinc-600">or paste JSON</span>
+          <div className="flex-1 h-px bg-zinc-800" />
+        </div>
+
+        <textarea
+          value={text}
+          onChange={(e) => { setText(e.target.value); setError('') }}
+          placeholder='{"last_node_id": 9, "nodes": [...]}'
+          rows={6}
+          className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-xs font-mono text-zinc-300 focus:outline-none focus:border-indigo-500 resize-none placeholder:text-zinc-700"
+        />
+
+        {error && (
+          <div className="flex items-center gap-2 text-red-400 text-sm">
+            <Warning size={14} weight="fill" />
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={handleNext}
+            className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Analyze Workflow
+            <ArrowRight size={14} />
+          </button>
+        </div>
       </div>
     </div>
+  )
+}
+
+// ─── Step 1: Attach Workflow ──────────────────────────────────────────────────
+
+function StepAttach({
+  onNext,
+}: {
+  onNext: (workflowJson: string) => void
+}) {
+  const [uploadModalOpen, setUploadModalOpen] = useState(false)
+  const [instances, setInstances] = useState<ComfyInstance[]>([])
+  const [selectedPort, setSelectedPort] = useState<number | null>(null)
+  const [scanning, setScanning] = useState(false)
+  const [workflows, setWorkflows] = useState<string[]>([])
+  const [loadingWorkflows, setLoadingWorkflows] = useState(false)
+  const [loadingWorkflow, setLoadingWorkflow] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  const scanPorts = async () => {
+    setScanning(true)
+    try {
+      const res = await fetch('/api/comfy/scan')
+      const data: ComfyInstance[] = await res.json()
+      setInstances(data)
+      if (data.length > 0) setSelectedPort(data[0].port)
+    } catch { /* ignore */ } finally {
+      setScanning(false)
+    }
+  }
+
+  const fetchWorkflows = useCallback(async (port: number) => {
+    setLoadingWorkflows(true)
+    setWorkflows([])
+    try {
+      const res = await fetch(`/api/comfy/${port}/userdata?dir=workflows&recurse=true`)
+      if (!res.ok) return
+      const data = await res.json()
+      const files: string[] = Array.isArray(data) ? data : (data.files ?? [])
+      setWorkflows(files.filter((f: string) => f.endsWith('.json')))
+    } catch { /* ignore */ } finally {
+      setLoadingWorkflows(false)
+    }
+  }, [])
+
+  useEffect(() => { scanPorts() }, [])
+
+  useEffect(() => {
+    if (selectedPort) fetchWorkflows(selectedPort)
+  }, [selectedPort, fetchWorkflows])
+
+  const handleSelectWorkflow = async (filename: string) => {
+    if (!selectedPort) return
+    setLoadingWorkflow(filename)
+    setError('')
+    try {
+      // The listing returns bare filenames; files live in the `workflows/` subdir.
+      // ComfyUI's /userdata/{file} route uses a single path segment, so the
+      // directory separator must be percent-encoded for the router to match correctly.
+      const encodedPath = encodeURIComponent(`workflows/${filename}`)
+      const res = await fetch(`/api/comfy/${selectedPort}/userdata/${encodedPath}`)
+      if (!res.ok) throw new Error(`Failed to load workflow (${res.status})`)
+      const json = await res.text()
+      JSON.parse(json)
+      onNext(json)
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to load workflow')
+    } finally {
+      setLoadingWorkflow(null)
+    }
+  }
+
+  const workflowDisplayName = (filename: string) =>
+    filename.replace(/\.json$/, '')
+
+  return (
+    <>
+      <div className="flex flex-col gap-5">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-100 mb-1">Attach Workflow</h2>
+            <p className="text-sm text-zinc-500">Pick a saved ComfyUI workflow or upload a file.</p>
+          </div>
+          <button
+            onClick={() => setUploadModalOpen(true)}
+            className="shrink-0 flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-sm font-medium rounded-lg transition-colors"
+          >
+            <UploadSimple size={14} />
+            Upload / Paste
+          </button>
+        </div>
+
+        {/* Instance bar */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">ComfyUI Instance</span>
+            {instances.length > 1 && (
+              <div className="flex gap-1">
+                {instances.map((inst) => (
+                  <button
+                    key={inst.port}
+                    onClick={() => setSelectedPort(inst.port)}
+                    className={[
+                      'px-2 py-0.5 rounded text-xs border transition-colors',
+                      selectedPort === inst.port
+                        ? 'border-indigo-500 bg-indigo-600/10 text-indigo-300'
+                        : 'border-zinc-700 text-zinc-500 hover:border-zinc-600',
+                    ].join(' ')}
+                  >
+                    :{inst.port}
+                  </button>
+                ))}
+              </div>
+            )}
+            {instances.length === 1 && selectedPort && (
+              <span className="text-xs text-zinc-600 font-mono">:{selectedPort}</span>
+            )}
+          </div>
+          <button
+            onClick={scanPorts}
+            disabled={scanning}
+            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50"
+          >
+            <ArrowCounterClockwise size={12} className={scanning ? 'animate-spin' : ''} />
+            {scanning ? 'Scanning…' : 'Refresh'}
+          </button>
+        </div>
+
+        {/* States */}
+        {scanning && instances.length === 0 && (
+          <div className="flex items-center gap-2 text-zinc-500 text-sm py-2">
+            <Spinner size={14} className="animate-spin" />
+            Scanning for ComfyUI…
+          </div>
+        )}
+
+        {!scanning && instances.length === 0 && (
+          <div className="flex items-center gap-3 p-4 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-sm">
+            <Monitor size={16} weight="duotone" />
+            No running ComfyUI detected. Start ComfyUI and click Refresh.
+          </div>
+        )}
+
+        {loadingWorkflows && (
+          <div className="flex items-center gap-2 text-zinc-500 text-sm py-2">
+            <Spinner size={14} className="animate-spin" />
+            Loading workflows…
+          </div>
+        )}
+
+        {!loadingWorkflows && selectedPort && workflows.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 gap-3 text-zinc-600">
+            <MagicWand size={28} weight="duotone" />
+            <span className="text-sm">No saved workflows found</span>
+            <span className="text-xs text-zinc-700">Save a workflow in ComfyUI, or use Upload / Paste above</span>
+          </div>
+        )}
+
+        {/* Workflow grid */}
+        {!loadingWorkflows && workflows.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {workflows.map((path) => {
+              const name = workflowDisplayName(path)
+              const isLoading = loadingWorkflow === path
+              return (
+                <button
+                  key={path}
+                  onClick={() => handleSelectWorkflow(path)}
+                  disabled={loadingWorkflow !== null}
+                  className="group flex flex-col rounded-xl overflow-hidden border border-zinc-800 bg-zinc-900 hover:border-zinc-600 transition-all duration-200 hover:shadow-xl hover:shadow-black/40 hover:-translate-y-0.5 disabled:opacity-50 text-left"
+                >
+                  {/* Card preview surface */}
+                  <div
+                    className="relative h-28 bg-[#0d0d0d] flex items-center justify-center overflow-hidden"
+                    style={{
+                      backgroundImage: 'radial-gradient(circle, #2a2a2a 1px, transparent 1px)',
+                      backgroundSize: '18px 18px',
+                    }}
+                  >
+                    {isLoading ? (
+                      <Spinner size={20} className="text-zinc-500 animate-spin" />
+                    ) : (
+                      <MagicWand
+                        size={28}
+                        weight="duotone"
+                        className="text-zinc-700 group-hover:text-indigo-500 transition-colors"
+                      />
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-zinc-900 to-transparent" />
+                  </div>
+                  {/* Card footer */}
+                  <div className="px-3 py-2.5">
+                    <p className="text-xs font-medium text-zinc-300 truncate group-hover:text-zinc-100 transition-colors">
+                      {name}
+                    </p>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-center gap-2 text-red-400 text-sm">
+            <Warning size={14} weight="fill" />
+            {error}
+          </div>
+        )}
+      </div>
+
+      {uploadModalOpen && (
+        <UploadModal
+          onClose={() => setUploadModalOpen(false)}
+          onNext={(json) => { setUploadModalOpen(false); onNext(json) }}
+        />
+      )}
+    </>
   )
 }
 

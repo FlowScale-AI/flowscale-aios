@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 
 type Params = { port: string; path: string[] }
 
-function buildUpstreamUrl(port: string, path: string[], search: string): string {
-  const pathStr = path.join('/')
-  return `http://127.0.0.1:${port}/${pathStr}${search ? `?${search}` : ''}`
-}
-
-async function proxyRequest(req: NextRequest, port: string, path: string[]): Promise<NextResponse> {
+async function proxyRequest(req: NextRequest, port: string): Promise<NextResponse> {
   const url = new URL(req.url)
-  const upstream = buildUpstreamUrl(port, path, url.searchParams.toString())
+  // Use url.pathname directly to preserve any percent-encoded characters (e.g. %2F).
+  // The decoded [...path] param would turn %2F into a real slash, breaking paths
+  // like /userdata/workflows%2Ffile.json that ComfyUI expects as a single segment.
+  const prefix = `/api/comfy/${port}/`
+  const rawPath = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : ''
+  const upstream = `http://127.0.0.1:${port}/${rawPath}${url.search}`
 
   const headers = new Headers(req.headers)
   headers.delete('host')
@@ -43,26 +43,26 @@ async function proxyRequest(req: NextRequest, port: string, path: string[]): Pro
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<Params> }) {
-  const { port, path } = await params
-  return proxyRequest(req, port, path)
+  const { port } = await params
+  return proxyRequest(req, port)
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<Params> }) {
-  const { port, path } = await params
-  return proxyRequest(req, port, path)
+  const { port } = await params
+  return proxyRequest(req, port)
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<Params> }) {
-  const { port, path } = await params
-  return proxyRequest(req, port, path)
+  const { port } = await params
+  return proxyRequest(req, port)
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<Params> }) {
-  const { port, path } = await params
-  return proxyRequest(req, port, path)
+  const { port } = await params
+  return proxyRequest(req, port)
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<Params> }) {
-  const { port, path } = await params
-  return proxyRequest(req, port, path)
+  const { port } = await params
+  return proxyRequest(req, port)
 }
