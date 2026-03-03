@@ -610,99 +610,134 @@ function StepConfigure({
         </div>
       )}
 
-      {schema && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-              Detected Parameters ({schema.length})
-            </h3>
-            <span className="text-xs text-zinc-600">Edit default values for inputs below</span>
-          </div>
-          <div className="overflow-x-auto rounded-xl border border-zinc-800">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-zinc-800 text-left">
-                  <th className="pl-4 pr-2 py-2.5">
-                    {/* Select-all checkbox */}
-                    <input
-                      type="checkbox"
-                      checked={schema.every((f) => enabledKeys.has(fieldKey(f)))}
-                      onChange={(e) => {
-                        setEnabledKeys(
-                          e.target.checked
-                            ? new Set(schema.map(fieldKey))
-                            : new Set()
-                        )
-                      }}
-                      className="accent-indigo-500 w-4 h-4"
-                      title="Toggle all"
-                    />
-                  </th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Node</th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Field</th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Type</th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-zinc-500 w-48">Default Value</th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Direction</th>
-                </tr>
-              </thead>
-              <tbody>
-                {schema.map((f) => {
-                  const key = fieldKey(f)
-                  const enabled = enabledKeys.has(key)
-                  return (
-                    <tr
-                      key={key}
-                      onClick={() =>
-                        setEnabledKeys((prev) => {
-                          const next = new Set(prev)
-                          enabled ? next.delete(key) : next.add(key)
-                          return next
-                        })
-                      }
-                      className={`border-b border-zinc-800/50 last:border-0 cursor-pointer transition-opacity ${enabled ? '' : 'opacity-35'}`}
-                    >
-                      <td className="pl-4 pr-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+      {schema && (() => {
+        const inputs = schema.filter((f) => f.isInput)
+        const outputs = schema.filter((f) => !f.isInput)
+        return (
+          <div className="flex flex-col gap-6">
+            {/* ── Inputs ── */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                  Inputs ({inputs.length})
+                </h3>
+                <span className="text-xs text-zinc-600">Edit default values below</span>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-zinc-800">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-zinc-800 text-left">
+                      <th className="pl-4 pr-2 py-2.5">
                         <input
                           type="checkbox"
-                          checked={enabled}
-                          onChange={() =>
+                          checked={inputs.length > 0 && inputs.every((f) => enabledKeys.has(fieldKey(f)))}
+                          onChange={(e) => {
+                            setEnabledKeys((prev) => {
+                              const next = new Set(prev)
+                              inputs.forEach((f) => e.target.checked ? next.add(fieldKey(f)) : next.delete(fieldKey(f)))
+                              return next
+                            })
+                          }}
+                          className="accent-indigo-500 w-4 h-4"
+                          title="Toggle all inputs"
+                        />
+                      </th>
+                      <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Node</th>
+                      <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Field</th>
+                      <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Type</th>
+                      <th className="px-4 py-2.5 text-xs font-medium text-zinc-500 w-48">Default Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inputs.map((f) => {
+                      const key = fieldKey(f)
+                      const enabled = enabledKeys.has(key)
+                      return (
+                        <tr
+                          key={key}
+                          onClick={() =>
                             setEnabledKeys((prev) => {
                               const next = new Set(prev)
                               enabled ? next.delete(key) : next.add(key)
                               return next
                             })
                           }
-                          className="accent-indigo-500 w-4 h-4"
-                        />
-                      </td>
-                      <td className="px-4 py-2.5 text-zinc-300 font-medium text-xs">
-                        {f.nodeTitle || f.nodeType}
-                      </td>
-                      <td className="px-4 py-2.5 text-zinc-400 font-mono text-xs">{f.paramName}</td>
-                      <td className="px-4 py-2.5">
-                        <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono">
-                          {f.paramType}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 w-48" onClick={(e) => e.stopPropagation()}>
-                        <EditableDefault
-                          field={f}
-                          onChange={(value) => handleDefaultChange(f.nodeId, f.paramName, value)}
-                        />
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <span className={`text-xs font-medium ${f.isInput ? 'text-indigo-400' : 'text-emerald-400'}`}>
-                          {f.isInput ? '→ Input' : '← Output'}
-                        </span>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                          className={`border-b border-zinc-800/50 last:border-0 cursor-pointer transition-opacity ${enabled ? '' : 'opacity-35'}`}
+                        >
+                          <td className="pl-4 pr-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={enabled}
+                              onChange={() =>
+                                setEnabledKeys((prev) => {
+                                  const next = new Set(prev)
+                                  enabled ? next.delete(key) : next.add(key)
+                                  return next
+                                })
+                              }
+                              className="accent-indigo-500 w-4 h-4"
+                            />
+                          </td>
+                          <td className="px-4 py-2.5 text-zinc-300 font-medium text-xs">
+                            {f.nodeTitle || f.nodeType}
+                          </td>
+                          <td className="px-4 py-2.5 text-zinc-400 font-mono text-xs">{f.paramName}</td>
+                          <td className="px-4 py-2.5">
+                            <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono">
+                              {f.paramType}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 w-48" onClick={(e) => e.stopPropagation()}>
+                            <EditableDefault
+                              field={f}
+                              onChange={(value) => handleDefaultChange(f.nodeId, f.paramName, value)}
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* ── Outputs ── */}
+            {outputs.length > 0 && (
+              <div>
+                <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+                  Outputs ({outputs.length})
+                </h3>
+                <div className="overflow-x-auto rounded-xl border border-zinc-800">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-zinc-800 text-left">
+                        <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Node</th>
+                        <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Field</th>
+                        <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Type</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {outputs.map((f) => (
+                        <tr key={fieldKey(f)} className="border-b border-zinc-800/50 last:border-0">
+                          <td className="px-4 py-2.5 text-zinc-300 font-medium text-xs">
+                            {f.nodeTitle || f.nodeType}
+                          </td>
+                          <td className="px-4 py-2.5 text-zinc-400 font-mono text-xs">{f.paramName}</td>
+                          <td className="px-4 py-2.5">
+                            <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono">
+                              {f.paramType}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* ComfyUI selector */}
       <div>
