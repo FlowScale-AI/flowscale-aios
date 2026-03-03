@@ -89,7 +89,7 @@ function Model3dContent({
   return (
     <div
       className={`w-full h-full bg-zinc-900 p-5 rounded-lg overflow-hidden ${
-        isSelected ? "border-2 border-emerald-500" : "border border-zinc-700"
+        isSelected ? "border-2 border-emerald-500" : "border border-white/5"
       }`}
     >
       <div className="w-full h-full relative">
@@ -107,7 +107,7 @@ function Model3dContent({
         ) : (
           /* Fallback/Loading placeholder for 3D models */
           <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-4 bg-gradient-to-br from-zinc-900 to-zinc-800">
-            <div className="w-16 h-16 bg-zinc-800 rounded-xl flex items-center justify-center border border-zinc-700">
+            <div className="w-16 h-16 bg-zinc-800 rounded-xl flex items-center justify-center border border-white/5">
               <Icon
                 icon="solar:box-minimalistic-bold"
                 className="w-8 h-8 text-violet-500"
@@ -599,7 +599,7 @@ export default function DraggableObject({
             className={`w-full h-full bg-zinc-800/80 rounded-lg flex flex-col items-center justify-center p-3 gap-2 ${
               isSelected
                 ? "border-2 border-emerald-500"
-                : "border border-zinc-700"
+                : "border border-white/5"
             }`}
           >
             <div className="flex items-center gap-2 w-full">

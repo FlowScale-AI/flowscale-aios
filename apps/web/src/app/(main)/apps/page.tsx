@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { useState, useCallback } from 'react'
-import { AppWindow, ArrowRight, Clock, CheckCircle, Warning, Terminal, Copy, Check, X } from 'phosphor-react'
+import { AppWindow, ArrowRight, Warning, Terminal, Copy, Check, X } from 'phosphor-react'
 
 interface WorkflowIO {
   nodeId: string
@@ -79,18 +79,18 @@ function CurlModal({ tool, onClose }: { tool: Tool; onClose: () => void }) {
 
       {/* Panel */}
       <div
-        className="relative z-10 w-full max-w-2xl bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl flex flex-col gap-0 overflow-hidden"
+        className="relative z-10 w-full max-w-2xl bg-zinc-950 border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col gap-0 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
           <div className="flex items-center gap-2.5">
             <Terminal size={16} className="text-zinc-400" />
-            <span className="text-sm font-medium text-zinc-100">cURL — {tool.name}</span>
+            <span className="text-sm font-medium text-zinc-100">{tool.name}</span>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+            className="p-1 rounded-md text-zinc-500 hover:text-white transition-colors"
           >
             <X size={16} />
           </button>
@@ -99,17 +99,17 @@ function CurlModal({ tool, onClose }: { tool: Tool; onClose: () => void }) {
         {/* Description */}
         <p className="px-5 pt-4 text-xs text-zinc-500">
           Execute this tool via HTTP. Image inputs must be sent as a separate{' '}
-          <code className="text-zinc-400">multipart/form-data</code> request or omitted to use workflow defaults.
+          <code className="text-zinc-400 font-mono-custom">multipart/form-data</code> request or omitted to use workflow defaults.
         </p>
 
         {/* Code block */}
         <div className="relative mx-5 mt-3 mb-5">
-          <pre className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 text-xs text-zinc-300 font-mono overflow-x-auto whitespace-pre leading-relaxed">
+          <pre className="bg-zinc-900 border border-white/5 rounded-lg p-4 text-xs text-zinc-300 font-mono-custom overflow-x-auto whitespace-pre leading-relaxed">
             {curl}
           </pre>
           <button
             onClick={handleCopy}
-            className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors"
+            className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors"
           >
             {copied ? (
               <>
@@ -132,18 +132,15 @@ function CurlModal({ tool, onClose }: { tool: Tool; onClose: () => void }) {
           const inputs = schema.filter((f) => f.isInput && f.paramType !== 'image')
           if (inputs.length === 0) return null
           return (
-            <div className="border-t border-zinc-800 px-5 py-4 space-y-2">
-              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">Parameters</p>
+            <div className="border-t border-white/5 px-5 py-4 space-y-2">
+              <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-widest font-mono-custom mb-3">Parameters</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {inputs.map((f) => (
                   <div key={`${f.nodeId}_${f.paramName}`} className="flex items-center gap-2">
-                    <code className="text-[11px] text-indigo-300 font-mono bg-indigo-950/40 px-1.5 py-0.5 rounded shrink-0">
+                    <code className="text-[11px] text-emerald-300 font-mono-custom bg-emerald-950/40 px-1.5 py-0.5 rounded shrink-0">
                       {f.nodeId}__{f.paramName}
                     </code>
-                    <span className="text-[11px] text-zinc-600">{f.paramType}</span>
-                    {f.nodeTitle && f.nodeTitle !== f.nodeType && (
-                      <span className="text-[11px] text-zinc-700 truncate">· {f.nodeTitle}</span>
-                    )}
+                    <span className="text-[11px] text-zinc-600 font-mono-custom">{f.paramType}</span>
                   </div>
                 ))}
               </div>
@@ -165,59 +162,56 @@ function ToolCard({ tool, onCurlClick }: { tool: Tool; onCurlClick: () => void }
     : null
 
   return (
-    <div className="group flex flex-col bg-zinc-900 border border-zinc-800 rounded-xl hover:border-zinc-600 hover:bg-zinc-800/50 transition-all duration-150">
-      {/* Clickable main area */}
-      <Link href={`/apps/${tool.id}`} className="flex flex-col gap-3 p-5 pb-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-indigo-600/20 flex items-center justify-center shrink-0">
-              <AppWindow size={18} weight="duotone" className="text-indigo-400" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-zinc-100 group-hover:text-white transition-colors">
-                {tool.name}
-              </h3>
-              {tool.version && (
-                <span className="text-xs text-zinc-500">v{tool.version}</span>
-              )}
-            </div>
-          </div>
-          <ArrowRight
-            size={16}
-            className="text-zinc-600 group-hover:text-zinc-400 transition-colors mt-1 shrink-0"
+    <Link
+      href={`/apps/${tool.id}`}
+      className="group relative flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50 hover:bg-zinc-900 hover:border-emerald-500/30 hover:shadow-xl hover:shadow-emerald-900/10 hover:-translate-y-1 transition-all duration-200"
+    >
+      {/* Preview surface */}
+      <div className="relative h-36 bg-[var(--color-background-canvas)] overflow-hidden bg-grid-pattern">
+        <div className="absolute inset-0 flex items-center justify-center">
+          <AppWindow
+            size={32}
+            weight="duotone"
+            className="text-zinc-700 group-hover:text-emerald-500 transition-colors"
           />
         </div>
 
-        {tool.description && (
-          <p className="text-sm text-zinc-400 line-clamp-2">{tool.description}</p>
-        )}
-      </Link>
-
-      {/* Footer: status + cURL button */}
-      <div className="flex items-center justify-between px-5 py-3 border-t border-zinc-800">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5">
-            <CheckCircle size={13} weight="fill" className="text-emerald-500" />
-            <span className="text-xs text-zinc-500">Production</span>
-          </div>
-          {deployedDate && (
-            <div className="flex items-center gap-1.5">
-              <Clock size={13} className="text-zinc-600" />
-              <span className="text-xs text-zinc-500">Deployed {deployedDate}</span>
-            </div>
-          )}
+        {/* Status dot */}
+        <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2 py-1 rounded-md bg-zinc-900/80 backdrop-blur-md border border-white/10">
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          <span className="text-[10px] text-zinc-400">Production</span>
         </div>
 
-        <button
-          onClick={onCurlClick}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/60 transition-colors"
-          title="Copy cURL command"
-        >
-          <Terminal size={12} />
-          cURL
-        </button>
+        {/* cURL button */}
+        <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={(e) => { e.preventDefault(); onCurlClick() }}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-zinc-900/80 backdrop-blur-md border border-white/10 text-zinc-400 hover:text-white text-[10px] font-medium transition-colors"
+          >
+            <Terminal size={10} />
+            cURL
+          </button>
+        </div>
+
+        <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#18181b] to-transparent" />
       </div>
-    </div>
+
+      {/* Card footer */}
+      <div className="px-4 py-3 flex items-center justify-between gap-2 bg-[#18181b]">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-zinc-100 truncate">{tool.name}</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            {tool.version && (
+              <span className="text-xs text-zinc-600 font-mono-custom">v{tool.version}</span>
+            )}
+            {deployedDate && (
+              <span className="text-xs text-zinc-600 font-mono-custom">{deployedDate}</span>
+            )}
+          </div>
+        </div>
+        <AppWindow size={16} className="text-zinc-600 shrink-0" />
+      </div>
+    </Link>
   )
 }
 
@@ -238,34 +232,35 @@ export default function AppsPage() {
   })
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-5xl mx-auto px-8 py-8">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-xl font-semibold text-zinc-100">Apps</h1>
-            <p className="text-sm text-zinc-500 mt-1">Your deployed production tools</p>
-          </div>
-          <Link
-            href="/build-tool"
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
-          >
-            + New Tool
-          </Link>
+    <div className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
+        <div>
+          <h1 className="font-tech text-xl font-semibold text-zinc-100">Apps</h1>
+          <p className="text-sm text-zinc-500 mt-0.5">Your deployed production tools</p>
         </div>
+        <Link
+          href="/build-tool"
+          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md transition-colors"
+        >
+          + New Tool
+        </Link>
+      </div>
+
+      <div className="flex-1 p-8">
 
         {/* Loading */}
         {isLoading && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-40 bg-zinc-900 border border-zinc-800 rounded-xl animate-pulse" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-40 bg-zinc-900/50 border border-white/5 rounded-xl animate-pulse" />
             ))}
           </div>
         )}
 
         {/* Error */}
         {error && (
-          <div className="flex items-center gap-3 p-4 bg-red-950/30 border border-red-900/50 rounded-xl text-red-400 text-sm">
+          <div className="flex items-center gap-3 p-4 bg-red-950/30 border border-red-900/50 rounded-lg text-red-400 text-sm">
             <Warning size={16} weight="fill" />
             Failed to load tools. Make sure the server is running.
           </div>
@@ -274,16 +269,16 @@ export default function AppsPage() {
         {/* Empty state */}
         {!isLoading && !error && tools?.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
-              <AppWindow size={28} weight="duotone" className="text-zinc-500" />
+            <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-white/5 flex items-center justify-center mb-4">
+              <AppWindow size={28} weight="duotone" className="text-zinc-600" />
             </div>
-            <h2 className="text-base font-medium text-zinc-300 mb-2">No tools deployed yet</h2>
+            <h2 className="font-tech text-base font-medium text-zinc-300 mb-2">No tools deployed yet</h2>
             <p className="text-sm text-zinc-500 mb-6 max-w-xs">
               Go to Build Tool to create and deploy a ComfyUI workflow as a production tool.
             </p>
             <Link
               href="/build-tool"
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+              className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md transition-colors"
             >
               Open Build Tool
               <ArrowRight size={14} />
@@ -293,7 +288,7 @@ export default function AppsPage() {
 
         {/* Grid */}
         {!isLoading && !error && tools && tools.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {tools.map((tool) => (
               <ToolCard key={tool.id} tool={tool} onCurlClick={() => setCurlTool(tool)} />
             ))}

@@ -52,7 +52,7 @@ const STEPS = [
 
 function StepBar({ current }: { current: number }) {
   return (
-    <div className="flex items-center gap-0 mb-8">
+    <div className="flex items-center justify-center gap-0 mb-8">
       {STEPS.map((step, i) => {
         const Icon = step.icon
         const done = i < current
@@ -62,7 +62,7 @@ function StepBar({ current }: { current: number }) {
             <div
               className={[
                 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                done ? 'text-emerald-400' : active ? 'text-indigo-300 bg-indigo-600/20' : 'text-zinc-600',
+                done ? 'text-emerald-400' : active ? 'text-emerald-300 bg-emerald-600/20' : 'text-zinc-600',
               ].join(' ')}
             >
               {done ? (
@@ -121,10 +121,10 @@ function UploadModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl flex flex-col gap-5 p-6">
+      <div className="relative z-10 w-full max-w-lg bg-zinc-950 border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col gap-5 p-6">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold text-zinc-100">Upload Workflow</h3>
+          <h3 className="font-tech text-base font-semibold text-zinc-100">Upload Workflow</h3>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/5 text-zinc-500 hover:text-zinc-200 transition-colors">
             <X size={16} />
           </button>
@@ -142,14 +142,14 @@ function UploadModal({
         <div
           onDrop={handleDrop}
           onDragOver={(e) => e.preventDefault()}
-          className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-zinc-700 rounded-xl hover:border-zinc-600 transition-colors"
+          className="flex flex-col items-center justify-center gap-3 p-8 border-2 border-dashed border-white/10 rounded-xl hover:border-emerald-500/30 transition-colors"
         >
           <UploadSimple size={24} weight="duotone" className="text-zinc-500" />
           <p className="text-sm text-zinc-400">Drop a workflow .json here, or</p>
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-sm font-medium rounded-lg transition-colors"
+            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-600 text-zinc-300 text-sm font-medium rounded-md transition-colors"
           >
             Browse file…
           </button>
@@ -166,7 +166,7 @@ function UploadModal({
           onChange={(e) => { setText(e.target.value); setError('') }}
           placeholder='{"last_node_id": 9, "nodes": [...]}'
           rows={6}
-          className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-xs font-mono text-zinc-300 focus:outline-none focus:border-indigo-500 resize-none placeholder:text-zinc-700"
+          className="bg-zinc-950 border border-white/5 rounded-xl px-4 py-3 text-xs font-mono-custom text-zinc-300 focus:outline-none focus:border-emerald-500/50 resize-none placeholder:text-zinc-700"
         />
 
         {error && (
@@ -182,7 +182,7 @@ function UploadModal({
           </button>
           <button
             onClick={handleNext}
-            className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+            className="flex items-center gap-2 px-5 py-2 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md transition-colors"
           >
             Analyze Workflow
             <ArrowRight size={14} />
@@ -271,12 +271,12 @@ function StepAttach({
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-base font-semibold text-zinc-100 mb-1">Attach Workflow</h2>
+            <h2 className="font-tech text-base font-semibold text-zinc-100 mb-1">Attach Workflow</h2>
             <p className="text-sm text-zinc-500">Pick a saved ComfyUI workflow or upload a file.</p>
           </div>
           <button
             onClick={() => setUploadModalOpen(true)}
-            className="shrink-0 flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-sm font-medium rounded-lg transition-colors"
+            className="shrink-0 flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-600 text-zinc-300 text-sm font-medium rounded-md transition-colors"
           >
             <UploadSimple size={14} />
             Upload / Paste
@@ -296,8 +296,8 @@ function StepAttach({
                     className={[
                       'px-2 py-0.5 rounded text-xs border transition-colors',
                       selectedPort === inst.port
-                        ? 'border-indigo-500 bg-indigo-600/10 text-indigo-300'
-                        : 'border-zinc-700 text-zinc-500 hover:border-zinc-600',
+                        ? 'border-emerald-500 bg-emerald-600/10 text-emerald-300'
+                        : 'border-zinc-800 text-zinc-500 hover:border-zinc-600',
                     ].join(' ')}
                   >
                     :{inst.port}
@@ -306,7 +306,7 @@ function StepAttach({
               </div>
             )}
             {instances.length === 1 && selectedPort && (
-              <span className="text-xs text-zinc-600 font-mono">:{selectedPort}</span>
+              <span className="text-xs text-zinc-600 font-mono-custom">:{selectedPort}</span>
             )}
           </div>
           <button
@@ -351,7 +351,7 @@ function StepAttach({
 
         {/* Workflow grid */}
         {!loadingWorkflows && workflows.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {workflows.map((path) => {
               const name = workflowDisplayName(path)
               const isLoading = loadingWorkflow === path
@@ -360,30 +360,26 @@ function StepAttach({
                   key={path}
                   onClick={() => handleSelectWorkflow(path)}
                   disabled={loadingWorkflow !== null}
-                  className="group flex flex-col rounded-xl overflow-hidden border border-zinc-800 bg-zinc-900 hover:border-zinc-600 transition-all duration-200 hover:shadow-xl hover:shadow-black/40 hover:-translate-y-0.5 disabled:opacity-50 text-left"
+                  className="group flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50 hover:bg-zinc-900 hover:border-emerald-500/30 hover:shadow-xl hover:shadow-emerald-900/10 hover:-translate-y-1 transition-all duration-200 disabled:opacity-50 text-left"
                 >
-                  {/* Card preview surface */}
-                  <div
-                    className="relative h-28 bg-[#0d0d0d] flex items-center justify-center overflow-hidden"
-                    style={{
-                      backgroundImage: 'radial-gradient(circle, #2a2a2a 1px, transparent 1px)',
-                      backgroundSize: '18px 18px',
-                    }}
-                  >
-                    {isLoading ? (
-                      <Spinner size={20} className="text-zinc-500 animate-spin" />
-                    ) : (
-                      <MagicWand
-                        size={28}
-                        weight="duotone"
-                        className="text-zinc-700 group-hover:text-indigo-500 transition-colors"
-                      />
-                    )}
-                    <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-zinc-900 to-transparent" />
+                  {/* Preview surface */}
+                  <div className="relative h-36 bg-[var(--color-background-canvas)] overflow-hidden bg-grid-pattern">
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      {isLoading ? (
+                        <Spinner size={20} className="text-zinc-500 animate-spin" />
+                      ) : (
+                        <MagicWand
+                          size={32}
+                          weight="duotone"
+                          className="text-zinc-700 group-hover:text-emerald-500 transition-colors"
+                        />
+                      )}
+                    </div>
+                    <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#18181b] to-transparent" />
                   </div>
                   {/* Card footer */}
-                  <div className="px-3 py-2.5">
-                    <p className="text-xs font-medium text-zinc-300 truncate group-hover:text-zinc-100 transition-colors">
+                  <div className="px-4 py-3 bg-[#18181b]">
+                    <p className="text-sm font-medium text-zinc-100 truncate group-hover:text-white transition-colors">
                       {name}
                     </p>
                   </div>
@@ -422,7 +418,7 @@ function EditableDefault({
 }) {
   // Outputs and image inputs can't be configured inline
   if (!field.isInput || field.paramType === 'image') {
-    return <span className="text-zinc-600 font-mono text-xs">{String(field.defaultValue ?? '—')}</span>
+    return <span className="text-zinc-600 font-mono-custom text-xs">{String(field.defaultValue ?? '—')}</span>
   }
 
   if (field.paramType === 'boolean') {
@@ -431,7 +427,7 @@ function EditableDefault({
         type="checkbox"
         checked={Boolean(field.defaultValue)}
         onChange={(e) => onChange(e.target.checked)}
-        className="accent-indigo-500 w-4 h-4"
+        className="accent-emerald-500 w-4 h-4"
       />
     )
   }
@@ -441,7 +437,7 @@ function EditableDefault({
       <select
         value={String(field.defaultValue ?? field.options[0])}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500"
+        className="w-full bg-zinc-950 border border-white/5 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50"
       >
         {field.options.map((opt) => (
           <option key={opt} value={opt}>{opt}</option>
@@ -457,7 +453,7 @@ function EditableDefault({
       onChange={(e) =>
         onChange(field.paramType === 'number' ? Number(e.target.value) : e.target.value)
       }
-      className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 font-mono"
+      className="w-full bg-zinc-950 border border-white/5 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50 font-mono-custom"
     />
   )
 }
@@ -599,7 +595,7 @@ function StepConfigure({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-base font-semibold text-zinc-100 mb-1">Auto-Configure</h2>
+        <h2 className="font-tech text-base font-semibold text-zinc-100 mb-1">Auto-Configure</h2>
         <p className="text-sm text-zinc-500">Review detected inputs/outputs, choose a ComfyUI instance, and name your tool.</p>
       </div>
 
@@ -631,10 +627,10 @@ function StepConfigure({
                 </h3>
                 <span className="text-xs text-zinc-600">Edit default values below</span>
               </div>
-              <div className="overflow-x-auto rounded-xl border border-zinc-800">
+              <div className="overflow-x-auto rounded-xl border border-white/5">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-zinc-800 text-left">
+                    <tr className="border-b border-white/5 text-left">
                       <th className="pl-4 pr-2 py-2.5">
                         <input
                           type="checkbox"
@@ -646,7 +642,7 @@ function StepConfigure({
                               return next
                             })
                           }}
-                          className="accent-indigo-500 w-4 h-4"
+                          className="accent-emerald-500 w-4 h-4"
                           title="Toggle all inputs"
                         />
                       </th>
@@ -683,15 +679,15 @@ function StepConfigure({
                                   return next
                                 })
                               }
-                              className="accent-indigo-500 w-4 h-4"
+                              className="accent-emerald-500 w-4 h-4"
                             />
                           </td>
                           <td className="px-4 py-2.5 text-zinc-300 font-medium text-xs">
                             {f.nodeTitle || f.nodeType}
                           </td>
-                          <td className="px-4 py-2.5 text-zinc-400 font-mono text-xs">{f.paramName}</td>
+                          <td className="px-4 py-2.5 text-zinc-400 font-mono-custom text-xs">{f.paramName}</td>
                           <td className="px-4 py-2.5">
-                            <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono">
+                            <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono-custom">
                               {f.paramType}
                             </span>
                           </td>
@@ -715,10 +711,10 @@ function StepConfigure({
                 <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
                   Outputs ({outputs.length})
                 </h3>
-                <div className="overflow-x-auto rounded-xl border border-zinc-800">
+                <div className="overflow-x-auto rounded-xl border border-white/5">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-zinc-800 text-left">
+                      <tr className="border-b border-white/5 text-left">
                         <th className="pl-4 pr-2 py-2.5">
                           <input
                             type="checkbox"
@@ -730,7 +726,7 @@ function StepConfigure({
                                 return next
                               })
                             }}
-                            className="accent-indigo-500 w-4 h-4"
+                            className="accent-emerald-500 w-4 h-4"
                             title="Toggle all outputs"
                           />
                         </th>
@@ -766,15 +762,15 @@ function StepConfigure({
                                     return next
                                   })
                                 }
-                                className="accent-indigo-500 w-4 h-4"
+                                className="accent-emerald-500 w-4 h-4"
                               />
                             </td>
                             <td className="px-4 py-2.5 text-zinc-300 font-medium text-xs">
                               {f.nodeTitle || f.nodeType}
                             </td>
-                            <td className="px-4 py-2.5 text-zinc-400 font-mono text-xs">{f.paramName}</td>
+                            <td className="px-4 py-2.5 text-zinc-400 font-mono-custom text-xs">{f.paramName}</td>
                             <td className="px-4 py-2.5">
-                              <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono">
+                              <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono-custom">
                                 {f.paramType}
                               </span>
                             </td>
@@ -828,7 +824,7 @@ function StepConfigure({
                 className={[
                   'flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition-colors',
                   selectedPort === inst.port
-                    ? 'border-indigo-500 bg-indigo-600/10'
+                    ? 'border-emerald-500 bg-emerald-600/10'
                     : 'border-zinc-800 hover:border-zinc-600',
                 ].join(' ')}
               >
@@ -838,7 +834,7 @@ function StepConfigure({
                   value={inst.port}
                   checked={selectedPort === inst.port}
                   onChange={() => setSelectedPort(inst.port)}
-                  className="accent-indigo-500"
+                  className="accent-emerald-500"
                 />
                 <Monitor size={16} weight="duotone" className="text-zinc-400" />
                 <div className="flex-1">
@@ -861,7 +857,7 @@ function StepConfigure({
             value={name}
             onChange={(e) => { setName(e.target.value); setError('') }}
             placeholder="e.g. Character Portrait Generator"
-            className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500"
+            className="bg-zinc-950 border border-white/5 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50"
           />
         </div>
         <div className="flex flex-col gap-1.5">
@@ -871,7 +867,7 @@ function StepConfigure({
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional short description of what this tool does…"
             rows={2}
-            className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 resize-none"
+            className="bg-zinc-950 border border-white/5 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 resize-none"
           />
         </div>
       </div>
@@ -894,7 +890,7 @@ function StepConfigure({
         <button
           onClick={handleNext}
           disabled={saving || !schema}
-          className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+          className="flex items-center gap-2 px-5 py-2.5 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {saving ? <Spinner size={14} className="animate-spin" /> : null}
           {selectedPort ? 'Save & Test' : 'Save (test later)'}
@@ -1022,7 +1018,7 @@ function StepTest({
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-base font-semibold text-zinc-100 mb-1">Test in Dev Mode</h2>
+        <h2 className="font-tech text-base font-semibold text-zinc-100 mb-1">Test in Dev Mode</h2>
         <p className="text-sm text-zinc-500">Run the tool with test inputs before deploying to production.</p>
       </div>
 
@@ -1045,7 +1041,7 @@ function StepTest({
                       [key]: field.paramType === 'number' ? Number(e.target.value) : e.target.value,
                     }))
                   }
-                  className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500"
+                  className="bg-zinc-950 border border-white/5 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50"
                 />
               </div>
             )
@@ -1084,7 +1080,7 @@ function StepTest({
         {running && progress !== null && (
           <div className="flex-1 bg-zinc-800 rounded-full h-1.5 max-w-xs">
             <div
-              className="bg-indigo-500 h-full rounded-full transition-all"
+              className="bg-emerald-500 h-full rounded-full transition-all"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -1116,7 +1112,7 @@ function StepTest({
       )}
 
       {execMeta && (
-        <div className="flex gap-4 text-xs text-zinc-500 font-mono">
+        <div className="flex gap-4 text-xs text-zinc-500 font-mono-custom">
           <span>seed: {execMeta.seed}</span>
           <span>elapsed: {execMeta.elapsed}</span>
         </div>
@@ -1132,7 +1128,7 @@ function StepTest({
         </button>
         <button
           onClick={onNext}
-          className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+          className="flex items-center gap-2 px-5 py-2.5 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md transition-colors"
         >
           Deploy to Production
           <ArrowRight size={14} />
@@ -1178,13 +1174,13 @@ function StepDeploy({ tool, onBack }: { tool: Tool; onBack: () => void }) {
           <CheckCircle size={32} weight="fill" className="text-emerald-400" />
         </div>
         <div>
-          <h2 className="text-base font-semibold text-zinc-100 mb-1">Tool deployed!</h2>
+          <h2 className="font-tech text-base font-semibold text-zinc-100 mb-1">Tool deployed!</h2>
           <p className="text-sm text-zinc-500">{tool.id} is now live in production.</p>
         </div>
         <div className="flex gap-3">
           <button
             onClick={() => router.push('/apps')}
-            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+            className="flex items-center gap-2 px-5 py-2.5 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md transition-colors"
           >
             View in Apps Dashboard
             <ArrowRight size={14} />
@@ -1197,20 +1193,20 @@ function StepDeploy({ tool, onBack }: { tool: Tool; onBack: () => void }) {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-base font-semibold text-zinc-100 mb-1">Deploy</h2>
+        <h2 className="font-tech text-base font-semibold text-zinc-100 mb-1">Deploy</h2>
         <p className="text-sm text-zinc-500">
           This will pin the current workflow hash and make the tool available in the Apps Dashboard and Canvas.
         </p>
       </div>
 
-      <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl flex flex-col gap-2 text-sm">
+      <div className="p-4 bg-zinc-900/50 border border-white/5 rounded-xl flex flex-col gap-2 text-sm">
         <div className="flex justify-between">
           <span className="text-zinc-500">Tool name</span>
           <span className="text-zinc-200 font-medium">{tool.id}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-zinc-500">ComfyUI port</span>
-          <span className="text-zinc-200 font-mono">{tool.comfyPort ?? '—'}</span>
+          <span className="text-zinc-200 font-mono-custom">{tool.comfyPort ?? '—'}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-zinc-500">Status after deploy</span>
@@ -1237,7 +1233,7 @@ function StepDeploy({ tool, onBack }: { tool: Tool; onBack: () => void }) {
         <button
           onClick={handleDeploy}
           disabled={status === 'deploying'}
-          className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+          className="flex items-center gap-2 px-5 py-2.5 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md disabled:opacity-50 transition-colors"
         >
           {status === 'deploying' ? (
             <><Spinner size={14} className="animate-spin" /> Deploying…</>
@@ -1259,13 +1255,16 @@ export default function BuildToolPage() {
   const [tool, setTool] = useState<Tool | null>(null)
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-2xl mx-auto px-8 py-8">
-        <div className="mb-6">
-          <h1 className="text-xl font-semibold text-zinc-100">Build Tool</h1>
-          <p className="text-sm text-zinc-500 mt-1">Turn a ComfyUI workflow into a production-ready tool</p>
+    <div className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
+        <div>
+          <h1 className="font-tech text-xl font-semibold text-zinc-100">Build Tool</h1>
+          <p className="text-sm text-zinc-500 mt-0.5">Turn a ComfyUI workflow into a production-ready tool</p>
         </div>
+      </div>
 
+      <div className="flex-1 p-8">
         <StepBar current={step} />
 
         {step === 0 && (
@@ -1275,24 +1274,30 @@ export default function BuildToolPage() {
         )}
 
         {step === 1 && (
-          <StepConfigure
-            workflowJson={workflowJson}
-            initialName={workflowName}
-            onBack={() => setStep(0)}
-            onNext={(t) => { setTool(t); setStep(2) }}
-          />
+          <div className="max-w-3xl">
+            <StepConfigure
+              workflowJson={workflowJson}
+              initialName={workflowName}
+              onBack={() => setStep(0)}
+              onNext={(t) => { setTool(t); setStep(2) }}
+            />
+          </div>
         )}
 
         {step === 2 && tool && (
-          <StepTest
-            tool={tool}
-            onBack={() => setStep(1)}
-            onNext={() => setStep(3)}
-          />
+          <div className="max-w-3xl">
+            <StepTest
+              tool={tool}
+              onBack={() => setStep(1)}
+              onNext={() => setStep(3)}
+            />
+          </div>
         )}
 
         {step === 3 && tool && (
-          <StepDeploy tool={tool} onBack={() => setStep(2)} />
+          <div className="max-w-3xl">
+            <StepDeploy tool={tool} onBack={() => setStep(2)} />
+          </div>
         )}
       </div>
     </div>

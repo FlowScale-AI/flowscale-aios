@@ -1515,7 +1515,7 @@ export default function CanvasSurface({
             <Minus width={16} />
           </button>
         </Tooltip>
-        <span className="text-zinc-300 text-xs font-mono w-10 text-center select-none">
+        <span className="text-zinc-300 text-xs font-mono-custom w-10 text-center select-none">
           {Math.round(view.scale * 100)}%
         </span>
         <Tooltip content="Zoom In" side="bottom" delay={600}>
@@ -1605,7 +1605,7 @@ export default function CanvasSurface({
         {/* Selection Box */}
         {selectionBox && (
           <div
-            className="absolute border border-blue-500 bg-blue-500/10 pointer-events-none z-50"
+            className="absolute border border-emerald-500 bg-emerald-500/10 pointer-events-none z-50"
             style={{
               left: selectionBox.x,
               top: selectionBox.y,
@@ -1618,7 +1618,7 @@ export default function CanvasSurface({
         {/* Drawing Preview */}
         {drawingObject && (
           <div
-            className="absolute border border-indigo-500 bg-indigo-500/10 pointer-events-none"
+            className="absolute border border-emerald-500 bg-emerald-500/10 pointer-events-none"
             style={{
               left: drawingObject.x,
               top: drawingObject.y,

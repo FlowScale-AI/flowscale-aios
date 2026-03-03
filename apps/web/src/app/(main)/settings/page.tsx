@@ -43,12 +43,16 @@ export default function SettingsPage() {
   })
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-2xl mx-auto px-8 py-8">
-        <div className="mb-8">
-          <h1 className="text-xl font-semibold text-zinc-100">Settings</h1>
-          <p className="text-sm text-zinc-500 mt-1">Runtime status and app configuration</p>
+    <div className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
+        <div>
+          <h1 className="font-tech text-xl font-semibold text-zinc-100">Settings</h1>
+          <p className="text-sm text-zinc-500 mt-0.5">Runtime status and app configuration</p>
         </div>
+      </div>
+
+      <div className="flex-1 p-8 max-w-2xl">
 
         {/* Runtime Status */}
         <section className="mb-8">
@@ -60,7 +64,7 @@ export default function SettingsPage() {
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-white transition-colors disabled:opacity-50"
             >
               <ArrowCounterClockwise size={12} className={isFetching ? 'animate-spin' : ''} />
               {isFetching ? 'Scanning…' : 'Refresh'}
@@ -72,14 +76,14 @@ export default function SettingsPage() {
           )}
 
           {error && (
-            <div className="flex items-center gap-2 text-red-400 text-sm p-4 bg-red-950/20 border border-red-900/30 rounded-xl">
+            <div className="flex items-center gap-2 text-red-400 text-sm p-4 bg-red-950/20 border border-red-900/30 rounded-lg">
               <Warning size={14} weight="fill" />
               Failed to scan for ComfyUI instances.
             </div>
           )}
 
           {!isLoading && !error && data?.comfyInstances.length === 0 && (
-            <div className="flex items-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 text-sm">
+            <div className="flex items-center gap-3 p-4 bg-zinc-900/50 border border-white/5 rounded-lg text-zinc-500 text-sm">
               <Monitor size={16} weight="duotone" />
               No ComfyUI instances detected. Start ComfyUI and click Refresh.
             </div>
@@ -90,7 +94,7 @@ export default function SettingsPage() {
               {data.comfyInstances.map((inst) => (
                 <div
                   key={inst.port}
-                  className="flex items-center gap-4 p-4 bg-zinc-900 border border-zinc-800 rounded-xl"
+                  className="flex items-center gap-4 p-4 bg-zinc-900/50 border border-white/5 rounded-lg"
                 >
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-emerald-500" />
@@ -105,7 +109,7 @@ export default function SettingsPage() {
                       {getVram(inst) && ` · ${getVram(inst)}`}
                     </div>
                   </div>
-                  <span className="text-xs font-mono text-zinc-600">
+                  <span className="text-xs font-mono-custom text-zinc-600">
                     localhost:{inst.port}
                   </span>
                 </div>
@@ -114,7 +118,7 @@ export default function SettingsPage() {
           )}
 
           {data?.timestamp && (
-            <p className="text-xs text-zinc-700 mt-3">
+            <p className="text-xs text-zinc-700 mt-3 font-mono-custom">
               Last scanned {new Date(data.timestamp).toLocaleTimeString()}
             </p>
           )}
@@ -126,14 +130,14 @@ export default function SettingsPage() {
             <HardDrive size={16} className="text-zinc-400" />
             <h2 className="text-sm font-semibold text-zinc-200">Storage</h2>
           </div>
-          <div className="flex flex-col gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl text-sm">
+          <div className="flex flex-col gap-3 p-4 bg-zinc-900/50 border border-white/5 rounded-lg text-sm">
             <div className="flex justify-between">
               <span className="text-zinc-500">Database</span>
-              <span className="text-zinc-300 font-mono text-xs">~/.flowscale/eios.db</span>
+              <span className="text-zinc-300 font-mono-custom text-xs">~/.flowscale/eios.db</span>
             </div>
             <div className="flex justify-between">
               <span className="text-zinc-500">Outputs</span>
-              <span className="text-zinc-300 font-mono text-xs">~/.flowscale/eios-outputs/</span>
+              <span className="text-zinc-300 font-mono-custom text-xs">~/.flowscale/eios-outputs/</span>
             </div>
           </div>
           <p className="text-xs text-zinc-600 mt-2">
@@ -142,10 +146,10 @@ export default function SettingsPage() {
         </section>
 
         {/* App info */}
-        <section className="mt-8 pt-8 border-t border-zinc-800">
+        <section className="mt-8 pt-8 border-t border-white/5">
           <div className="flex justify-between text-xs text-zinc-600">
-            <span>FlowScale EIOS</span>
-            <span>v0.1.0</span>
+            <span className="font-tech">FlowScale EIOS</span>
+            <span className="font-mono-custom">v0.1.0</span>
           </div>
         </section>
       </div>

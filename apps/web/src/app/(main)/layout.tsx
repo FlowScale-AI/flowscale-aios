@@ -23,13 +23,13 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname()
 
   return (
-    <div className="flex h-screen overflow-hidden bg-zinc-950">
+    <div className="flex h-screen overflow-hidden bg-[var(--color-background)]">
       {/* Sidebar */}
-      <nav className="group/sidebar relative flex flex-col bg-zinc-900 border-r border-zinc-800 transition-all duration-200 ease-in-out w-16 hover:w-[220px] shrink-0 overflow-hidden">
+      <nav className="group/sidebar relative flex flex-col bg-[var(--color-background-panel)] border-r border-white/5 transition-all duration-200 ease-in-out w-16 hover:w-[220px] hover:shadow-2xl hover:shadow-black/50 shrink-0 overflow-hidden z-50">
         {/* Logo */}
-        <div className="flex items-center gap-3 px-4 py-5 border-b border-zinc-800 shrink-0">
-          <FlowArrow size={28} weight="duotone" className="text-indigo-400 shrink-0" />
-          <span className="text-sm font-semibold text-zinc-100 whitespace-nowrap opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75">
+        <div className="flex items-center gap-3 px-4 py-5 border-b border-white/5 shrink-0">
+          <FlowArrow size={28} weight="duotone" className="text-emerald-400 shrink-0" />
+          <span className="font-tech text-sm font-semibold text-zinc-100 whitespace-nowrap opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75">
             FlowScale EIOS
           </span>
         </div>
@@ -46,14 +46,14 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                   'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors duration-150',
                   'whitespace-nowrap group/item',
                   active
-                    ? 'bg-indigo-600/20 text-indigo-300'
-                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
+                    ? 'bg-white/5 text-emerald-400'
+                    : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100',
                 ].join(' ')}
               >
                 <Icon
                   size={20}
                   weight={active ? 'fill' : 'regular'}
-                  className="shrink-0"
+                  className="shrink-0 transition-transform group-hover/item:scale-110"
                 />
                 <span className="text-sm font-medium opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75">
                   {label}
@@ -64,12 +64,12 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         </div>
 
         {/* Version badge */}
-        <div className="p-2 border-t border-zinc-800 shrink-0">
+        <div className="p-2 border-t border-white/5 shrink-0">
           <div className="flex items-center gap-3 px-3 py-2">
-            <div className="w-5 h-5 rounded-full bg-zinc-700 shrink-0 flex items-center justify-center">
-              <span className="text-[9px] text-zinc-400 font-mono">v1</span>
+            <div className="w-5 h-5 rounded-full bg-zinc-800 shrink-0 flex items-center justify-center">
+              <span className="text-[9px] text-zinc-500 font-mono-custom">v1</span>
             </div>
-            <span className="text-xs text-zinc-500 opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75 whitespace-nowrap">
+            <span className="text-xs text-zinc-600 opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75 whitespace-nowrap font-mono-custom">
               v0.1.0
             </span>
           </div>

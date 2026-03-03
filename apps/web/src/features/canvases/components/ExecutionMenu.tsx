@@ -119,7 +119,7 @@ export default function ExecutionMenu({
                 {executionState.logs.slice(-5).map((log, i) => (
                   <div
                     key={i}
-                    className="text-xs text-zinc-400 font-mono truncate"
+                    className="text-xs text-zinc-400 font-mono-custom truncate"
                   >
                     {log}
                   </div>

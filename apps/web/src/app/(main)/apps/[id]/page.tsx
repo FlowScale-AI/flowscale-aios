@@ -82,7 +82,7 @@ function InputField({
           id={`${field.nodeId}__${field.paramName}`}
           checked={Boolean(value)}
           onChange={(e) => onChange(e.target.checked)}
-          className="w-4 h-4 accent-indigo-500"
+          className="w-4 h-4 accent-emerald-500"
         />
         <label htmlFor={`${field.nodeId}__${field.paramName}`} className="text-sm text-zinc-300">
           {label}
@@ -98,7 +98,7 @@ function InputField({
         <select
           value={String(value ?? '')}
           onChange={(e) => onChange(e.target.value)}
-          className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500"
+          className="bg-zinc-950 border border-white/5 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50"
         >
           {field.options.map((opt) => (
             <option key={opt} value={opt}>{opt}</option>
@@ -116,7 +116,7 @@ function InputField({
           type="number"
           value={String(value ?? '')}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500"
+          className="bg-zinc-950 border border-white/5 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50"
         />
       </div>
     )
@@ -129,7 +129,7 @@ function InputField({
         value={String(value ?? '')}
         onChange={(e) => onChange(e.target.value)}
         rows={3}
-        className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-indigo-500 resize-none"
+        className="bg-zinc-950 border border-white/5 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 resize-none"
       />
     </div>
   )
@@ -156,7 +156,7 @@ function ExecutionHistoryItem({
   const inputs: Record<string, unknown> = exec.inputsJson ? JSON.parse(exec.inputsJson) : {}
 
   return (
-    <div className="border border-zinc-800 rounded-lg p-3 flex flex-col gap-2">
+    <div className="border border-white/5 rounded-lg p-3 flex flex-col gap-2">
       <div className="flex items-center gap-2">
         {exec.status === 'completed' && (
           <CheckCircle size={14} weight="fill" className="text-emerald-500 shrink-0" />
@@ -165,7 +165,7 @@ function ExecutionHistoryItem({
           <XCircle size={14} weight="fill" className="text-red-500 shrink-0" />
         )}
         {exec.status === 'running' && (
-          <Spinner size={14} className="text-indigo-400 animate-spin shrink-0" />
+          <Spinner size={14} className="text-emerald-400 animate-spin shrink-0" />
         )}
         <span className="text-xs text-zinc-400 flex-1">{date}</span>
         {elapsed && <span className="text-xs text-zinc-600">{elapsed}</span>}
@@ -199,7 +199,7 @@ function ExecutionHistoryItem({
       )}
 
       {exec.seed !== null && (
-        <span className="text-[11px] text-zinc-600 font-mono">seed: {exec.seed}</span>
+        <span className="text-[11px] text-zinc-600 font-mono-custom">seed: {exec.seed}</span>
       )}
     </div>
   )
@@ -240,7 +240,7 @@ function CurlModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <div
-        className="relative z-10 w-full max-w-2xl bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden"
+        className="relative z-10 w-full max-w-2xl bg-zinc-950 border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -264,7 +264,7 @@ function CurlModal({
 
         {/* Code block */}
         <div className="relative mx-5 mt-3 mb-5">
-          <pre className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 text-xs text-zinc-300 font-mono overflow-x-auto whitespace-pre leading-relaxed">
+          <pre className="bg-zinc-900 border border-white/5 rounded-xl p-4 text-xs text-zinc-300 font-mono-custom overflow-x-auto whitespace-pre leading-relaxed">
             {curl}
           </pre>
           <button
@@ -411,7 +411,7 @@ export default function ToolPage() {
   if (toolLoading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <Spinner size={24} className="text-indigo-400 animate-spin" />
+        <Spinner size={24} className="text-emerald-400 animate-spin" />
       </div>
     )
   }
@@ -427,7 +427,7 @@ export default function ToolPage() {
   return (
     <div className="h-full flex flex-col">
       {/* Topbar */}
-      <div className="flex items-center gap-4 px-6 py-4 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center gap-4 px-6 py-4 border-b border-white/5 shrink-0">
         <Link href="/apps" className="text-zinc-500 hover:text-zinc-300 transition-colors">
           <ArrowLeft size={18} />
         </Link>
@@ -439,7 +439,7 @@ export default function ToolPage() {
         </div>
         <button
           onClick={() => setShowCurl(true)}
-          className="flex items-center gap-2 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-sm font-medium rounded-lg transition-colors border border-zinc-700"
+          className="flex items-center gap-2 px-3 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white text-sm font-medium rounded-md transition-colors border border-zinc-800 hover:border-zinc-600"
         >
           <Terminal size={14} />
           cURL
@@ -447,7 +447,7 @@ export default function ToolPage() {
         <button
           onClick={() => runMutation.mutate()}
           disabled={isRunning || !tool.comfyPort}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
         >
           {isRunning ? (
             <>
@@ -519,25 +519,25 @@ export default function ToolPage() {
             </div>
           </Panel>
 
-          <PanelResizeHandle className="w-px bg-zinc-800 hover:bg-indigo-500 transition-colors cursor-col-resize" />
+          <PanelResizeHandle className="w-px bg-white/5 hover:bg-emerald-500 transition-colors cursor-col-resize" />
 
           {/* Right: Outputs + History */}
           <Panel defaultSize={60} minSize={30}>
             <div className="h-full flex flex-col">
               {/* Output viewer */}
-              <div className="flex-1 overflow-y-auto px-6 py-5 border-b border-zinc-800">
+              <div className="flex-1 overflow-y-auto px-6 py-5 border-b border-white/5">
                 <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
                   Output
                 </h2>
 
                 {isRunning && latestOutputs.length === 0 && (
                   <div className="flex items-center gap-3 text-zinc-500 text-sm">
-                    <Spinner size={14} className="animate-spin text-indigo-400" />
+                    <Spinner size={14} className="animate-spin text-emerald-400" />
                     Generating…
                     {progress !== null && (
                       <div className="flex-1 bg-zinc-800 rounded-full h-1.5 max-w-xs">
                         <div
-                          className="bg-indigo-500 h-full rounded-full transition-all"
+                          className="bg-emerald-500 h-full rounded-full transition-all"
                           style={{ width: `${progress}%` }}
                         />
                       </div>

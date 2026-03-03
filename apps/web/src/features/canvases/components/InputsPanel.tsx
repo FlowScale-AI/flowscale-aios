@@ -405,7 +405,7 @@ export default function InputsPanel({
                 )}
 
                 {/* Parameter name hint */}
-                <div className="mt-1 ml-8 text-[10px] text-zinc-600 font-mono truncate">
+                <div className="mt-1 ml-8 text-[10px] text-zinc-600 font-mono-custom truncate">
                   {input.parameter_name}
                 </div>
 
@@ -432,7 +432,7 @@ export default function InputsPanel({
                     key={key}
                     className={`rounded-lg border p-3 transition-colors ${
                       cfg.visible
-                        ? "border-blue-500/30 bg-blue-500/5"
+                        ? "border-emerald-500/30 bg-emerald-500/5"
                         : "border-white/5 bg-white/2"
                     }`}
                   >
@@ -442,7 +442,7 @@ export default function InputsPanel({
                         onClick={() => handleOutputToggleVisibility(key)}
                         className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors ${
                           cfg.visible
-                            ? "bg-blue-500 border-blue-500 text-white"
+                            ? "bg-emerald-500 border-emerald-500 text-white"
                             : "border-white/20 text-transparent hover:border-white/40"
                         }`}
                       >
@@ -475,7 +475,7 @@ export default function InputsPanel({
                     )}
 
                     {/* Parameter name hint */}
-                    <div className="mt-1 ml-8 text-[10px] text-zinc-600 font-mono truncate">
+                    <div className="mt-1 ml-8 text-[10px] text-zinc-600 font-mono-custom truncate">
                       {key}
                     </div>
 
@@ -730,7 +730,7 @@ export default function InputsPanel({
                 />
               )}
               {input.path && (
-                <div className="text-[10px] text-zinc-600 font-mono truncate">
+                <div className="text-[10px] text-zinc-600 font-mono-custom truncate">
                   Param: {input.parameter_name}
                 </div>
               )}
