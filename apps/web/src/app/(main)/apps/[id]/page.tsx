@@ -14,6 +14,10 @@ import {
   DownloadSimple,
   Spinner,
   ArrowCounterClockwise,
+  Terminal,
+  Copy,
+  Check,
+  X,
 } from 'phosphor-react'
 import Link from 'next/link'
 
@@ -201,6 +205,90 @@ function ExecutionHistoryItem({
   )
 }
 
+// ---------------------------------------------------------------------------
+// cURL modal — uses live input values from the form
+// ---------------------------------------------------------------------------
+
+function buildCurlCommand(toolId: string, inputs: Record<string, unknown>): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:14173'
+  const body = JSON.stringify({ inputs }, null, 2)
+  return `curl -X POST ${origin}/api/tools/${toolId}/executions \\\n  -H "Content-Type: application/json" \\\n  -d '${body}'`
+}
+
+function CurlModal({
+  toolId,
+  toolName,
+  inputs,
+  onClose,
+}: {
+  toolId: string
+  toolName: string
+  inputs: Record<string, unknown>
+  onClose: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const curl = buildCurlCommand(toolId, inputs)
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(curl).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <div
+        className="relative z-10 w-full max-w-2xl bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+          <div className="flex items-center gap-2.5">
+            <Terminal size={16} className="text-zinc-400" />
+            <span className="text-sm font-medium text-zinc-100">cURL — {toolName}</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Note */}
+        <p className="px-5 pt-4 text-xs text-zinc-500">
+          Reflects the current input values in the form. Paste directly into a terminal or import into Postman.
+        </p>
+
+        {/* Code block */}
+        <div className="relative mx-5 mt-3 mb-5">
+          <pre className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 text-xs text-zinc-300 font-mono overflow-x-auto whitespace-pre leading-relaxed">
+            {curl}
+          </pre>
+          <button
+            onClick={handleCopy}
+            className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors"
+          >
+            {copied ? (
+              <>
+                <Check size={12} className="text-emerald-400" />
+                <span className="text-emerald-400">Copied!</span>
+              </>
+            ) : (
+              <>
+                <Copy size={12} />
+                Copy
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ToolPage() {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
@@ -245,6 +333,7 @@ export default function ToolPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool?.schemaJson])
 
+  const [showCurl, setShowCurl] = useState(false)
   const [runningId, setRunningId] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
   const [latestOutputs, setLatestOutputs] = useState<{ filename: string; path: string }[]>([])
@@ -349,6 +438,13 @@ export default function ToolPage() {
           )}
         </div>
         <button
+          onClick={() => setShowCurl(true)}
+          className="flex items-center gap-2 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-sm font-medium rounded-lg transition-colors border border-zinc-700"
+        >
+          <Terminal size={14} />
+          cURL
+        </button>
+        <button
           onClick={() => runMutation.mutate()}
           disabled={isRunning || !tool.comfyPort}
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
@@ -380,6 +476,16 @@ export default function ToolPage() {
         <div className="px-6 py-2.5 bg-amber-950/30 border-b border-amber-900/50 text-amber-400 text-sm">
           No ComfyUI instance configured for this tool. Re-deploy via Build Tool to assign one.
         </div>
+      )}
+
+      {/* cURL modal */}
+      {showCurl && (
+        <CurlModal
+          toolId={tool.id}
+          toolName={tool.name}
+          inputs={inputs}
+          onClose={() => setShowCurl(false)}
+        />
       )}
 
       {/* Content */}
