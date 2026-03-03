@@ -28,17 +28,78 @@ const USER_PARAMS: Record<string, string[]> = {
   LoadImage: ['image']
 }
 
-// Widget value order for graph-format nodes (skipping non-user widgets like control_after_generate)
+// Widget value order for graph-format nodes.
+// null = widget present in widgets_values but not a named user param (e.g. control_after_generate).
+// Only widget (non-linked) inputs are listed here; linked inputs come from the links array.
 const GRAPH_WIDGET_PARAMS: Record<string, Array<string | null>> = {
-  CLIPTextEncode: ['text'],
+  // Sampling
   KSampler: ['seed', null /* control_after_generate */, 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise'],
-  KSamplerAdvanced: [null /* add_noise */, 'noise_seed', null /* control_after_generate */, 'steps', 'cfg', 'sampler_name', 'scheduler'],
-  EmptyLatentImage: ['width', 'height', 'batch_size'],
-  LoadImage: ['image'],
+  KSamplerAdvanced: ['add_noise', 'noise_seed', null /* control_after_generate */, 'steps', 'cfg', 'sampler_name', 'scheduler', 'start_at_step', 'end_at_step', 'return_with_leftover_noise'],
+
+  // Text / CLIP
+  CLIPTextEncode: ['text'],
+  CLIPSetLastLayer: ['stop_at_clip_layer'],
+
+  // Loaders
   CheckpointLoaderSimple: ['ckpt_name'],
+  CheckpointSave: ['filename_prefix'],
   VAELoader: ['vae_name'],
+  LoraLoader: ['lora_name', 'strength_model', 'strength_clip'],
+  LoraLoaderModelOnly: ['lora_name', 'strength_model'],
+  HypernetworkLoader: ['hypernetwork_name', 'strength'],
+  UpscaleModelLoader: ['model_name'],
+  CLIPVisionLoader: ['clip_name'],
+  StyleModelLoader: ['style_model_name'],
+  ControlNetLoader: ['control_net_name'],
+  GLIGENLoader: ['gligen_name'],
+
+  // VAE
+  VAEEncode: [],
+  VAEDecode: [],
+  VAEEncodeForInpaint: ['grow_mask_by'],
+  VAEDecodeTiled: ['tile_size', 'overlap', 'temporal_size', 'temporal_overlap'],
+  VAEEncodeTiled: ['tile_size', 'overlap', 'temporal_size', 'temporal_overlap'],
+
+  // Latent
+  EmptyLatentImage: ['width', 'height', 'batch_size'],
+  LatentRotate: ['rotation'],
+  LatentFlip: ['flip_method'],
+  LatentComposite: ['x', 'y', 'feather'],
+  LatentCrop: ['width', 'height', 'x', 'y'],
+  SetLatentNoiseMask: [],
+
+  // Image
+  LoadImage: ['image'],
+  LoadImageMask: ['image', 'channel'],
   SaveImage: ['filename_prefix'],
   PreviewImage: [],
+  ImageScale: ['upscale_method', 'width', 'height', 'crop'],
+  ImageUpscaleWithModel: [],
+
+  // ControlNet
+  ControlNetApply: ['strength'],
+  ControlNetApplyAdvanced: ['strength', 'start_percent', 'end_percent'],
+
+  // CLIP Vision / Style
+  CLIPVisionEncode: ['crop'],
+  StyleModelApply: ['strength', 'strength_type'],
+  unCLIPConditioning: ['strength', 'noise_augmentation'],
+
+  // GLIGEN
+  GLIGENTextBoxApply: ['text', 'width', 'height', 'x', 'y'],
+
+  // Inpaint
+  InpaintModelConditioning: ['noise_mask'],
+
+  // Model patches
+  ModelMergeSimple: ['ratio'],
+  ModelMergeBlocks: ['input', 'middle', 'out'],
+  CLIPMergeSimple: ['ratio'],
+  TomePatchModel: ['ratio'],
+  SelfAttentionGuidance: ['scale', 'blur_sigma'],
+  FreeU: ['b1', 'b2', 's1', 's2'],
+  FreeU_V2: ['b1', 'b2', 's1', 's2'],
+  PatchModelAddDownscale: ['block_number', 'downscale_factor', 'start_percent', 'end_percent', 'downscale_after_skip', 'downscale_method', 'upscale_method'],
 }
 
 interface GraphNodeInput {

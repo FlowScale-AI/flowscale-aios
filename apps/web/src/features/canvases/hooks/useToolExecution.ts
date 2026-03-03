@@ -135,16 +135,12 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
 
           clearPoll();
 
-          // Build results map
+          // Build results map — use persisted output files so results survive ComfyUI restarts
           const resultsMap: Record<string, any> = {};
           for (const nodeOut of Object.values(entry.outputs ?? {})) {
             for (const img of nodeOut.images ?? []) {
-              const params = new URLSearchParams({
-                filename: img.filename,
-                subfolder: img.subfolder || "",
-                type: img.type || "output",
-              });
-              const url = `/api/comfy/${comfyPort}/view?${params}`;
+              const destName = `${executionId.slice(0, 8)}_${img.filename}`;
+              const url = `/api/outputs/${toolId}/${encodeURIComponent(destName)}`;
               resultsMap[img.filename] = {
                 content_type: "image/png",
                 data: url,
