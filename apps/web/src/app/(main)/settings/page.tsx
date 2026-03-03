@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { Monitor, HardDrive, ArrowCounterClockwise, CheckCircle, Warning } from 'phosphor-react'
+import { PageTransition, LottieSpinner, StaggerGrid, StaggerItem } from '@/components/ui'
 
 interface ComfyInstance {
   port: number
@@ -43,7 +44,7 @@ export default function SettingsPage() {
   })
 
   return (
-    <div className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
+    <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
         <div>
@@ -73,7 +74,10 @@ export default function SettingsPage() {
           </div>
 
           {isLoading && (
-            <div className="text-sm text-zinc-500">Scanning ports 6188-16188...</div>
+            <div className="flex items-center gap-2 text-sm text-zinc-500">
+              <LottieSpinner size={14} />
+              Scanning ports 6188-16188...
+            </div>
           )}
 
           {error && (
@@ -91,31 +95,30 @@ export default function SettingsPage() {
           )}
 
           {!isLoading && !error && data && data.comfyInstances.length > 0 && (
-            <div className="flex flex-col gap-2">
+            <StaggerGrid className="flex flex-col gap-2">
               {data.comfyInstances.map((inst) => (
-                <div
-                  key={inst.port}
-                  className="flex items-center gap-4 p-4 bg-zinc-900/50 border border-white/5 rounded-lg hover:border-emerald-500/30 transition-all"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                    <CheckCircle size={14} weight="fill" className="text-emerald-500" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-zinc-200">
-                      Port {inst.port}
+                <StaggerItem key={inst.port}>
+                  <div className="flex items-center gap-4 p-4 bg-zinc-900/50 border border-white/5 rounded-lg hover:border-emerald-500/30 transition-all">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                      <CheckCircle size={14} weight="fill" className="text-emerald-500" />
                     </div>
-                    <div className="text-xs text-zinc-500 mt-0.5">
-                      {getGpuName(inst)}
-                      {getVram(inst) && ` · ${getVram(inst)}`}
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-zinc-200">
+                        Port {inst.port}
+                      </div>
+                      <div className="text-xs text-zinc-500 mt-0.5">
+                        {getGpuName(inst)}
+                        {getVram(inst) && ` · ${getVram(inst)}`}
+                      </div>
                     </div>
+                    <span className="text-xs font-mono-custom text-zinc-600">
+                      localhost:{inst.port}
+                    </span>
                   </div>
-                  <span className="text-xs font-mono-custom text-zinc-600">
-                    localhost:{inst.port}
-                  </span>
-                </div>
+                </StaggerItem>
               ))}
-            </div>
+            </StaggerGrid>
           )}
 
           {data?.timestamp && (
@@ -156,6 +159,6 @@ export default function SettingsPage() {
 
         </div>
       </div>
-    </div>
+    </PageTransition>
   )
 }

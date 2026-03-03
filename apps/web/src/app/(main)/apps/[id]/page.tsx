@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
@@ -20,6 +20,7 @@ import {
   X,
 } from 'phosphor-react'
 import Link from 'next/link'
+import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 
 interface WorkflowIO {
   nodeId: string
@@ -165,7 +166,7 @@ function ExecutionHistoryItem({
           <XCircle size={14} weight="fill" className="text-red-500 shrink-0" />
         )}
         {exec.status === 'running' && (
-          <Spinner size={14} className="text-emerald-400 animate-spin shrink-0" />
+          <LottieSpinner size={14} />
         )}
         <span className="text-xs text-zinc-400 flex-1">{date}</span>
         {elapsed && <span className="text-xs text-zinc-600">{elapsed}</span>}
@@ -337,6 +338,7 @@ export default function ToolPage() {
   const [runningId, setRunningId] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
   const [latestOutputs, setLatestOutputs] = useState<{ filename: string; path: string }[]>([])
+  const wsRef = useRef<WebSocket | null>(null)
 
   const runMutation = useMutation<ExecResult, Error>({
     mutationFn: async () => {
@@ -356,6 +358,22 @@ export default function ToolPage() {
       setProgress(0)
       setLatestOutputs([])
 
+      // Connect WebSocket for live progress
+      try {
+        const ws = new WebSocket(`ws://localhost:${result.comfyPort}/ws?clientId=${result.clientId}`)
+        wsRef.current = ws
+        ws.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data as string)
+            if (msg.type === 'progress') {
+              const pct = msg.data.max ? Math.round((msg.data.value / msg.data.max) * 100) : 0
+              setProgress(pct)
+            }
+          } catch { /* binary preview frame */ }
+        }
+        ws.onerror = () => { wsRef.current = null }
+      } catch { /* WebSocket unavailable */ }
+
       const pollInterval = setInterval(async () => {
         try {
           const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
@@ -368,6 +386,8 @@ export default function ToolPage() {
           if (!entry?.status?.completed) return
 
           clearInterval(pollInterval)
+          wsRef.current?.close()
+          wsRef.current = null
           const imgs: { filename: string; path: string }[] = []
           for (const nodeOut of Object.values(entry.outputs ?? {})) {
             for (const img of nodeOut.images ?? []) {
@@ -396,6 +416,8 @@ export default function ToolPage() {
 
       setTimeout(() => {
         clearInterval(pollInterval)
+        wsRef.current?.close()
+        wsRef.current = null
         setRunningId(null)
         setProgress(null)
       }, 300_000)
@@ -411,7 +433,7 @@ export default function ToolPage() {
   if (toolLoading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <Spinner size={24} className="text-emerald-400 animate-spin" />
+        <LottieSpinner size={32} />
       </div>
     )
   }
@@ -425,7 +447,7 @@ export default function ToolPage() {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <FadeIn from="none" duration={0.3} className="h-full flex flex-col">
       {/* Topbar */}
       <div className="flex items-center gap-4 px-6 py-4 border-b border-white/5 shrink-0">
         <Link href="/apps" className="text-zinc-500 hover:text-zinc-300 transition-colors">
@@ -451,7 +473,7 @@ export default function ToolPage() {
         >
           {isRunning ? (
             <>
-              <Spinner size={14} className="animate-spin" />
+              <LottieSpinner size={14} />
               {progress !== null ? `${progress}%` : 'Running…'}
             </>
           ) : (
@@ -532,7 +554,7 @@ export default function ToolPage() {
 
                 {isRunning && latestOutputs.length === 0 && (
                   <div className="flex items-center gap-3 text-zinc-500 text-sm">
-                    <Spinner size={14} className="animate-spin text-emerald-400" />
+                    <LottieSpinner size={14} />
                     Generating…
                     {progress !== null && (
                       <div className="flex-1 bg-zinc-800 rounded-full h-1.5 max-w-xs">
@@ -546,24 +568,26 @@ export default function ToolPage() {
                 )}
 
                 {latestOutputs.length > 0 && (
-                  <div className="grid grid-cols-2 gap-3">
+                  <StaggerGrid className="grid grid-cols-2 gap-3">
                     {latestOutputs.map((out) => (
-                      <div key={out.filename} className="relative group rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800">
-                        <img
-                          src={`/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`}
-                          alt={out.filename}
-                          className="w-full h-auto object-cover"
-                        />
-                        <a
-                          href={`/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`}
-                          download={out.filename}
-                          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 bg-black/60 rounded-md text-white"
-                        >
-                          <DownloadSimple size={14} />
-                        </a>
-                      </div>
+                      <StaggerItem key={out.filename}>
+                        <div className="relative group rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800">
+                          <img
+                            src={`/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`}
+                            alt={out.filename}
+                            className="w-full h-auto object-cover"
+                          />
+                          <a
+                            href={`/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`}
+                            download={out.filename}
+                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 bg-black/60 rounded-md text-white"
+                          >
+                            <DownloadSimple size={14} />
+                          </a>
+                        </div>
+                      </StaggerItem>
                     ))}
-                  </div>
+                  </StaggerGrid>
                 )}
 
                 {!isRunning && latestOutputs.length === 0 && (
@@ -581,7 +605,7 @@ export default function ToolPage() {
                 </h2>
                 {execLoading && (
                   <div className="flex items-center gap-2 text-zinc-600 text-xs">
-                    <Spinner size={12} className="animate-spin" />
+                    <LottieSpinner size={12} />
                     Loading…
                   </div>
                 )}
@@ -604,6 +628,6 @@ export default function ToolPage() {
           </Panel>
         </PanelGroup>
       </div>
-    </div>
+    </FadeIn>
   )
 }

@@ -1,7 +1,8 @@
 "use client";
 import { CanvasTool } from "@/features/canvases/types";
-import { ArrowsClockwise, Spinner, Wrench } from "phosphor-react";
+import { ArrowsClockwise, Wrench } from "phosphor-react";
 import { useMemo } from "react";
+import { LottieSpinner } from "@/components/ui";
 
 interface ToolCategoriesProps {
   toolsData: any;
@@ -42,7 +43,7 @@ export default function ToolCategories({
       <div className="flex flex-col h-full w-64 p-4">
         <div className="flex items-center justify-center h-full">
           <div className="flex flex-col items-center gap-2">
-            <Spinner className="w-6 h-6 text-zinc-500 animate-spin" />
+            <LottieSpinner size={24} />
             <div className="text-xs text-zinc-500">Loading tools...</div>
           </div>
         </div>

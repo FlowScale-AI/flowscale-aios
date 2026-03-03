@@ -1,11 +1,11 @@
 "use client";
 import { Icon } from "@iconify/react";
-import { Spinner } from "phosphor-react";
 import { useState, useEffect, useCallback } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import ResultsPill from "./ResultsPill";
 import RunsHistoryPanel from "./RunsHistoryPanel";
 import { ExecutionState } from "../types";
-import { Tooltip } from "@flowscale/ui";
+import { Tooltip, LottieSpinner } from "@/components/ui";
 
 interface ResultItem {
   content_type: string;
@@ -71,6 +71,10 @@ export default function ExecutionMenu({
     onReset();
   }, [onReset]);
 
+  const isExecuting =
+    executionState.status === "submitting" ||
+    executionState.status === "running";
+
   return (
     <>
       {/* Results Pill - show accumulated results */}
@@ -86,49 +90,56 @@ export default function ExecutionMenu({
       )}
 
       {/* Execution Progress */}
-      {(executionState.status === "submitting" ||
-        executionState.status === "running") && (
-        <div className="absolute bottom-10 right-6 z-20">
-          <div className="bg-[#111] border border-white/10 rounded-2xl p-4 shadow-2xl backdrop-blur-sm min-w-[320px] max-w-md">
-            <div className="space-y-3">
-              {/* Progress Header */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Spinner className="w-4 h-4 text-emerald-500 animate-spin" />
-                  <span className="text-sm text-white font-medium">
-                    {executionState.status === "submitting"
-                      ? "Submitting..."
-                      : "Generating..."}
+      <AnimatePresence>
+        {isExecuting && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+            className="absolute bottom-10 right-6 z-20"
+          >
+            <div className="bg-[#111] border border-white/10 rounded-2xl p-4 shadow-2xl backdrop-blur-sm min-w-[320px] max-w-md">
+              <div className="space-y-3">
+                {/* Progress Header */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <LottieSpinner size={16} />
+                    <span className="text-sm text-white font-medium">
+                      {executionState.status === "submitting"
+                        ? "Submitting..."
+                        : "Generating..."}
+                    </span>
+                  </div>
+                  <span className="text-xs text-zinc-500">
+                    {executionState.progress}%
                   </span>
                 </div>
-                <span className="text-xs text-zinc-500">
-                  {executionState.progress}%
-                </span>
-              </div>
 
-              {/* Progress Bar */}
-              <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="bg-emerald-500 h-full transition-all duration-300 rounded-full"
-                  style={{ width: `${executionState.progress}%` }}
-                />
-              </div>
-
-              {/* Logs */}
-              <div className="max-h-24 overflow-y-auto custom-scrollbar space-y-1">
-                {executionState.logs.slice(-5).map((log, i) => (
+                {/* Progress Bar */}
+                <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
                   <div
-                    key={i}
-                    className="text-xs text-zinc-400 font-mono-custom truncate"
-                  >
-                    {log}
-                  </div>
-                ))}
+                    className="bg-emerald-500 h-full transition-all duration-300 rounded-full"
+                    style={{ width: `${executionState.progress}%` }}
+                  />
+                </div>
+
+                {/* Logs */}
+                <div className="max-h-24 overflow-y-auto custom-scrollbar space-y-1">
+                  {executionState.logs.slice(-5).map((log, i) => (
+                    <div
+                      key={i}
+                      className="text-xs text-zinc-400 font-mono-custom truncate"
+                    >
+                      {log}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Error Display */}
       {executionState.status === "error" && executionState.error && (

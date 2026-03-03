@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { AnimatePresence, motion } from 'framer-motion'
 import {
   UploadSimple,
   MagicWand,
@@ -17,6 +18,7 @@ import {
   ArrowCounterClockwise,
   X,
 } from 'phosphor-react'
+import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 
 interface WorkflowIO {
   nodeId: string
@@ -246,9 +248,6 @@ function StepAttach({
     setLoadingWorkflow(filename)
     setError('')
     try {
-      // The listing returns bare filenames; files live in the `workflows/` subdir.
-      // ComfyUI's /userdata/{file} route uses a single path segment, so the
-      // directory separator must be percent-encoded for the router to match correctly.
       const encodedPath = encodeURIComponent(`workflows/${filename}`)
       const res = await fetch(`/api/comfy/${selectedPort}/userdata/${encodedPath}`)
       if (!res.ok) throw new Error(`Failed to load workflow (${res.status})`)
@@ -322,7 +321,7 @@ function StepAttach({
         {/* States */}
         {scanning && instances.length === 0 && (
           <div className="flex items-center gap-2 text-zinc-500 text-sm py-2">
-            <Spinner size={14} className="animate-spin" />
+            <LottieSpinner size={14} />
             Scanning for ComfyUI…
           </div>
         )}
@@ -336,7 +335,7 @@ function StepAttach({
 
         {loadingWorkflows && (
           <div className="flex items-center gap-2 text-zinc-500 text-sm py-2">
-            <Spinner size={14} className="animate-spin" />
+            <LottieSpinner size={14} />
             Loading workflows…
           </div>
         )}
@@ -351,42 +350,43 @@ function StepAttach({
 
         {/* Workflow grid */}
         {!loadingWorkflows && workflows.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          <StaggerGrid className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {workflows.map((path) => {
               const name = workflowDisplayName(path)
               const isLoading = loadingWorkflow === path
               return (
-                <button
-                  key={path}
-                  onClick={() => handleSelectWorkflow(path)}
-                  disabled={loadingWorkflow !== null}
-                  className="group flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50 hover:bg-zinc-900 hover:border-emerald-500/30 hover:shadow-xl hover:shadow-emerald-900/10 hover:-translate-y-1 transition-all duration-200 disabled:opacity-50 text-left"
-                >
-                  {/* Preview surface */}
-                  <div className="relative h-36 bg-[var(--color-background-canvas)] overflow-hidden bg-grid-pattern">
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      {isLoading ? (
-                        <Spinner size={20} className="text-zinc-500 animate-spin" />
-                      ) : (
-                        <MagicWand
-                          size={32}
-                          weight="duotone"
-                          className="text-zinc-700 group-hover:text-emerald-500 transition-colors"
-                        />
-                      )}
+                <StaggerItem key={path}>
+                  <button
+                    onClick={() => handleSelectWorkflow(path)}
+                    disabled={loadingWorkflow !== null}
+                    className="group flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50 hover:bg-zinc-900 hover:border-emerald-500/30 hover:shadow-xl hover:shadow-emerald-900/10 hover:-translate-y-1 transition-all duration-200 disabled:opacity-50 text-left w-full"
+                  >
+                    {/* Preview surface */}
+                    <div className="relative h-36 bg-[var(--color-background-canvas)] overflow-hidden bg-grid-pattern">
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        {isLoading ? (
+                          <LottieSpinner size={20} />
+                        ) : (
+                          <MagicWand
+                            size={32}
+                            weight="duotone"
+                            className="text-zinc-700 group-hover:text-emerald-500 transition-colors"
+                          />
+                        )}
+                      </div>
+                      <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#18181b] to-transparent" />
                     </div>
-                    <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#18181b] to-transparent" />
-                  </div>
-                  {/* Card footer */}
-                  <div className="px-4 py-3 bg-[#18181b]">
-                    <p className="text-sm font-medium text-zinc-100 truncate group-hover:text-white transition-colors">
-                      {name}
-                    </p>
-                  </div>
-                </button>
+                    {/* Card footer */}
+                    <div className="px-4 py-3 bg-[#18181b]">
+                      <p className="text-sm font-medium text-zinc-100 truncate group-hover:text-white transition-colors">
+                        {name}
+                      </p>
+                    </div>
+                  </button>
+                </StaggerItem>
               )
             })}
-          </div>
+          </StaggerGrid>
         )}
 
         {error && (
@@ -609,7 +609,7 @@ function StepConfigure({
 
       {!schema && !analyzeError && (
         <div className="flex items-center gap-2 text-zinc-500 text-sm">
-          <Spinner size={14} className="animate-spin" />
+          <LottieSpinner size={14} />
           Analyzing workflow…
         </div>
       )}
@@ -804,7 +804,7 @@ function StepConfigure({
 
         {scanning && instances.length === 0 && (
           <div className="flex items-center gap-2 text-zinc-500 text-sm py-3">
-            <Spinner size={14} className="animate-spin" />
+            <LottieSpinner size={14} />
             Scanning ports 6188-16188...
           </div>
         )}
@@ -892,7 +892,7 @@ function StepConfigure({
           disabled={saving || !schema}
           className="flex items-center gap-2 px-5 py-2.5 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {saving ? <Spinner size={14} className="animate-spin" /> : null}
+          {saving ? <LottieSpinner size={14} /> : null}
           {selectedPort ? 'Save & Test' : 'Save (test later)'}
           <ArrowRight size={14} />
         </button>
@@ -1066,7 +1066,7 @@ function StepTest({
         >
           {running ? (
             <>
-              <Spinner size={14} className="animate-spin" />
+              <LottieSpinner size={14} />
               {progress !== null ? `${progress}%` : 'Running…'}
             </>
           ) : (
@@ -1098,16 +1098,17 @@ function StepTest({
       {outputs.length > 0 && (
         <div>
           <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Output Preview</h3>
-          <div className="grid grid-cols-2 gap-3">
+          <StaggerGrid className="grid grid-cols-2 gap-3">
             {outputs.map((out) => (
-              <img
-                key={out.filename}
-                src={`/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`}
-                alt={out.filename}
-                className="w-full rounded-xl border border-zinc-800"
-              />
+              <StaggerItem key={out.filename}>
+                <img
+                  src={`/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`}
+                  alt={out.filename}
+                  className="w-full rounded-xl border border-zinc-800"
+                />
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerGrid>
         </div>
       )}
 
@@ -1169,24 +1170,26 @@ function StepDeploy({ tool, onBack }: { tool: Tool; onBack: () => void }) {
 
   if (status === 'done') {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center gap-5">
-        <div className="w-16 h-16 rounded-2xl bg-emerald-600/20 flex items-center justify-center">
-          <CheckCircle size={32} weight="fill" className="text-emerald-400" />
+      <FadeIn from="bottom">
+        <div className="flex flex-col items-center justify-center py-16 text-center gap-5">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-600/20 flex items-center justify-center">
+            <CheckCircle size={32} weight="fill" className="text-emerald-400" />
+          </div>
+          <div>
+            <h2 className="font-tech text-base font-semibold text-zinc-100 mb-1">Tool deployed!</h2>
+            <p className="text-sm text-zinc-500">{tool.id} is now live in production.</p>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => router.push('/apps')}
+              className="flex items-center gap-2 px-5 py-2.5 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md transition-colors"
+            >
+              View in Apps Dashboard
+              <ArrowRight size={14} />
+            </button>
+          </div>
         </div>
-        <div>
-          <h2 className="font-tech text-base font-semibold text-zinc-100 mb-1">Tool deployed!</h2>
-          <p className="text-sm text-zinc-500">{tool.id} is now live in production.</p>
-        </div>
-        <div className="flex gap-3">
-          <button
-            onClick={() => router.push('/apps')}
-            className="flex items-center gap-2 px-5 py-2.5 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md transition-colors"
-          >
-            View in Apps Dashboard
-            <ArrowRight size={14} />
-          </button>
-        </div>
-      </div>
+      </FadeIn>
     )
   }
 
@@ -1236,7 +1239,7 @@ function StepDeploy({ tool, onBack }: { tool: Tool; onBack: () => void }) {
           className="flex items-center gap-2 px-5 py-2.5 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md disabled:opacity-50 transition-colors"
         >
           {status === 'deploying' ? (
-            <><Spinner size={14} className="animate-spin" /> Deploying…</>
+            <><LottieSpinner size={14} /> Deploying…</>
           ) : (
             <><RocketLaunch size={14} weight="fill" /> Deploy Now</>
           )}
@@ -1247,6 +1250,12 @@ function StepDeploy({ tool, onBack }: { tool: Tool; onBack: () => void }) {
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
+
+const stepVariants = {
+  enter: { opacity: 0, y: 12 },
+  center: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -12 },
+}
 
 export default function BuildToolPage() {
   const [step, setStep] = useState(0)
@@ -1267,38 +1276,74 @@ export default function BuildToolPage() {
       <div className="flex-1 p-8">
         <StepBar current={step} />
 
-        {step === 0 && (
-          <StepAttach
-            onNext={(json, name) => { setWorkflowJson(json); setWorkflowName(name); setStep(1) }}
-          />
-        )}
+        <AnimatePresence mode="wait">
+          {step === 0 && (
+            <motion.div
+              key="step-0"
+              variants={stepVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+              className="max-w-5xl mx-auto"
+            >
+              <StepAttach
+                onNext={(json, name) => { setWorkflowJson(json); setWorkflowName(name); setStep(1) }}
+              />
+            </motion.div>
+          )}
 
-        {step === 1 && (
-          <div className="max-w-3xl">
-            <StepConfigure
-              workflowJson={workflowJson}
-              initialName={workflowName}
-              onBack={() => setStep(0)}
-              onNext={(t) => { setTool(t); setStep(2) }}
-            />
-          </div>
-        )}
+          {step === 1 && (
+            <motion.div
+              key="step-1"
+              variants={stepVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+              className="max-w-5xl mx-auto"
+            >
+              <StepConfigure
+                workflowJson={workflowJson}
+                initialName={workflowName}
+                onBack={() => setStep(0)}
+                onNext={(t) => { setTool(t); setStep(2) }}
+              />
+            </motion.div>
+          )}
 
-        {step === 2 && tool && (
-          <div className="max-w-3xl">
-            <StepTest
-              tool={tool}
-              onBack={() => setStep(1)}
-              onNext={() => setStep(3)}
-            />
-          </div>
-        )}
+          {step === 2 && tool && (
+            <motion.div
+              key="step-2"
+              variants={stepVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+              className="max-w-5xl mx-auto"
+            >
+              <StepTest
+                tool={tool}
+                onBack={() => setStep(1)}
+                onNext={() => setStep(3)}
+              />
+            </motion.div>
+          )}
 
-        {step === 3 && tool && (
-          <div className="max-w-3xl">
-            <StepDeploy tool={tool} onBack={() => setStep(2)} />
-          </div>
-        )}
+          {step === 3 && tool && (
+            <motion.div
+              key="step-3"
+              variants={stepVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+              className="max-w-5xl mx-auto"
+            >
+              <StepDeploy tool={tool} onBack={() => setStep(2)} />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   )

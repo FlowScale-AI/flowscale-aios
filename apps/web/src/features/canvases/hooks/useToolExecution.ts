@@ -23,6 +23,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef(false);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const clearPoll = () => {
     if (pollTimerRef.current) {
@@ -70,6 +71,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
       let promptId: string;
       let comfyPort: number;
       let seed: number;
+      let clientId: string;
 
       try {
         const res = await fetch(`/api/tools/${toolId}/executions`, {
@@ -83,7 +85,29 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
           throw new Error((err as any).error || "Failed to start execution");
         }
 
-        ({ executionId, promptId, comfyPort, seed } = await res.json());
+        ({ executionId, promptId, comfyPort, seed, clientId } = await res.json());
+
+        // Connect WebSocket for live progress updates
+        try {
+          const ws = new WebSocket(`ws://localhost:${comfyPort}/ws?clientId=${clientId}`);
+          wsRef.current = ws;
+          ws.onmessage = (evt) => {
+            try {
+              const msg = JSON.parse(evt.data as string);
+              if (msg.type === "progress") {
+                const pct = msg.data.max ? Math.round((msg.data.value / msg.data.max) * 100) : 0;
+                setExecutionState((prev) => ({ ...prev, status: "running", progress: pct }));
+              } else if (msg.type === "executing" && msg.data.node !== null) {
+                setExecutionState((prev) => ({
+                  ...prev,
+                  status: "running",
+                  logs: [...prev.logs, `Executing node: ${msg.data.node}`],
+                }));
+              }
+            } catch { /* binary preview frame */ }
+          };
+          ws.onerror = () => { wsRef.current = null; };
+        } catch { /* WebSocket unavailable */ }
       } catch (err: any) {
         setExecutionState({
           status: "error",
@@ -132,6 +156,8 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
           if (!entry?.status?.completed) return;
 
           clearPoll();
+          wsRef.current?.close();
+          wsRef.current = null;
 
           // Build results map — use ComfyUI /view URL for immediate preview,
           // and the persisted /api/outputs URL for long-term access.
@@ -191,6 +217,8 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
   const cancelWorkflow = useCallback(async () => {
     abortRef.current = true;
     clearPoll();
+    wsRef.current?.close();
+    wsRef.current = null;
     setExecutionState((prev) => ({
       ...prev,
       status: "error",
@@ -202,6 +230,8 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
   const reset = useCallback(() => {
     abortRef.current = true;
     clearPoll();
+    wsRef.current?.close();
+    wsRef.current = null;
     setExecutionState({
       status: "idle",
       progress: 0,

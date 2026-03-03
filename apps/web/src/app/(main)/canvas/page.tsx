@@ -8,6 +8,7 @@ import { getCanvasList } from '@/features/canvases/api/getCanvasList'
 import { deleteCanvas } from '@/features/canvases/api/deleteCanvas'
 import type { Canvas } from '@/features/canvases/types'
 import CreateCanvasModal from '@/features/canvases/components/CreateCanvasModal'
+import { PageTransition, LottieSpinner, StaggerGrid, StaggerItem } from '@/components/ui'
 
 function CanvasCard({ canvas, onDelete }: { canvas: Canvas; onDelete: (id: string) => void }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -99,7 +100,7 @@ export default function CanvasListPage() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
+    <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
         <div>
@@ -119,7 +120,7 @@ export default function CanvasListPage() {
       <div className="flex-1 p-8">
         {loading ? (
           <div className="flex items-center justify-center py-24">
-            <div className="w-5 h-5 border-2 border-white/5 border-t-emerald-500 rounded-full animate-spin" />
+            <LottieSpinner size={24} />
           </div>
         ) : canvases.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -137,24 +138,28 @@ export default function CanvasListPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          <StaggerGrid className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {/* New canvas card */}
-            <button
-              onClick={() => setModalOpen(true)}
-              className="group flex flex-col rounded-xl overflow-hidden border-2 border-dashed border-zinc-800 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all duration-200 text-zinc-600 hover:text-emerald-400"
-            >
-              <div className="h-36 flex items-center justify-center">
-                <Plus size={28} className="transition-transform group-hover:scale-110" />
-              </div>
-              <div className="px-4 py-3">
-                <p className="text-sm font-medium">New Canvas</p>
-              </div>
-            </button>
+            <StaggerItem>
+              <button
+                onClick={() => setModalOpen(true)}
+                className="group flex flex-col rounded-xl overflow-hidden border-2 border-dashed border-zinc-800 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all duration-200 text-zinc-600 hover:text-emerald-400 w-full"
+              >
+                <div className="h-36 flex items-center justify-center">
+                  <Plus size={28} className="transition-transform group-hover:scale-110" />
+                </div>
+                <div className="px-4 py-3">
+                  <p className="text-sm font-medium">New Canvas</p>
+                </div>
+              </button>
+            </StaggerItem>
 
             {canvases.map(canvas => (
-              <CanvasCard key={canvas._id} canvas={canvas} onDelete={handleDelete} />
+              <StaggerItem key={canvas._id}>
+                <CanvasCard canvas={canvas} onDelete={handleDelete} />
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerGrid>
         )}
       </div>
       <CreateCanvasModal
@@ -162,6 +167,6 @@ export default function CanvasListPage() {
         onClose={() => setModalOpen(false)}
         onSuccess={handleModalSuccess}
       />
-    </div>
+    </PageTransition>
   )
 }
