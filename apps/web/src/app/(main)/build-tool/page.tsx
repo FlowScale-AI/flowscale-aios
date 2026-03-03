@@ -375,7 +375,7 @@ function StepConfigure({
         {scanning && instances.length === 0 && (
           <div className="flex items-center gap-2 text-zinc-500 text-sm py-3">
             <Spinner size={14} className="animate-spin" />
-            Scanning ports 8188–9188…
+            Scanning ports 6188-16188...
           </div>
         )}
 

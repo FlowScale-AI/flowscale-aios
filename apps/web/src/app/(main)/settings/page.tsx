@@ -68,7 +68,7 @@ export default function SettingsPage() {
           </div>
 
           {isLoading && (
-            <div className="text-sm text-zinc-500">Scanning ports 8188–9188…</div>
+            <div className="text-sm text-zinc-500">Scanning ports 6188-16188...</div>
           )}
 
           {error && (
