@@ -28,6 +28,108 @@ const USER_PARAMS: Record<string, string[]> = {
   LoadImage: ['image']
 }
 
+// Widget value order for graph-format nodes (skipping non-user widgets like control_after_generate)
+const GRAPH_WIDGET_PARAMS: Record<string, Array<string | null>> = {
+  CLIPTextEncode: ['text'],
+  KSampler: ['seed', null /* control_after_generate */, 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise'],
+  KSamplerAdvanced: [null /* add_noise */, 'noise_seed', null /* control_after_generate */, 'steps', 'cfg', 'sampler_name', 'scheduler'],
+  EmptyLatentImage: ['width', 'height', 'batch_size'],
+  LoadImage: ['image'],
+  CheckpointLoaderSimple: ['ckpt_name'],
+  VAELoader: ['vae_name'],
+  SaveImage: ['filename_prefix'],
+  PreviewImage: [],
+}
+
+interface GraphNodeInput {
+  name: string
+  type: string
+  link: number | null
+}
+
+interface GraphNode {
+  id: number
+  type: string
+  inputs?: GraphNodeInput[]
+  widgets_values?: unknown[]
+  properties?: Record<string, unknown>
+}
+
+interface GraphFormat {
+  nodes: GraphNode[]
+  // Each link: [link_id, from_node_id, from_output_slot, to_node_id, to_input_slot, type]
+  links?: number[][]
+}
+
+function isGraphFormat(json: unknown): json is GraphFormat {
+  return (
+    typeof json === 'object' &&
+    json !== null &&
+    !Array.isArray(json) &&
+    'nodes' in json &&
+    Array.isArray((json as GraphFormat).nodes)
+  )
+}
+
+function isApiFormat(json: unknown): boolean {
+  if (typeof json !== 'object' || json === null || Array.isArray(json)) return false
+  const entries = Object.entries(json as Record<string, unknown>)
+  if (entries.length === 0) return false
+  return entries.every(([, node]) => {
+    return (
+      typeof node === 'object' &&
+      node !== null &&
+      'class_type' in node &&
+      'inputs' in node &&
+      typeof (node as { class_type: unknown }).class_type === 'string'
+    )
+  })
+}
+
+// UI-only node types that have no ComfyUI backend — skip during conversion
+const UI_ONLY_NODES = new Set(['Note', 'PrimitiveNode', 'Reroute'])
+
+/** Convert graph-format workflow to API format */
+function graphToApi(graph: GraphFormat): ComfyUIWorkflow {
+  // Build link map: link_id -> [from_node_id_str, from_output_slot]
+  const linkMap = new Map<number, [string, number]>()
+  for (const link of graph.links ?? []) {
+    const [linkId, fromNodeId, fromSlot] = link
+    linkMap.set(linkId, [String(fromNodeId), fromSlot])
+  }
+
+  const api: ComfyUIWorkflow = {}
+  for (const node of graph.nodes) {
+    if (UI_ONLY_NODES.has(node.type)) continue
+
+    const inputs: Record<string, unknown> = {}
+
+    // Wire linked inputs (connections from other nodes)
+    for (const inp of node.inputs ?? []) {
+      if (inp.link != null && linkMap.has(inp.link)) {
+        inputs[inp.name] = linkMap.get(inp.link)
+      }
+    }
+
+    // Wire widget inputs (non-linked values stored in widgets_values)
+    const widgetParams = GRAPH_WIDGET_PARAMS[node.type]
+    if (widgetParams && node.widgets_values) {
+      widgetParams.forEach((name, i) => {
+        if (name !== null && i < node.widgets_values!.length) {
+          inputs[name] = node.widgets_values![i]
+        }
+      })
+    }
+
+    api[String(node.id)] = {
+      class_type: node.type,
+      inputs,
+      _meta: { title: node.type }
+    }
+  }
+  return api
+}
+
 export function analyzeWorkflow(workflow: ComfyUIWorkflow): WorkflowIO[] {
   const ios: WorkflowIO[] = []
 
@@ -90,16 +192,11 @@ function inferParamType(
 }
 
 export function isValidComfyWorkflow(json: unknown): json is ComfyUIWorkflow {
-  if (typeof json !== 'object' || json === null || Array.isArray(json)) return false
-  const entries = Object.entries(json as Record<string, unknown>)
-  if (entries.length === 0) return false
-  return entries.every(([, node]) => {
-    return (
-      typeof node === 'object' &&
-      node !== null &&
-      'class_type' in node &&
-      'inputs' in node &&
-      typeof (node as { class_type: unknown }).class_type === 'string'
-    )
-  })
+  return isApiFormat(json) || isGraphFormat(json)
+}
+
+/** Normalize any valid ComfyUI workflow format into API format for analysis */
+export function normalizeWorkflow(json: ComfyUIWorkflow | GraphFormat): ComfyUIWorkflow {
+  if (isGraphFormat(json)) return graphToApi(json)
+  return json as ComfyUIWorkflow
 }

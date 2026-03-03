@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { analyzeWorkflow, isValidComfyWorkflow } from '@flowscale/workflow'
+import { analyzeWorkflow, isValidComfyWorkflow, normalizeWorkflow } from '@flowscale/workflow'
 import { createHash } from 'crypto'
 
 export async function POST(req: NextRequest) {
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Not a valid ComfyUI workflow' }, { status: 422 })
   }
 
-  const schema = analyzeWorkflow(parsed)
+  const schema = analyzeWorkflow(normalizeWorkflow(parsed as Parameters<typeof normalizeWorkflow>[0]))
   const hash = createHash('sha256').update(workflowJson).digest('hex')
 
   return NextResponse.json({ schema, hash })

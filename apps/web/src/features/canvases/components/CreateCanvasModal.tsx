@@ -8,11 +8,13 @@ import { useCreateCanvas } from "@/features/canvases/api";
 interface CreateCanvasModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
 export default function CreateCanvasModal({
   isOpen,
   onClose,
+  onSuccess,
 }: CreateCanvasModalProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -20,11 +22,11 @@ export default function CreateCanvasModal({
 
   const { mutate, isPending } = useCreateCanvas({
     onSuccess: () => {
-      // Reset form
       setName("");
       setDescription("");
       setTouched({ name: false });
       onClose();
+      onSuccess?.();
     },
   });
 

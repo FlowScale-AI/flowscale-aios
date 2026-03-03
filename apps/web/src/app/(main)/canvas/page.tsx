@@ -4,8 +4,9 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, Palette, Trash, DotsThree } from 'phosphor-react'
-import { localGetCanvasList, localCreateCanvas, localDeleteCanvas } from '@/lib/local-db'
+import { localGetCanvasList, localDeleteCanvas } from '@/lib/local-db'
 import type { Canvas } from '@/features/canvases/types'
+import CreateCanvasModal from '@/features/canvases/components/CreateCanvasModal'
 
 function CanvasCard({ canvas, onDelete }: { canvas: Canvas; onDelete: (id: string) => void }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -78,7 +79,7 @@ export default function CanvasListPage() {
   const router = useRouter()
   const [canvases, setCanvases] = useState<Canvas[]>([])
   const [loading, setLoading] = useState(true)
-  const [creating, setCreating] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -89,11 +90,11 @@ export default function CanvasListPage() {
 
   useEffect(() => { load() }, [load])
 
-  const handleCreate = async () => {
-    setCreating(true)
-    const canvas = await localCreateCanvas({ name: `Canvas ${canvases.length + 1}` })
-    router.push(`/canvas/${canvas._id}`)
-  }
+  const handleModalSuccess = useCallback(async () => {
+    const list = await localGetCanvasList()
+    const newest = list[0]
+    if (newest) router.push(`/canvas/${newest._id}`)
+  }, [router])
 
   const handleDelete = async (id: string) => {
     await localDeleteCanvas(id)
@@ -109,8 +110,8 @@ export default function CanvasListPage() {
           <p className="text-sm text-zinc-500 mt-0.5">Create and manage your generative canvases</p>
         </div>
         <button
-          onClick={handleCreate}
-          disabled={creating}
+          onClick={() => setModalOpen(true)}
+          disabled={false}
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
         >
           <Plus size={16} />
@@ -132,8 +133,8 @@ export default function CanvasListPage() {
             <h3 className="text-base font-medium text-zinc-300 mb-1">No canvases yet</h3>
             <p className="text-sm text-zinc-500 mb-6">Create your first canvas to start generating</p>
             <button
-              onClick={handleCreate}
-              disabled={creating}
+              onClick={() => setModalOpen(true)}
+              disabled={false}
               className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
             >
               <Plus size={16} />
@@ -144,8 +145,8 @@ export default function CanvasListPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {/* New canvas card */}
             <button
-              onClick={handleCreate}
-              disabled={creating}
+              onClick={() => setModalOpen(true)}
+              disabled={false}
               className="group flex flex-col items-center justify-center h-[232px] rounded-xl border-2 border-dashed border-zinc-800 hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all duration-200 text-zinc-600 hover:text-indigo-400 disabled:opacity-50"
             >
               <Plus size={24} className="mb-2 transition-transform group-hover:scale-110" />
@@ -158,6 +159,11 @@ export default function CanvasListPage() {
           </div>
         )}
       </div>
+      <CreateCanvasModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onSuccess={handleModalSuccess}
+      />
     </div>
   )
 }

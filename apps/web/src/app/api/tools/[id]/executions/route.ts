@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db'
 import { executions, tools } from '@/lib/db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
+import { isValidComfyWorkflow, normalizeWorkflow } from '@flowscale/workflow'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const db = getDb()
@@ -36,8 +37,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const now = Date.now()
   const clientId = uuidv4()
 
-  // Parse workflow and inject inputs
-  const workflow = JSON.parse(tool.workflowJson) as Record<string, { inputs: Record<string, unknown> }>
+  // Parse workflow, normalize to API format, and inject inputs
+  const parsed = JSON.parse(tool.workflowJson)
+  if (!isValidComfyWorkflow(parsed)) {
+    return NextResponse.json({ error: 'Stored workflow is not a valid ComfyUI workflow' }, { status: 422 })
+  }
+  const workflow = normalizeWorkflow(parsed) as Record<string, { inputs: Record<string, unknown> }>
   const schema = JSON.parse(tool.schemaJson) as Array<{
     nodeId: string; paramName: string; isInput: boolean; defaultValue?: unknown
   }>

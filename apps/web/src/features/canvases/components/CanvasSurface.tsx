@@ -220,8 +220,10 @@ export default function CanvasSurface({
   const podsExecution = usePodsExecution(selectedPodId);
   // In desktop mode: use pods execution if a pod is selected, else fall back to legacy ComfyUI execution
   const desktopExecution = selectedPodId ? podsExecution : comfyExecution;
+  // EIOS tools (eios: prefix) always go through the API server regardless of desktop mode
+  const isEiosTool = activeToolId?.startsWith('eios:');
   const { executionState, executeWorkflow, cancelWorkflow, reset } =
-    isDesktop() ? desktopExecution : cloudExecution;
+    (isDesktop() && !isEiosTool) ? desktopExecution : cloudExecution;
 
   // Tool config for "Send To" feature
   const { data: toolsData } = useCanvasTools();
