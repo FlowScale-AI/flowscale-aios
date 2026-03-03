@@ -7,7 +7,7 @@ import {
   Wrench,
   Palette,
   GearSix,
-  FlowArrow,
+  Infinity as InfinityIcon,
 } from 'phosphor-react'
 import type { ReactNode } from 'react'
 import { CanvasStateProvider } from '@/features/canvases/components/CanvasStateContext'
@@ -27,10 +27,12 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       {/* Sidebar */}
       <nav className="group/sidebar relative flex flex-col bg-[var(--color-background-panel)] border-r border-white/5 transition-all duration-200 ease-in-out w-16 hover:w-[220px] hover:shadow-2xl hover:shadow-black/50 shrink-0 overflow-hidden z-50">
         {/* Logo */}
-        <div className="flex items-center gap-3 px-4 py-5 border-b border-white/5 shrink-0">
-          <FlowArrow size={28} weight="duotone" className="text-emerald-400 shrink-0" />
-          <span className="font-tech text-sm font-semibold text-zinc-100 whitespace-nowrap opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75">
-            FlowScale AI OS
+        <div className="flex items-center gap-3 px-3 py-5 border-b border-white/5 shrink-0">
+          <div className="size-10 rounded-xl bg-emerald-600/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+            <InfinityIcon size={24} weight="bold" className="text-emerald-500" />
+          </div>
+          <span className="font-tech text-lg font-bold tracking-tight text-white whitespace-nowrap opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75">
+            FlowScale
           </span>
         </div>
 
