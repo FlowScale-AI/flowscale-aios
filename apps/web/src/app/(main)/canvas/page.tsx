@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Plus, Palette, Trash, DotsThree } from 'phosphor-react'
-import { localGetCanvasList, localDeleteCanvas } from '@/lib/local-db'
+import { getCanvasList } from '@/features/canvases/api/getCanvasList'
+import { deleteCanvas } from '@/features/canvases/api/deleteCanvas'
 import type { Canvas } from '@/features/canvases/types'
 import CreateCanvasModal from '@/features/canvases/components/CreateCanvasModal'
 
@@ -83,7 +84,7 @@ export default function CanvasListPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const list = await localGetCanvasList()
+    const list = await getCanvasList()
     setCanvases(list)
     setLoading(false)
   }, [])
@@ -91,13 +92,13 @@ export default function CanvasListPage() {
   useEffect(() => { load() }, [load])
 
   const handleModalSuccess = useCallback(async () => {
-    const list = await localGetCanvasList()
+    const list = await getCanvasList()
     const newest = list[0]
     if (newest) router.push(`/canvas/${newest._id}`)
   }, [router])
 
   const handleDelete = async (id: string) => {
-    await localDeleteCanvas(id)
+    await deleteCanvas(id)
     setCanvases(prev => prev.filter(c => c._id !== id))
   }
 

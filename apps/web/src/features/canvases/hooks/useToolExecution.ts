@@ -7,8 +7,6 @@
 
 import { useState, useCallback, useRef } from "react";
 import type { ExecutionState } from "../types";
-import { localSaveRun } from "@/lib/local-db";
-import type { RunItem } from "@/features/canvases/api/getAllRunsList";
 
 interface UseToolExecutionProps {
   apiUrl?: string;
@@ -135,16 +133,19 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
 
           clearPoll();
 
-          // Build results map — use persisted output files so results survive ComfyUI restarts
+          // Build results map — use ComfyUI /view URL for immediate preview,
+          // and the persisted /api/outputs URL for long-term access.
           const resultsMap: Record<string, any> = {};
           for (const nodeOut of Object.values(entry.outputs ?? {})) {
             for (const img of nodeOut.images ?? []) {
               const destName = `${executionId.slice(0, 8)}_${img.filename}`;
-              const url = `/api/outputs/${toolId}/${encodeURIComponent(destName)}`;
+              const persistUrl = `/api/outputs/${toolId}/${encodeURIComponent(destName)}`;
+              // ComfyUI proxy URL works immediately (file just generated)
+              const previewUrl = `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder || "")}&type=output`;
               resultsMap[img.filename] = {
                 content_type: "image/png",
-                data: url,
-                download_url: url,
+                data: previewUrl,
+                download_url: persistUrl,
                 filename: img.filename,
                 label: img.filename,
                 run_id: promptId,
@@ -179,44 +180,6 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
             }),
           }).catch(console.error);
 
-          // Save run to IndexedDB for RunsHistoryPanel
-          if (!isError) {
-            const now = new Date().toISOString();
-            const run: RunItem = {
-              _id: promptId,
-              pod_id: "local",
-              cluster_id: "local",
-              team_id: "local",
-              project_id: "local",
-              workflow_id: `eios:${toolId}`,
-              group_id: "STUDIO",
-              status: "completed",
-              trigger_type: "manual",
-              inputs: [],
-              canvas_id: null,
-              output_metadata: [],
-              outputs: Object.values(resultsMap).map((r: any) => ({
-                filename: r.filename,
-                url: r.download_url,
-                content_type: r.content_type,
-                label: r.label,
-              })),
-              error: null,
-              execution_time_ms: null,
-              started_at: now,
-              completed_at: now,
-              created_at: now,
-              updated_at: now,
-              container_id: "",
-              prompt_id: promptId,
-              progress: 100,
-              can_regenerate: true,
-              project_name: "EIOS",
-              workflow_name: toolId,
-              regenerations: [],
-            };
-            localSaveRun(run).catch(console.error);
-          }
         } catch {
           // Network hiccup — keep polling
         }

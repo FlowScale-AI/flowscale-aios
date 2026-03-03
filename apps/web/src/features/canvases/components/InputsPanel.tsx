@@ -1,6 +1,6 @@
 "use client";
 import { useCanvasTools } from "@/features/canvases/api/getCanvasTools";
-import { getToolConfig, saveToolConfig } from "@/lib/local-db";
+import type { ToolConfig } from "@/features/canvases/types";
 import type { ToolInputConfig, ToolOutputConfig } from "@/features/canvases/types";
 import { Icon } from "@iconify/react";
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
@@ -94,18 +94,23 @@ export default function InputsPanel({
       return;
     }
     let cancelled = false;
-    getToolConfig(activeToolId).then((config) => {
-      if (cancelled) return;
-      setSavedConfig(config?.inputs ?? null);
-      setSavedOutputConfig(config?.outputs ?? null);
-    });
+    fetch(`/api/tool-configs/${encodeURIComponent(activeToolId)}`)
+      .then((r) => (r.status === 204 ? null : r.json()))
+      .then((config: ToolConfig | null) => {
+        if (cancelled) return;
+        setSavedConfig(config?.inputs ?? null);
+        setSavedOutputConfig(config?.outputs ?? null);
+      })
+      .catch(() => { /* no config yet */ });
     return () => { cancelled = true; };
   }, [activeToolId]);
 
-  // Filter inputs based on saved config
+  // Filter inputs based on saved config.
+  // When no canvas-specific config has been saved yet, show all inputs —
+  // the schema is already the user's selected subset from the build step.
   const visibleInputs = useMemo(() => {
     if (!activeTool) return [];
-    if (!savedConfig) return []; // No config yet = show nothing
+    if (!savedConfig) return activeTool.inputs;
     return activeTool.inputs.filter(
       (input) => savedConfig[input.parameter_name]?.visible,
     );
@@ -130,7 +135,7 @@ export default function InputsPanel({
   useEffect(() => {
     if (activeTool) {
       const initialValues: Record<string, any> = {};
-      activeTool.inputs.forEach((input: any) => {
+      activeTool.inputs.forEach((input) => {
         if (input.demo_type === "number") {
           initialValues[input.parameter_name] = input.default ?? 0;
         } else if (input.demo_type === "combo") {
@@ -229,10 +234,14 @@ export default function InputsPanel({
   const handleSaveConfig = async () => {
     if (!activeToolId) return;
     try {
-      await saveToolConfig(activeToolId, {
-        workflow_id: activeToolId,
-        inputs: draftConfig,
-        outputs: draftOutputConfig,
+      await fetch(`/api/tool-configs/${encodeURIComponent(activeToolId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workflow_id: activeToolId,
+          inputs: draftConfig,
+          outputs: draftOutputConfig,
+        }),
       });
     } catch (err) {
       console.error("Failed to save tool config:", err);
@@ -509,13 +518,6 @@ export default function InputsPanel({
           <h2 className="text-base text-white font-medium font-tech">
             {activeTool.name}
           </h2>
-          <button
-            onClick={handleStartConfig}
-            className="p-1.5 text-zinc-500 hover:text-emerald-400 transition-colors rounded-lg hover:bg-white/5"
-            title="Configure inputs"
-          >
-            <Icon icon="solar:settings-minimalistic-linear" width="18" />
-          </button>
         </div>
         <p className="text-xs text-zinc-500 mt-1">
           {(() => {

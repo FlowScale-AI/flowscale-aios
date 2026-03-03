@@ -65,7 +65,7 @@ export default function ResultsPill({
     if (result.content_type.startsWith("image/")) {
       return (
         <img
-          src={result.download_url || result.data}
+          src={result.data || result.download_url}
           alt={result.label}
           className="w-full h-full object-cover"
         />
@@ -74,7 +74,7 @@ export default function ResultsPill({
     if (result.content_type.startsWith("video/")) {
       return (
         <video
-          src={result.download_url || result.data}
+          src={result.data || result.download_url}
           className="w-full h-full object-cover"
           muted
         />

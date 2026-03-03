@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { Canvas } from "../types";
-import { localGetCanvasList } from "@/lib/local-db";
+import type { Canvas } from "../types";
 
 export const getCanvasList = async (): Promise<Canvas[]> => {
-  return localGetCanvasList();
+  const res = await fetch("/api/canvases");
+  if (!res.ok) throw new Error("Failed to fetch canvases");
+  return res.json();
 };
 
 export const useCanvasList = () => {

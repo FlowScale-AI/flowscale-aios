@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { localGetAllRunsList } from "@/lib/local-db";
 
 export interface RunOutput {
   content_type?: string;
@@ -11,7 +10,7 @@ export interface RunOutput {
   parameter_name?: string;
   node_path?: string;
   node_id?: string;
-  data?: string; // For text outputs
+  data?: string;
 }
 
 export interface RunItem {
@@ -46,8 +45,6 @@ export interface RunItem {
 export interface RunsListResponse {}
 
 export const getAllRunsList = async ({
-  filter_by,
-  filter_value,
   page_size,
   page_number,
 }: {
@@ -57,7 +54,13 @@ export const getAllRunsList = async ({
   page_size: number;
   page_number: number;
 }): Promise<RunsListResponse | undefined> => {
-  return localGetAllRunsList({ filter_by, filter_value, page_size, page_number });
+  const params = new URLSearchParams({
+    page_size: String(page_size),
+    page_number: String(page_number),
+  });
+  const res = await fetch(`/api/runs?${params}`);
+  if (!res.ok) return undefined;
+  return res.json();
 };
 
 export const useGetAllRunsList = (

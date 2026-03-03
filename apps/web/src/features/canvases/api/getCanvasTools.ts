@@ -51,6 +51,8 @@ function mapEiosTool(row: EiosToolRow): CanvasTool {
       category: s.nodeType,
       randomize: s.paramName === "seed",
       value_type: s.paramType,
+      default: s.defaultValue,
+      options: s.options,
     }));
 
   const outputSchema = schema.filter((s) => !s.isInput);

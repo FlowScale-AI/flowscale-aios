@@ -41,6 +41,8 @@ export interface CanvasToolInput {
   category: string;
   randomize: boolean;
   value_type: string;
+  default?: unknown;
+  options?: string[];
 }
 
 export interface CanvasToolOutput {

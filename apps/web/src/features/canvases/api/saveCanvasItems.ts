@@ -1,16 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
-import { axios } from "@/lib/axios";
-import { CanvasItem } from "../types";
-import { isDesktop } from "@/lib/platform";
-import { localSaveCanvasItems } from "@/lib/local-db";
+import type { CanvasItem } from "../types";
 
-export const saveCanvasItems = async (
-  canvasId: string,
-  items: CanvasItem[],
-): Promise<void> => {
-  if (isDesktop()) return localSaveCanvasItems(canvasId, items);
-
-  await axios.post(`/v1/canvas/${canvasId}/items`, { items });
+export const saveCanvasItems = async (canvasId: string, items: CanvasItem[]): Promise<void> => {
+  const res = await fetch(`/api/canvases/${canvasId}/items`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!res.ok) throw new Error("Failed to save canvas items");
 };
 
 export const useSaveCanvasItems = (canvasId: string) => {

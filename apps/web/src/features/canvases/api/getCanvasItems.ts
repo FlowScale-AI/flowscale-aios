@@ -1,22 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { axios } from "@/lib/axios";
-import { CanvasItem } from "../types";
-import { isDesktop } from "@/lib/platform";
-import { localGetCanvasItems } from "@/lib/local-db";
+import type { CanvasItem } from "../types";
 
-export interface GetCanvasItemsResponse {
-  items: CanvasItem[];
-}
-
-export const getCanvasItems = async (
-  canvasId: string,
-): Promise<CanvasItem[]> => {
-  if (isDesktop()) return localGetCanvasItems(canvasId);
-
-  const response = await axios.get<GetCanvasItemsResponse>(
-    `/v1/canvas/${canvasId}/items?${Math.random()}`, // Add cache buster
-  );
-  return response.data.items;
+export const getCanvasItems = async (canvasId: string): Promise<CanvasItem[]> => {
+  const res = await fetch(`/api/canvases/${canvasId}/items`);
+  if (!res.ok) throw new Error("Failed to fetch canvas items");
+  return res.json();
 };
 
 export const useGetCanvasItems = (canvasId: string) => {

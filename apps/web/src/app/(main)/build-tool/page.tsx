@@ -188,6 +188,57 @@ function StepAttach({
   )
 }
 
+// ─── Editable default cell ────────────────────────────────────────────────────
+
+function EditableDefault({
+  field,
+  onChange,
+}: {
+  field: WorkflowIO
+  onChange: (value: unknown) => void
+}) {
+  // Outputs and image inputs can't be configured inline
+  if (!field.isInput || field.paramType === 'image') {
+    return <span className="text-zinc-600 font-mono text-xs">{String(field.defaultValue ?? '—')}</span>
+  }
+
+  if (field.paramType === 'boolean') {
+    return (
+      <input
+        type="checkbox"
+        checked={Boolean(field.defaultValue)}
+        onChange={(e) => onChange(e.target.checked)}
+        className="accent-indigo-500 w-4 h-4"
+      />
+    )
+  }
+
+  if (field.paramType === 'select' && field.options?.length) {
+    return (
+      <select
+        value={String(field.defaultValue ?? field.options[0])}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500"
+      >
+        {field.options.map((opt) => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+    )
+  }
+
+  return (
+    <input
+      type={field.paramType === 'number' ? 'number' : 'text'}
+      value={String(field.defaultValue ?? '')}
+      onChange={(e) =>
+        onChange(field.paramType === 'number' ? Number(e.target.value) : e.target.value)
+      }
+      className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 font-mono"
+    />
+  )
+}
+
 // ─── Step 2: Auto-Configure ───────────────────────────────────────────────────
 
 function StepConfigure({
@@ -207,6 +258,10 @@ function StepConfigure({
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [analyzeError, setAnalyzeError] = useState('')
+  // Keys of enabled (visible) fields — format: "nodeId__paramName"
+  const [enabledKeys, setEnabledKeys] = useState<Set<string>>(new Set())
+
+  const fieldKey = (f: WorkflowIO) => `${f.nodeId}__${f.paramName}`
 
   const runAnalyze = useCallback(async (port?: number | null) => {
     try {
@@ -226,6 +281,12 @@ function StepConfigure({
       setSchema(s)
       setWorkflowHash(hash)
       setAnalyzeError('')
+      // Enable all fields by default; preserve existing choices on re-analyze
+      setEnabledKeys((prev) => {
+        const next = new Set(prev)
+        for (const f of s as WorkflowIO[]) next.add(`${f.nodeId}__${f.paramName}`)
+        return next
+      })
     } catch {
       setAnalyzeError('Failed to analyze workflow')
     }
@@ -238,6 +299,14 @@ function StepConfigure({
   useEffect(() => {
     if (selectedPort) runAnalyze(selectedPort)
   }, [selectedPort]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDefaultChange = useCallback((nodeId: string, paramName: string, value: unknown) => {
+    setSchema((prev) =>
+      prev?.map((f) =>
+        f.nodeId === nodeId && f.paramName === paramName ? { ...f, defaultValue: value } : f
+      ) ?? null
+    )
+  }, [])
 
   const scanPorts = async () => {
     setScanning(true)
@@ -259,6 +328,9 @@ function StepConfigure({
     if (!name.trim()) { setError('Enter a tool name.'); return }
     if (!schema) { setError('Workflow analysis in progress.'); return }
 
+    const visibleSchema = schema.filter((f) => enabledKeys.has(fieldKey(f)))
+    if (visibleSchema.length === 0) { setError('Select at least one input or output.'); return }
+
     setSaving(true)
     setError('')
     try {
@@ -270,7 +342,7 @@ function StepConfigure({
           description: description.trim() || null,
           workflowJson,
           workflowHash,
-          schemaJson: JSON.stringify(schema),
+          schemaJson: JSON.stringify(visibleSchema),
           comfyPort: selectedPort,
         }),
       })
@@ -320,42 +392,92 @@ function StepConfigure({
 
       {schema && (
         <div>
-          <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
-            Detected Parameters ({schema.length})
-          </h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+              Detected Parameters ({schema.length})
+            </h3>
+            <span className="text-xs text-zinc-600">Edit default values for inputs below</span>
+          </div>
           <div className="overflow-x-auto rounded-xl border border-zinc-800">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-zinc-800 text-left">
+                  <th className="pl-4 pr-2 py-2.5">
+                    {/* Select-all checkbox */}
+                    <input
+                      type="checkbox"
+                      checked={schema.every((f) => enabledKeys.has(fieldKey(f)))}
+                      onChange={(e) => {
+                        setEnabledKeys(
+                          e.target.checked
+                            ? new Set(schema.map(fieldKey))
+                            : new Set()
+                        )
+                      }}
+                      className="accent-indigo-500 w-4 h-4"
+                      title="Toggle all"
+                    />
+                  </th>
                   <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Node</th>
                   <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Field</th>
                   <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Type</th>
-                  <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Default</th>
+                  <th className="px-4 py-2.5 text-xs font-medium text-zinc-500 w-48">Default Value</th>
                   <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Direction</th>
                 </tr>
               </thead>
               <tbody>
-                {schema.map((f) => (
-                  <tr key={`${f.nodeId}-${f.paramName}`} className="border-b border-zinc-800/50 last:border-0">
-                    <td className="px-4 py-2.5 text-zinc-300 font-medium text-xs">
-                      {f.nodeTitle || f.nodeType}
-                    </td>
-                    <td className="px-4 py-2.5 text-zinc-400 font-mono text-xs">{f.paramName}</td>
-                    <td className="px-4 py-2.5">
-                      <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono">
-                        {f.paramType}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 text-zinc-600 text-xs font-mono truncate max-w-32">
-                      {String(f.defaultValue ?? '—')}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <span className={`text-xs font-medium ${f.isInput ? 'text-indigo-400' : 'text-emerald-400'}`}>
-                        {f.isInput ? '→ Input' : '← Output'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {schema.map((f) => {
+                  const key = fieldKey(f)
+                  const enabled = enabledKeys.has(key)
+                  return (
+                    <tr
+                      key={key}
+                      onClick={() =>
+                        setEnabledKeys((prev) => {
+                          const next = new Set(prev)
+                          enabled ? next.delete(key) : next.add(key)
+                          return next
+                        })
+                      }
+                      className={`border-b border-zinc-800/50 last:border-0 cursor-pointer transition-opacity ${enabled ? '' : 'opacity-35'}`}
+                    >
+                      <td className="pl-4 pr-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={enabled}
+                          onChange={() =>
+                            setEnabledKeys((prev) => {
+                              const next = new Set(prev)
+                              enabled ? next.delete(key) : next.add(key)
+                              return next
+                            })
+                          }
+                          className="accent-indigo-500 w-4 h-4"
+                        />
+                      </td>
+                      <td className="px-4 py-2.5 text-zinc-300 font-medium text-xs">
+                        {f.nodeTitle || f.nodeType}
+                      </td>
+                      <td className="px-4 py-2.5 text-zinc-400 font-mono text-xs">{f.paramName}</td>
+                      <td className="px-4 py-2.5">
+                        <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono">
+                          {f.paramType}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 w-48" onClick={(e) => e.stopPropagation()}>
+                        <EditableDefault
+                          field={f}
+                          onChange={(value) => handleDefaultChange(f.nodeId, f.paramName, value)}
+                        />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span className={`text-xs font-medium ${f.isInput ? 'text-indigo-400' : 'text-emerald-400'}`}>
+                          {f.isInput ? '→ Input' : '← Output'}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

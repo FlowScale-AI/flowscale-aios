@@ -56,6 +56,36 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_tools_status ON tools(status);
     CREATE INDEX IF NOT EXISTS idx_executions_tool_id ON executions(tool_id);
     CREATE INDEX IF NOT EXISTS idx_executions_created_at ON executions(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS canvases (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      viewport_json TEXT NOT NULL DEFAULT '{"x":0,"y":0,"zoom":1}',
+      settings_json TEXT NOT NULL DEFAULT '{"grid_size":8,"snap_to_grid":false,"background":"#ffffff"}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS canvas_items (
+      id TEXT NOT NULL,
+      canvas_id TEXT NOT NULL REFERENCES canvases(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      position_json TEXT NOT NULL,
+      z_index INTEGER NOT NULL DEFAULT 0,
+      locked INTEGER NOT NULL DEFAULT 0,
+      hidden INTEGER NOT NULL DEFAULT 0,
+      data_json TEXT,
+      properties_json TEXT,
+      PRIMARY KEY (canvas_id, id)
+    );
+
+    CREATE TABLE IF NOT EXISTS tool_configs (
+      workflow_id TEXT PRIMARY KEY,
+      config_json TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_canvas_items_canvas_id ON canvas_items(canvas_id);
   `)
 
   _db = drizzle(sqlite, { schema })

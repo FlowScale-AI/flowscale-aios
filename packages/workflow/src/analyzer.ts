@@ -101,13 +101,15 @@ const OUTPUT_NODE_TYPES = new Set([
   'VHS_VideoCombine'
 ])
 
-// Parameters that are typically user-facing
+// For known node types: explicit ordered list of user-facing params to expose.
+// Unknown nodes fall back to Object.keys(node.inputs) — all non-link values.
+// This list is intentionally minimal; objectInfoMap covers everything else automatically.
 const USER_PARAMS: Record<string, string[]> = {
   CLIPTextEncode: ['text'],
   KSampler: ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise'],
   KSamplerAdvanced: ['noise_seed', 'steps', 'cfg', 'sampler_name', 'scheduler'],
   EmptyLatentImage: ['width', 'height', 'batch_size'],
-  LoadImage: ['image']
+  LoadImage: ['image'],
 }
 
 // Widget value order for graph-format nodes.
@@ -157,6 +159,14 @@ const GRAPH_WIDGET_PARAMS: Record<string, Array<string | null>> = {
   PreviewImage: [],
   ImageScale: ['upscale_method', 'width', 'height', 'crop'],
   ImageUpscaleWithModel: [],
+
+  // Modern / SD3 / Flux nodes (fallback; objectInfoMap takes priority when ComfyUI is running)
+  UNETLoader: ['unet_name', 'weight_dtype'],
+  CLIPLoader: ['clip_name', 'type', 'weight_dtype'],
+  EmptySD3LatentImage: ['width', 'height', 'batch_size'],
+  ModelSamplingAuraFlow: ['shift'],
+  ModelSamplingSD3: ['shift'],
+  ModelSamplingFlux: ['max_shift', 'base_shift'],
 
   // ControlNet
   ControlNetApply: ['strength'],
@@ -262,7 +272,8 @@ function graphToApi(graph: GraphFormat, objectInfoMap?: ObjectInfoMap): ComfyUIW
       GRAPH_WIDGET_PARAMS[node.type]
     if (widgetParams && node.widgets_values) {
       widgetParams.forEach((name, i) => {
-        if (name !== null && i < node.widgets_values!.length) {
+        // Don't overwrite a value already set by link wiring
+        if (name !== null && !(name in inputs) && i < node.widgets_values!.length) {
           inputs[name] = node.widgets_values![i]
         }
       })
@@ -283,27 +294,6 @@ export function analyzeWorkflow(workflow: ComfyUIWorkflow): WorkflowIO[] {
   for (const [nodeId, node] of Object.entries(workflow)) {
     const nodeTitle = (node._meta?.title as string) || node.class_type
 
-    // Detect inputs
-    if (INPUT_NODE_TYPES.has(node.class_type)) {
-      const relevantParams = USER_PARAMS[node.class_type] || Object.keys(node.inputs)
-
-      for (const paramName of relevantParams) {
-        const value = node.inputs[paramName]
-        // Skip link references (arrays like [nodeId, outputIndex])
-        if (Array.isArray(value)) continue
-
-        ios.push({
-          nodeId,
-          nodeType: node.class_type,
-          nodeTitle,
-          paramName,
-          paramType: inferParamType(paramName, value),
-          defaultValue: value,
-          isInput: true
-        })
-      }
-    }
-
     // Detect outputs
     if (OUTPUT_NODE_TYPES.has(node.class_type)) {
       ios.push({
@@ -314,6 +304,122 @@ export function analyzeWorkflow(workflow: ComfyUIWorkflow): WorkflowIO[] {
         paramType: 'image',
         isInput: false
       })
+      continue
+    }
+
+    // Detect inputs: include ALL non-output nodes that have widget (non-link) inputs.
+    // Use USER_PARAMS for known nodes to get a sensible ordered subset;
+    // fall back to all non-link inputs for unknown nodes.
+    const paramNames = USER_PARAMS[node.class_type] ?? Object.keys(node.inputs)
+
+    for (const paramName of paramNames) {
+      const value = node.inputs[paramName]
+      if (value === undefined) continue
+      // Skip link references (arrays like [nodeId, outputIndex])
+      if (Array.isArray(value)) continue
+
+      ios.push({
+        nodeId,
+        nodeType: node.class_type,
+        nodeTitle,
+        paramName,
+        paramType: inferParamType(paramName, value),
+        defaultValue: value,
+        isInput: true
+      })
+    }
+  }
+
+  return ios
+}
+
+const PRIMITIVE_OUTPUT_TYPES = new Set(['STRING', 'INT', 'FLOAT', 'BOOLEAN'])
+
+/**
+ * Detect custom "source" nodes in a graph-format workflow that feed primitive
+ * values (STRING/INT/FLOAT/BOOLEAN) into downstream nodes.  These are nodes
+ * like WAS "Text Multiline" that are not in INPUT_NODE_TYPES but still act as
+ * user-facing inputs.
+ *
+ * A node qualifies as a source node when:
+ *  - It has no linked inputs (all data comes from widget values)
+ *  - At least one of its outputs is connected to another node
+ *  - Its connected output types include at least one primitive type
+ *  - It has at least one widget value
+ *  - It is not already handled by analyzeWorkflow (not in INPUT/OUTPUT/UI sets)
+ */
+export function analyzeGraphSourceNodes(
+  workflow: ComfyUIWorkflow | GraphFormat,
+  objectInfoMap?: ObjectInfoMap
+): WorkflowIO[] {
+  if (!isGraphFormat(workflow)) return []
+
+  const graph = workflow
+
+  // nodeId → set of output types (from links array element [5])
+  const nodeOutputTypes = new Map<number, Set<string>>()
+  for (const link of graph.links ?? []) {
+    const fromNodeId = link[1]
+    const linkType = String(link[5] ?? '')
+    if (!nodeOutputTypes.has(fromNodeId)) nodeOutputTypes.set(fromNodeId, new Set())
+    nodeOutputTypes.get(fromNodeId)!.add(linkType)
+  }
+
+  const ios: WorkflowIO[] = []
+
+  for (const node of graph.nodes) {
+    // Skip node types already handled elsewhere
+    if (INPUT_NODE_TYPES.has(node.type)) continue
+    if (OUTPUT_NODE_TYPES.has(node.type)) continue
+    if (UI_ONLY_NODES.has(node.type)) continue
+
+    // Must have no linked inputs (pure widget-value source)
+    const hasLinkedInput = (node.inputs ?? []).some(inp => inp.link != null)
+    if (hasLinkedInput) continue
+
+    // Must have at least one widget value
+    if (!node.widgets_values?.length) continue
+
+    // Must output at least one primitive type
+    const outTypes = nodeOutputTypes.get(node.id) ?? new Set<string>()
+    const primitiveOuts = [...outTypes].filter(t => PRIMITIVE_OUTPUT_TYPES.has(t))
+    if (primitiveOuts.length === 0) continue
+
+    // Resolve widget param names: prefer live objectInfo, then fallback
+    const widgetParams = objectInfoMap
+      ? buildWidgetParamsFromInfo(node.type, objectInfoMap)
+      : null
+
+    if (widgetParams) {
+      widgetParams.forEach((name, i) => {
+        if (name !== null && i < node.widgets_values!.length) {
+          const value = node.widgets_values![i]
+          ios.push({
+            nodeId: String(node.id),
+            nodeType: node.type,
+            nodeTitle: node.type,
+            paramName: name,
+            paramType: inferParamType(name, value),
+            defaultValue: value,
+            isInput: true,
+          })
+        }
+      })
+    } else {
+      // Fallback: one entry per primitive output type, derive param name from type
+      for (const outType of primitiveOuts) {
+        const paramName = outType === 'STRING' ? 'text' : 'value'
+        const value = node.widgets_values[0]
+        ios.push({
+          nodeId: String(node.id),
+          nodeType: node.type,
+          nodeTitle: node.type,
+          paramName,
+          paramType: inferParamType(paramName, value),
+          defaultValue: value,
+          isInput: true,
+        })
+      }
     }
   }
 

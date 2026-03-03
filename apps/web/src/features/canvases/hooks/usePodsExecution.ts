@@ -4,8 +4,6 @@ import { useState, useCallback, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import type { ExecutionState } from "../types";
 import { graphToApiFormat, resolveWidgetValues } from "@/lib/comfyui-tool-mapper";
-import { localSaveRun } from "@/lib/local-db";
-import type { RunItem } from "@/features/canvases/api/getAllRunsList";
 import { usePodsStore } from "@/store/podsStore";
 import { isDesktop } from "@/lib/platform";
 
@@ -195,43 +193,6 @@ export const usePodsExecution = (podId: string | null) => {
           results: resultsMap,
           run_id: promptId,
         });
-
-        // Persist to local IndexedDB
-        const now = new Date().toISOString();
-        const run: RunItem = {
-          _id: promptId,
-          pod_id: "local",
-          cluster_id: "local",
-          team_id: "local",
-          project_id: "local",
-          workflow_id: `comfyui:${workflowFilename}`,
-          group_id: "STUDIO",
-          status: "completed",
-          trigger_type: "manual",
-          inputs: [],
-          canvas_id: null,
-          output_metadata: [],
-          outputs: Object.values(resultsMap).map((r: any) => ({
-            filename: r.filename,
-            url: r.download_url,
-            content_type: r.content_type,
-            label: r.label,
-          })),
-          error: null,
-          execution_time_ms: null,
-          started_at: now,
-          completed_at: now,
-          created_at: now,
-          updated_at: now,
-          container_id: "",
-          prompt_id: promptId,
-          progress: 100,
-          can_regenerate: true,
-          project_name: "ComfyUI",
-          workflow_name: workflowFilename.replace(/\.json$/i, ""),
-          regenerations: [],
-        };
-        localSaveRun(run).catch(console.error);
 
         wsRef.current?.close();
         wsRef.current = null;

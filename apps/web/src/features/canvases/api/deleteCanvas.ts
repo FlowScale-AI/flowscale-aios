@@ -1,8 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { localDeleteCanvas } from "@/lib/local-db";
 
 export const deleteCanvas = async (id: string): Promise<void> => {
-  return localDeleteCanvas(id);
+  const res = await fetch(`/api/canvases/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete canvas");
 };
 
 export const useDeleteCanvas = () => {

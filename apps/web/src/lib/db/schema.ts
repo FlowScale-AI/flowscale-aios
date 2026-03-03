@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core'
 
 export const tools = sqliteTable('tools', {
   id: text('id').primaryKey(),
@@ -33,7 +33,36 @@ export const executions = sqliteTable('executions', {
   completedAt: integer('completed_at'),
 })
 
+export const canvases = sqliteTable('canvases', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  viewportJson: text('viewport_json').notNull().default('{"x":0,"y":0,"zoom":1}'),
+  settingsJson: text('settings_json').notNull().default('{"grid_size":8,"snap_to_grid":false,"background":"#ffffff"}'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const canvasItems = sqliteTable('canvas_items', {
+  id: text('id').notNull(),
+  canvasId: text('canvas_id').notNull().references(() => canvases.id, { onDelete: 'cascade' }),
+  type: text('type').notNull(),
+  positionJson: text('position_json').notNull(),
+  zIndex: integer('z_index').notNull().default(0),
+  locked: integer('locked').notNull().default(0),
+  hidden: integer('hidden').notNull().default(0),
+  dataJson: text('data_json'),
+  propertiesJson: text('properties_json'),
+}, (t) => [primaryKey({ columns: [t.canvasId, t.id] })])
+
+export const toolConfigs = sqliteTable('tool_configs', {
+  workflowId: text('workflow_id').primaryKey(),
+  configJson: text('config_json').notNull(),
+})
+
 export type Tool = typeof tools.$inferSelect
 export type NewTool = typeof tools.$inferInsert
 export type Execution = typeof executions.$inferSelect
 export type NewExecution = typeof executions.$inferInsert
+export type Canvas = typeof canvases.$inferSelect
+export type CanvasItemRow = typeof canvasItems.$inferSelect

@@ -26,7 +26,7 @@ import { usePodsStore } from "@/store/podsStore";
 import ExecutionMenu from "./ExecutionMenu";
 import { Minus, Plus } from "phosphor-react";
 import { useCanvasTools } from "@/features/canvases/api/getCanvasTools";
-import { getToolConfig } from "@/lib/local-db";
+import type { ToolConfig } from "@/features/canvases/types";
 import type { ToolInputConfig } from "@/features/canvases/types";
 
 /** Rewrites a stored operator proxy URL to use the current operator host:port. */
@@ -233,9 +233,12 @@ export default function CanvasSurface({
   useEffect(() => {
     if (!activeToolId) { setToolConfig(null); return; }
     let cancelled = false;
-    getToolConfig(activeToolId).then((config) => {
-      if (!cancelled) setToolConfig(config?.inputs ?? null);
-    });
+    fetch(`/api/tool-configs/${encodeURIComponent(activeToolId)}`)
+      .then((r) => (r.status === 204 ? null : r.json()))
+      .then((config: ToolConfig | null) => {
+        if (!cancelled) setToolConfig(config?.inputs ?? null);
+      })
+      .catch(() => { /* no config yet */ });
     return () => { cancelled = true; };
   }, [activeToolId]);
 

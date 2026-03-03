@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { analyzeWorkflow, isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@flowscale/workflow'
+import { analyzeWorkflow, analyzeGraphSourceNodes, isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@flowscale/workflow'
 import { createHash } from 'crypto'
 
 export async function POST(req: NextRequest) {
@@ -33,9 +33,22 @@ export async function POST(req: NextRequest) {
     } catch { /* unreachable — proceed without */ }
   }
 
-  const schema = analyzeWorkflow(
-    normalizeWorkflow(parsed as Parameters<typeof normalizeWorkflow>[0], objectInfoMap)
+  const normalized = normalizeWorkflow(parsed as Parameters<typeof normalizeWorkflow>[0], objectInfoMap)
+  const schema = analyzeWorkflow(normalized)
+
+  // For graph-format workflows, also detect custom primitive-output source nodes
+  // (e.g. WAS "Text Multiline") that analyzeWorkflow can't see in API format.
+  const sourceNodeIOs = analyzeGraphSourceNodes(
+    parsed as Parameters<typeof analyzeGraphSourceNodes>[0],
+    objectInfoMap
   )
+  // Merge — deduplicate by nodeId+paramName
+  for (const io of sourceNodeIOs) {
+    if (!schema.some(s => s.nodeId === io.nodeId && s.paramName === io.paramName)) {
+      schema.push(io)
+    }
+  }
+
   const hash = createHash('sha256').update(workflowJson).digest('hex')
 
   return NextResponse.json({ schema, hash })

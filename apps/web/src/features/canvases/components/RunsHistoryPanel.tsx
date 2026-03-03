@@ -148,6 +148,15 @@ export default function RunsHistoryPanel({
     return () => container.removeEventListener("scroll", handleScroll);
   }, [handleScroll]);
 
+  // Stop wheel events from bubbling to the canvas native listener
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const stop = (e: WheelEvent) => e.stopPropagation();
+    container.addEventListener("wheel", stop, { passive: false });
+    return () => container.removeEventListener("wheel", stop);
+  }, []);
+
   const getOutputType = (
     output: RunOutput,
   ): "image" | "video" | "text" | "audio" | "model3d" => {

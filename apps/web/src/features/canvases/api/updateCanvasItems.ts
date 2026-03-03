@@ -1,16 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
-import { axios } from "@/lib/axios";
-import { CanvasItem } from "../types";
-import { isDesktop } from "@/lib/platform";
-import { localUpdateCanvasItems } from "@/lib/local-db";
+import type { CanvasItem } from "../types";
 
-export const updateCanvasItems = async (
-  canvasId: string,
-  items: CanvasItem[],
-): Promise<void> => {
-  if (isDesktop()) return localUpdateCanvasItems(canvasId, items);
-
-  await axios.patch(`/v1/canvas/${canvasId}/items`, { items });
+export const updateCanvasItems = async (canvasId: string, items: CanvasItem[]): Promise<void> => {
+  const res = await fetch(`/api/canvases/${canvasId}/items`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!res.ok) throw new Error("Failed to update canvas items");
 };
 
 export const useUpdateCanvasItems = (canvasId: string) => {
