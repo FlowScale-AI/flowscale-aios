@@ -1,0 +1,47 @@
+appId: ai.flowscale.eios
+productName: FlowScale EIOS
+copyright: Copyright © 2024 FlowScale
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+
+# The Next.js standalone server is bundled into the app's Resources directory.
+# main.ts reads it from: process.resourcesPath/apps/web/.next/standalone/server.js
+extraResources:
+  - from: ../web/.next/standalone
+    to: apps/web/.next/standalone
+    filter:
+      - "**/*"
+      - "!**/*.map"
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.developer-tools
+
+dmg:
+  writeUpdateInfo: false
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Development
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
