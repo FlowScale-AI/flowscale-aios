@@ -111,27 +111,14 @@ export default function ExecutionMenu({
           >
             <div className="bg-[#111] border border-white/10 rounded-2xl p-4 shadow-2xl backdrop-blur-sm min-w-[320px] max-w-md">
               <div className="space-y-3">
-                {/* Progress Header */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <LottieSpinner size={16} />
-                    <span className="text-sm text-white font-medium">
-                      {executionState.status === "submitting"
-                        ? "Submitting..."
-                        : "Generating..."}
-                    </span>
-                  </div>
-                  <span className="text-xs text-zinc-500">
-                    {executionState.progress}%
+                {/* Status */}
+                <div className="flex items-center gap-2">
+                  <LottieSpinner size={16} />
+                  <span className="text-sm text-white font-medium">
+                    {executionState.status === "submitting"
+                      ? "Submitting..."
+                      : "Generating..."}
                   </span>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
-                  <div
-                    className="bg-emerald-500 h-full transition-all duration-300 rounded-full"
-                    style={{ width: `${executionState.progress}%` }}
-                  />
                 </div>
 
                 {/* Logs */}
