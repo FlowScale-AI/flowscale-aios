@@ -98,10 +98,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if (!queueRes.ok) {
     let detail = ''
-    try { detail = await queueRes.text() } catch { /* ignore */ }
-    await db.update(executions).set({ status: 'error', errorMessage: detail || 'Failed to queue prompt', completedAt: Date.now() })
+    let nodeErrors: Record<string, { errors: { details: string }[]; class_type: string }> | undefined
+    try {
+      const body = await queueRes.json()
+      detail = body?.error?.message ?? JSON.stringify(body)
+      nodeErrors = body?.node_errors
+    } catch {
+      try { detail = await queueRes.text() } catch { /* ignore */ }
+    }
+
+    const errorMessage = nodeErrors
+      ? Object.entries(nodeErrors)
+          .flatMap(([, n]) => n.errors.map((e) => `[${n.class_type}] ${e.details}`))
+          .join('\n')
+      : detail || 'Failed to queue prompt'
+
+    await db.update(executions).set({ status: 'error', errorMessage, completedAt: Date.now() })
       .where(eq(executions.id, executionId))
-    return NextResponse.json({ error: `Failed to queue ComfyUI prompt: ${detail}` }, { status: 502 })
+    return NextResponse.json({ error: errorMessage, nodeErrors }, { status: 502 })
   }
 
   const { prompt_id: promptId } = (await queueRes.json()) as { prompt_id: string }

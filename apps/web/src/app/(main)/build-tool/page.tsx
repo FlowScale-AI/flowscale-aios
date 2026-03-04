@@ -929,14 +929,14 @@ function StepTest({
   const [progress, setProgress] = useState<number | null>(null)
   const [outputs, setOutputs] = useState<{ filename: string }[]>([])
   const [execMeta, setExecMeta] = useState<{ seed: number; elapsed: string } | null>(null)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<string[]>([])
   const [logsOpen, setLogsOpen] = useState(false)
 
   const handleRun = async () => {
     setRunning(true)
     setProgress(0)
     setOutputs([])
-    setError('')
+    setError([])
     setExecMeta(null)
     const startTime = Date.now()
 
@@ -948,7 +948,10 @@ function StepTest({
       })
       if (!res.ok) {
         const err = await res.json()
-        setError(err.error ?? 'Run failed')
+        const lines: string[] = err.error
+          ? String(err.error).split('\n').filter(Boolean)
+          : ['Run failed']
+        setError(lines)
         setRunning(false)
         return
       }
@@ -1005,14 +1008,14 @@ function StepTest({
       setTimeout(() => {
         clearInterval(pollInterval)
         if (running) {
-          setError('Timed out waiting for ComfyUI')
+          setError(['Timed out waiting for ComfyUI'])
           setRunning(false)
           setProgress(null)
         }
       }, 300_000)
 
     } catch {
-      setError('Failed to start execution')
+      setError(['Failed to start execution'])
       setRunning(false)
     }
   }
@@ -1089,10 +1092,15 @@ function StepTest({
         )}
       </div>
 
-      {error && (
-        <div className="flex items-center gap-2 text-red-400 text-sm">
-          <Warning size={14} weight="fill" />
-          {error}
+      {error.length > 0 && (
+        <div className="flex flex-col gap-1 bg-red-950/20 border border-red-900/30 rounded-xl px-4 py-3">
+          {error.map((line, i) => (
+            <div key={i} className="flex items-start gap-2 text-red-400 text-sm font-mono">
+              {i === 0 && <Warning size={14} weight="fill" className="shrink-0 mt-0.5" />}
+              {i > 0 && <span className="w-[14px] shrink-0" />}
+              <span>{line}</span>
+            </div>
+          ))}
         </div>
       )}
 

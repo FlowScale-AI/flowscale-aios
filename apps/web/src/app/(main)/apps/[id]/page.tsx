@@ -21,6 +21,7 @@ import {
 } from 'phosphor-react'
 import Link from 'next/link'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
+import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 
 interface WorkflowIO {
   nodeId: string
@@ -285,6 +286,71 @@ function CurlModal({
             )}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function BottomTabs({
+  tool,
+  executions,
+  execLoading,
+  onRestore,
+}: {
+  tool: Tool
+  executions: Execution[]
+  execLoading: boolean
+  onRestore: (inputs: Record<string, unknown>) => void
+}) {
+  const [tab, setTab] = useState<'history' | 'logs'>('history')
+
+  return (
+    <div className="h-64 flex flex-col border-t border-white/5">
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 px-4 pt-2 shrink-0">
+        {(['history', 'logs'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={[
+              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors capitalize',
+              tab === t ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-zinc-300',
+            ].join(' ')}
+          >
+            {t === 'history' ? 'Run History' : 'Logs'}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-hidden px-4 pb-4 pt-2">
+        {tab === 'history' && (
+          <div className="h-full overflow-y-auto">
+            {execLoading && (
+              <div className="flex items-center gap-2 text-zinc-600 text-xs">
+                <LottieSpinner size={12} />
+                Loading…
+              </div>
+            )}
+            {!execLoading && executions.length === 0 && (
+              <p className="text-xs text-zinc-600">No runs yet.</p>
+            )}
+            {!execLoading && executions.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {executions.map((exec) => (
+                  <ExecutionHistoryItem key={exec.id} exec={exec} onRestore={onRestore} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'logs' && tool.comfyPort && (
+          <ComfyLogsPanel port={tool.comfyPort} />
+        )}
+        {tab === 'logs' && !tool.comfyPort && (
+          <p className="text-xs text-zinc-600 pt-2">No ComfyUI instance configured.</p>
+        )}
       </div>
     </div>
   )
@@ -598,32 +664,13 @@ export default function ToolPage() {
                 )}
               </div>
 
-              {/* Run history */}
-              <div className="h-64 overflow-y-auto px-6 py-4">
-                <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
-                  Run History
-                </h2>
-                {execLoading && (
-                  <div className="flex items-center gap-2 text-zinc-600 text-xs">
-                    <LottieSpinner size={12} />
-                    Loading…
-                  </div>
-                )}
-                {!execLoading && executions.length === 0 && (
-                  <p className="text-xs text-zinc-600">No runs yet.</p>
-                )}
-                {!execLoading && executions.length > 0 && (
-                  <div className="flex flex-col gap-2">
-                    {executions.map((exec) => (
-                      <ExecutionHistoryItem
-                        key={exec.id}
-                        exec={exec}
-                        onRestore={handleRestore}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* Run history / Logs tabs */}
+              <BottomTabs
+                tool={tool}
+                executions={executions}
+                execLoading={execLoading}
+                onRestore={handleRestore}
+              />
             </div>
           </Panel>
         </PanelGroup>
