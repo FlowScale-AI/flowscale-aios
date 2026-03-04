@@ -110,9 +110,11 @@ export default function InputsPanel({
   // the schema is already the user's selected subset from the build step.
   const visibleInputs = useMemo(() => {
     if (!activeTool) return [];
-    if (!savedConfig) return activeTool.inputs;
-    return activeTool.inputs.filter(
-      (input) => savedConfig[input.parameter_name]?.visible,
+    const base = savedConfig
+      ? activeTool.inputs.filter((input) => savedConfig[input.parameter_name]?.visible)
+      : activeTool.inputs;
+    return base.filter(
+      (f) => !(f.parameter_name.split("::").pop() === "label" && f.category?.startsWith("FS")),
     );
   }, [activeTool, savedConfig]);
 

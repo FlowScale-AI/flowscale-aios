@@ -60,7 +60,7 @@ function mapEiosTool(row: EiosToolRow): CanvasTool {
     outputSchema.length > 0
       ? outputSchema.map((s) => ({
           label: s.nodeTitle || s.paramName,
-          demo_type: "image",
+          demo_type: mapParamTypeToDemoType(s.paramType),
           parameter_name: `${s.nodeId}::${s.paramName}`,
           category: s.nodeType,
         }))
