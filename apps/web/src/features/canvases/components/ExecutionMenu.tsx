@@ -28,7 +28,6 @@ interface ExecutionMenuProps {
   onResultDragStart: (filename: string, result: any) => void;
   onReset: () => void;
   readOnly?: boolean;
-  canvasId?: string;
 }
 
 export default function ExecutionMenu({
@@ -40,18 +39,23 @@ export default function ExecutionMenu({
   onResultDragStart,
   onReset,
   readOnly = false,
-  canvasId,
 }: ExecutionMenuProps) {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [shareCopied, setShareCopied] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
 
-  const comfyPort = typeof window !== "undefined"
-    ? (() => {
-        const url = localStorage.getItem("flowscale_comfyui_url") || "http://localhost:8188";
-        try { return Number(new URL(url).port || 8188); } catch { return 8188; }
-      })()
-    : 8188;
+  const comfyPort =
+    typeof window !== "undefined"
+      ? (() => {
+          const url =
+            localStorage.getItem("flowscale_comfyui_url") ||
+            "http://localhost:8188";
+          try {
+            return Number(new URL(url).port || 8188);
+          } catch {
+            return 8188;
+          }
+        })()
+      : 8188;
 
   // Accumulated results from all generations
   const [accumulatedResults, setAccumulatedResults] = useState<
@@ -85,22 +89,6 @@ export default function ExecutionMenu({
     setAccumulatedResults({});
     onReset();
   }, [onReset]);
-
-  // Handle sharing canvas URL — enables sharing in the DB then copies link
-  const handleShare = useCallback(async () => {
-    if (!canvasId) return;
-    await fetch(`/api/canvases/${canvasId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ is_shared: true }),
-    });
-    const url = new URL(window.location.origin + `/canvas/${canvasId}`);
-    url.searchParams.set("shared", "true");
-    navigator.clipboard.writeText(url.toString()).then(() => {
-      setShareCopied(true);
-      setTimeout(() => setShareCopied(false), 2000);
-    });
-  }, [canvasId]);
 
   const isExecuting =
     executionState.status === "submitting" ||
@@ -231,7 +219,10 @@ export default function ExecutionMenu({
               {/* History Button */}
               <Tooltip content="Generation History" side="top">
                 <button
-                  onClick={() => { setIsHistoryOpen(true); setIsLogsOpen(false); }}
+                  onClick={() => {
+                    setIsHistoryOpen(true);
+                    setIsLogsOpen(false);
+                  }}
                   className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
                 >
                   <Icon
@@ -245,43 +236,27 @@ export default function ExecutionMenu({
             </>
           )}
 
-          {/* Share Button */}
-          {canvasId && (
-            <Tooltip
-              content={shareCopied ? "Link copied!" : "Copy share link"}
-              side="top"
-            >
-              <button
-                onClick={handleShare}
-                className={`p-1 rounded-full transition-colors ${
-                  shareCopied
-                    ? "text-emerald-400"
-                    : "text-zinc-400 hover:text-white hover:bg-white/10"
-                }`}
-              >
-                <Icon
-                  icon={
-                    shareCopied ? "solar:check-circle-bold" : "solar:share-bold"
-                  }
-                  width="18"
-                  className="pointer-events-none"
-                />
-              </button>
-            </Tooltip>
-          )}
-
-          {/* Only show divider when there's content to the left of the Logs button */}
-          {(!readOnly || canvasId) && <div className="w-px h-5 bg-white/10" />}
-
           {/* Logs Button */}
-          <Tooltip content="ComfyUI Logs" side="top">
-            <button
-              onClick={() => { setIsLogsOpen(true); setIsHistoryOpen(false); }}
-              className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
-            >
-              <Icon icon="solar:monitor-smartphone-bold" width="18" className="pointer-events-none" />
-            </button>
-          </Tooltip>
+          {!readOnly && (
+            <>
+              <div className="w-px h-5 bg-white/10" />
+              <Tooltip content="ComfyUI Logs" side="top">
+                <button
+                  onClick={() => {
+                    setIsLogsOpen(true);
+                    setIsHistoryOpen(false);
+                  }}
+                  className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
+                >
+                  <Icon
+                    icon="solar:monitor-smartphone-bold"
+                    width="18"
+                    className="pointer-events-none"
+                  />
+                </button>
+              </Tooltip>
+            </>
+          )}
         </div>
       </div>
 
@@ -296,12 +271,21 @@ export default function ExecutionMenu({
       {/* ComfyUI Logs Panel */}
       {isLogsOpen && (
         <div className="fixed top-0 right-0 h-full z-30 flex">
-          <div className="fixed inset-0 z-29" onClick={() => setIsLogsOpen(false)} />
+          <div
+            className="fixed inset-0 z-29"
+            onClick={() => setIsLogsOpen(false)}
+          />
           <div className="relative z-30 w-96 h-full bg-[#0a0a0a] border-l border-white/10 flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
               <div className="flex items-center gap-2">
-                <Icon icon="solar:monitor-smartphone-bold" width="18" className="text-zinc-400" />
-                <span className="text-sm font-medium text-white">ComfyUI Logs</span>
+                <Icon
+                  icon="solar:monitor-smartphone-bold"
+                  width="18"
+                  className="text-zinc-400"
+                />
+                <span className="text-sm font-medium text-white">
+                  ComfyUI Logs
+                </span>
               </div>
               <button
                 onClick={() => setIsLogsOpen(false)}

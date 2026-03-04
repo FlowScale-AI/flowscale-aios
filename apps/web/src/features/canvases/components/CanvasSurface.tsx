@@ -28,6 +28,7 @@ import { Minus, Plus } from "phosphor-react";
 import { useCanvasTools } from "@/features/canvases/api/getCanvasTools";
 import type { ToolConfig } from "@/features/canvases/types";
 import type { ToolInputConfig } from "@/features/canvases/types";
+import { Icon } from "@iconify/react";
 
 /** Rewrites a stored operator proxy URL to use the current operator host:port. */
 function rewriteOperatorUrl(
@@ -210,6 +211,7 @@ export default function CanvasSurface({
     filename: string;
     result: any;
   } | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
 
   // Operator URL for rewriting stored localhost URLs to current operator
   const storeOperatorUrl = usePodsStore((s) => s.operatorUrl);
@@ -260,6 +262,22 @@ export default function CanvasSurface({
 
   const params = useParams();
   const canvasId = params?.id as string;
+
+  const handleShare = useCallback(async () => {
+    if (!canvasId) return;
+    await fetch(`/api/canvases/${canvasId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_shared: true }),
+    });
+    const url = new URL(window.location.origin + `/canvas/${canvasId}`);
+    url.searchParams.set("shared", "true");
+    navigator.clipboard.writeText(url.toString()).then(() => {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    });
+  }, [canvasId]);
+
   const { data: canvas } = useGetCanvas(canvasId);
   const { mutate: saveItems } = useSaveCanvasItems(canvasId);
   const { mutate: updateItems, isPending: isUpdatePending } =
@@ -1563,26 +1581,52 @@ export default function CanvasSurface({
         })()}
 
       {/* Scale Indicator & Zoom Controls */}
-      <div className="absolute top-4 right-4 z-20 flex items-center gap-2 bg-black/60 backdrop-blur-md border border-white/5 rounded-full p-1 shadow-lg">
-        <Tooltip content="Zoom Out" side="bottom" delay={600}>
-          <button
-            onClick={zoomOut}
-            className="w-7 h-7 flex items-center justify-center rounded-full text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
+      <div className="absolute top-4 right-4 z-20 flex flex-col items-end gap-2">
+        <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md border border-white/5 rounded-full p-1 shadow-lg">
+          <Tooltip content="Zoom Out" side="bottom" delay={600}>
+            <button
+              onClick={zoomOut}
+              className="w-7 h-7 flex items-center justify-center rounded-full text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <Minus width={16} />
+            </button>
+          </Tooltip>
+          <span className="text-zinc-300 text-xs font-mono-custom w-10 text-center select-none">
+            {Math.round(view.scale * 100)}%
+          </span>
+          <Tooltip content="Zoom In" side="bottom" delay={600}>
+            <button
+              onClick={zoomIn}
+              className="w-7 h-7 flex items-center justify-center rounded-full text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <Plus width={16} />
+            </button>
+          </Tooltip>
+        </div>
+
+        {canvasId && (
+          <Tooltip
+            content={shareCopied ? "Link copied!" : "Copy share link"}
+            side="left"
           >
-            <Minus width={16} />
-          </button>
-        </Tooltip>
-        <span className="text-zinc-300 text-xs font-mono-custom w-10 text-center select-none">
-          {Math.round(view.scale * 100)}%
-        </span>
-        <Tooltip content="Zoom In" side="bottom" delay={600}>
-          <button
-            onClick={zoomIn}
-            className="w-7 h-7 flex items-center justify-center rounded-full text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
-          >
-            <Plus width={16} />
-          </button>
-        </Tooltip>
+            <button
+              onClick={handleShare}
+              className={`w-9 h-9 flex items-center justify-center rounded-full bg-black/60 backdrop-blur-md border border-white/5 shadow-lg transition-colors ${
+                shareCopied
+                  ? "text-emerald-400"
+                  : "text-zinc-400 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              <Icon
+                icon={
+                  shareCopied ? "solar:check-circle-bold" : "solar:share-bold"
+                }
+                width="18"
+                className="pointer-events-none"
+              />
+            </button>
+          </Tooltip>
+        )}
       </div>
 
       {/* Context Menu */}
@@ -1692,7 +1736,6 @@ export default function CanvasSurface({
         onResultDragStart={handleResultDragStart}
         onReset={reset}
         readOnly={readOnly}
-        canvasId={canvasId}
       />
 
       <ExportModal
