@@ -4,7 +4,8 @@ const PUBLIC_PATHS = ["/login", "/register", "/setup", "/api/auth/"];
 
 // Regex to match /canvas/<uuid> pages and their API data routes
 const SHARED_CANVAS_PAGE = /^\/canvas\/[\w-]+$/;
-const SHARED_CANVAS_API = /^\/api\/canvases\/[\w-]+(\/items)?$/;
+const SHARED_CANVAS_API =
+  /^\/api\/(canvases\/[\w-]+(\/items(\/[\w-]+)?)?|outputs\/.+)$/;
 
 export function middleware(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
@@ -16,10 +17,10 @@ export function middleware(request: NextRequest) {
   // Allow unauthenticated access to shared canvas pages & their data endpoints
   const isShared = searchParams.get("shared") === "true";
   if (isShared && SHARED_CANVAS_PAGE.test(pathname)) {
-    // Set a header so the layout can detect shared mode and skip auth redirect
-    const response = NextResponse.next();
-    response.headers.set("x-shared-canvas", "true");
-    return response;
+    // Forward as a request header so the server-component layout can detect it
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-shared-canvas", "true");
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
   if (isShared && SHARED_CANVAS_API.test(pathname)) {
     return NextResponse.next();

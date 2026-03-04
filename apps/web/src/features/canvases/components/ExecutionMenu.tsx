@@ -86,9 +86,14 @@ export default function ExecutionMenu({
     onReset();
   }, [onReset]);
 
-  // Handle sharing canvas URL
-  const handleShare = useCallback(() => {
+  // Handle sharing canvas URL — enables sharing in the DB then copies link
+  const handleShare = useCallback(async () => {
     if (!canvasId) return;
+    await fetch(`/api/canvases/${canvasId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_shared: true }),
+    });
     const url = new URL(window.location.origin + `/canvas/${canvasId}`);
     url.searchParams.set("shared", "true");
     navigator.clipboard.writeText(url.toString()).then(() => {
@@ -265,7 +270,8 @@ export default function ExecutionMenu({
             </Tooltip>
           )}
 
-          <div className="w-px h-5 bg-white/10" />
+          {/* Only show divider when there's content to the left of the Logs button */}
+          {(!readOnly || canvasId) && <div className="w-px h-5 bg-white/10" />}
 
           {/* Logs Button */}
           <Tooltip content="ComfyUI Logs" side="top">

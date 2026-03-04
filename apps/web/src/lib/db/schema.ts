@@ -39,6 +39,7 @@ export const canvases = sqliteTable('canvases', {
   description: text('description').notNull().default(''),
   viewportJson: text('viewport_json').notNull().default('{"x":0,"y":0,"zoom":1}'),
   settingsJson: text('settings_json').notNull().default('{"grid_size":8,"snap_to_grid":false,"background":"#ffffff"}'),
+  isShared: integer('is_shared').notNull().default(0),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 })

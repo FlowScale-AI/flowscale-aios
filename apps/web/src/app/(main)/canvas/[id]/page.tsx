@@ -1,26 +1,34 @@
-"use client";
+import { Suspense } from "react";
+import { notFound } from "next/navigation";
+import { getDb } from "@/lib/db";
+import { canvases } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import CanvasClientPage from "./CanvasClientPage";
 
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import StudioLayout from "@/features/canvases/components/StudioLayout";
+export default async function CanvasPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ shared?: string }>;
+}) {
+  const { id } = await params;
+  const { shared } = await searchParams;
+  const isSharedRequest = shared === "true";
 
-export default function CanvasPage() {
-  const searchParams = useSearchParams();
-  const isSharedLink = searchParams.get("shared") === "true";
-  const [readOnly, setReadOnly] = useState(isSharedLink);
+  if (isSharedRequest) {
+    // Validate that the canvas owner has enabled sharing
+    const db = getDb();
+    const [canvas] = await db
+      .select({ isShared: canvases.isShared })
+      .from(canvases)
+      .where(eq(canvases.id, id));
+    if (!canvas?.isShared) notFound();
+  }
 
-  // If accessed via shared link, check whether user is authenticated
-  useEffect(() => {
-    if (!isSharedLink) return;
-    fetch("/api/auth/me")
-      .then((res) => {
-        // Authenticated users get full access even on shared links
-        if (res.ok) setReadOnly(false);
-      })
-      .catch(() => {
-        // Not authenticated — stay in read-only mode
-      });
-  }, [isSharedLink]);
-
-  return <StudioLayout readOnly={readOnly} />;
+  return (
+    <Suspense>
+      <CanvasClientPage isSharedRequest={isSharedRequest} />
+    </Suspense>
+  );
 }
