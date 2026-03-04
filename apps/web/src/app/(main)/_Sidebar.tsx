@@ -10,6 +10,7 @@ import {
   Infinity as InfinityIcon,
   Users,
   SignOut,
+  Cpu,
 } from 'phosphor-react'
 import type { Role } from '@/lib/auth'
 
@@ -17,14 +18,15 @@ const ALL_NAV_ITEMS = [
   { href: '/apps', icon: AppWindow, label: 'Apps' },
   { href: '/build-tool', icon: Wrench, label: 'Build Tool' },
   { href: '/canvas', icon: Palette, label: 'Canvas' },
+  { href: '/comfyui', icon: Cpu, label: 'ComfyUI' },
   { href: '/users', icon: Users, label: 'Users' },
   { href: '/settings', icon: GearSix, label: 'Settings' },
 ]
 
 const ROLE_PATHS: Record<Role, string[]> = {
-  admin: ['/apps', '/build-tool', '/canvas', '/users', '/settings'],
-  pipeline_td: ['/apps', '/build-tool', '/canvas', '/users', '/settings'],
-  dev: ['/apps', '/build-tool', '/canvas', '/settings'],
+  admin: ['/apps', '/build-tool', '/canvas', '/comfyui', '/users', '/settings'],
+  pipeline_td: ['/apps', '/build-tool', '/canvas', '/comfyui', '/users', '/settings'],
+  dev: ['/apps', '/build-tool', '/canvas', '/comfyui', '/settings'],
   artist: ['/apps', '/canvas'],
 }
 

@@ -19,6 +19,7 @@ import {
   X,
 } from 'phosphor-react'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
+import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 
 interface WorkflowIO {
   nodeId: string
@@ -929,6 +930,7 @@ function StepTest({
   const [outputs, setOutputs] = useState<{ filename: string }[]>([])
   const [execMeta, setExecMeta] = useState<{ seed: number; elapsed: string } | null>(null)
   const [error, setError] = useState('')
+  const [logsOpen, setLogsOpen] = useState(false)
 
   const handleRun = async () => {
     setRunning(true)
@@ -1091,6 +1093,24 @@ function StepTest({
         <div className="flex items-center gap-2 text-red-400 text-sm">
           <Warning size={14} weight="fill" />
           {error}
+        </div>
+      )}
+
+      {/* ComfyUI logs */}
+      {tool.comfyPort && (
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => setLogsOpen((v) => !v)}
+            className="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors w-fit"
+          >
+            <span className={`transition-transform ${logsOpen ? 'rotate-90' : ''}`}>▶</span>
+            ComfyUI Logs
+          </button>
+          {logsOpen && (
+            <div className="h-48">
+              <ComfyLogsPanel port={tool.comfyPort} />
+            </div>
+          )}
         </div>
       )}
 
