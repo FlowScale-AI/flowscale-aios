@@ -116,7 +116,16 @@ export default function ResultsPill({
         </div>
       );
     }
-    // For text and other types, show icon
+    if (result.content_type === "text/plain") {
+      return (
+        <div className="w-full h-full flex items-center justify-center bg-zinc-800 p-1.5">
+          <p className="text-[8px] text-zinc-300 text-center leading-tight line-clamp-5 break-words">
+            {result.data}
+          </p>
+        </div>
+      );
+    }
+    // For other types, show icon
     return (
       <div className="w-full h-full flex items-center justify-center bg-zinc-800">
         <Icon

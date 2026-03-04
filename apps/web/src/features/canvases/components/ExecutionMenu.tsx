@@ -6,6 +6,8 @@ import ResultsPill from "./ResultsPill";
 import RunsHistoryPanel from "./RunsHistoryPanel";
 import { ExecutionState } from "../types";
 import { Tooltip, LottieSpinner } from "@/components/ui";
+import { ComfyLogsPanel } from "@/components/ComfyLogsPanel";
+import { X } from "phosphor-react";
 
 interface ResultItem {
   content_type: string;
@@ -42,6 +44,14 @@ export default function ExecutionMenu({
 }: ExecutionMenuProps) {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
+
+  const comfyPort = typeof window !== "undefined"
+    ? (() => {
+        const url = localStorage.getItem("flowscale_comfyui_url") || "http://localhost:8188";
+        try { return Number(new URL(url).port || 8188); } catch { return 8188; }
+      })()
+    : 8188;
 
   // Accumulated results from all generations
   const [accumulatedResults, setAccumulatedResults] = useState<
@@ -117,27 +127,14 @@ export default function ExecutionMenu({
           >
             <div className="bg-[#111] border border-white/10 rounded-2xl p-4 shadow-2xl backdrop-blur-sm min-w-[320px] max-w-md">
               <div className="space-y-3">
-                {/* Progress Header */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <LottieSpinner size={16} />
-                    <span className="text-sm text-white font-medium">
-                      {executionState.status === "submitting"
-                        ? "Submitting..."
-                        : "Generating..."}
-                    </span>
-                  </div>
-                  <span className="text-xs text-zinc-500">
-                    {executionState.progress}%
+                {/* Status */}
+                <div className="flex items-center gap-2">
+                  <LottieSpinner size={16} />
+                  <span className="text-sm text-white font-medium">
+                    {executionState.status === "submitting"
+                      ? "Submitting..."
+                      : "Generating..."}
                   </span>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
-                  <div
-                    className="bg-emerald-500 h-full transition-all duration-300 rounded-full"
-                    style={{ width: `${executionState.progress}%` }}
-                  />
                 </div>
 
                 {/* Logs */}
@@ -229,7 +226,7 @@ export default function ExecutionMenu({
               {/* History Button */}
               <Tooltip content="Generation History" side="top">
                 <button
-                  onClick={() => setIsHistoryOpen(true)}
+                  onClick={() => { setIsHistoryOpen(true); setIsLogsOpen(false); }}
                   className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
                 >
                   <Icon
@@ -267,6 +264,18 @@ export default function ExecutionMenu({
               </button>
             </Tooltip>
           )}
+
+          <div className="w-px h-5 bg-white/10" />
+
+          {/* Logs Button */}
+          <Tooltip content="ComfyUI Logs" side="top">
+            <button
+              onClick={() => { setIsLogsOpen(true); setIsHistoryOpen(false); }}
+              className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
+            >
+              <Icon icon="solar:monitor-smartphone-bold" width="18" className="pointer-events-none" />
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -277,6 +286,30 @@ export default function ExecutionMenu({
         projectId={projectId}
         onOutputDragStart={onResultDragStart}
       />
+
+      {/* ComfyUI Logs Panel */}
+      {isLogsOpen && (
+        <div className="fixed top-0 right-0 h-full z-30 flex">
+          <div className="fixed inset-0 z-29" onClick={() => setIsLogsOpen(false)} />
+          <div className="relative z-30 w-96 h-full bg-[#0a0a0a] border-l border-white/10 flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
+              <div className="flex items-center gap-2">
+                <Icon icon="solar:monitor-smartphone-bold" width="18" className="text-zinc-400" />
+                <span className="text-sm font-medium text-white">ComfyUI Logs</span>
+              </div>
+              <button
+                onClick={() => setIsLogsOpen(false)}
+                className="p-1 rounded-md hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden p-3">
+              <ComfyLogsPanel port={comfyPort} />
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
