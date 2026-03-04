@@ -25,6 +25,8 @@ interface ExecutionMenuProps {
   onStopGeneration: () => void;
   onResultDragStart: (filename: string, result: any) => void;
   onReset: () => void;
+  readOnly?: boolean;
+  canvasId?: string;
 }
 
 export default function ExecutionMenu({
@@ -35,8 +37,11 @@ export default function ExecutionMenu({
   onStopGeneration,
   onResultDragStart,
   onReset,
+  readOnly = false,
+  canvasId,
 }: ExecutionMenuProps) {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   // Accumulated results from all generations
   const [accumulatedResults, setAccumulatedResults] = useState<
@@ -71,6 +76,17 @@ export default function ExecutionMenu({
     onReset();
   }, [onReset]);
 
+  // Handle sharing canvas URL
+  const handleShare = useCallback(() => {
+    if (!canvasId) return;
+    const url = new URL(window.location.origin + `/canvas/${canvasId}`);
+    url.searchParams.set("shared", "true");
+    navigator.clipboard.writeText(url.toString()).then(() => {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    });
+  }, [canvasId]);
+
   const isExecuting =
     executionState.status === "submitting" ||
     executionState.status === "running";
@@ -78,7 +94,7 @@ export default function ExecutionMenu({
   return (
     <>
       {/* Results Pill - show accumulated results */}
-      {Object.keys(accumulatedResults).length > 0 && (
+      {!readOnly && Object.keys(accumulatedResults).length > 0 && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex flex-col items-center gap-3 z-20">
           <ResultsPill
             results={accumulatedResults}
@@ -173,47 +189,84 @@ export default function ExecutionMenu({
       {/* Control Button */}
       <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-20">
         <div className="flex items-center gap-2 bg-[#111] border border-white/10 rounded-full p-2 px-3 shadow-2xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 duration-200">
-          {executionState.status === "submitting" ||
-          executionState.status === "running" ? (
-            <button
-              onClick={onStopGeneration}
-              className="bg-red-600 hover:bg-red-500 text-white rounded-full px-4 py-1.5 text-xs font-medium flex items-center gap-2 transition-colors shadow-[0_0_20px_rgba(220,38,38,0.3)] hover:shadow-[0_0_25px_rgba(220,38,38,0.5)]"
-            >
-              <Icon icon="solar:stop-circle-bold" />
-              Stop Generation
-            </button>
-          ) : (
+          {!readOnly && (
+            <>
+              {executionState.status === "submitting" ||
+              executionState.status === "running" ? (
+                <button
+                  onClick={onStopGeneration}
+                  className="bg-red-600 hover:bg-red-500 text-white rounded-full px-4 py-1.5 text-xs font-medium flex items-center gap-2 transition-colors shadow-[0_0_20px_rgba(220,38,38,0.3)] hover:shadow-[0_0_25px_rgba(220,38,38,0.5)]"
+                >
+                  <Icon icon="solar:stop-circle-bold" />
+                  Stop Generation
+                </button>
+              ) : (
+                <Tooltip
+                  content={
+                    !activeToolId ? "Select a tool to enable" : "Run Generation"
+                  }
+                  side="top"
+                >
+                  <button
+                    onClick={onRunGeneration}
+                    disabled={!activeToolId}
+                    className={`rounded-full px-4 py-1.5 text-xs font-medium flex items-center gap-2 transition-colors ${
+                      activeToolId
+                        ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_25px_rgba(5,150,105,0.5)]"
+                        : "bg-zinc-700 text-zinc-500 cursor-not-allowed"
+                    }`}
+                  >
+                    <Icon
+                      icon="solar:play-circle-bold"
+                      className="pointer-events-none"
+                    />
+                    Run Generation
+                  </button>
+                </Tooltip>
+              )}
+              <div className="w-px h-5 bg-white/10" />
+
+              {/* History Button */}
+              <Tooltip content="Generation History" side="top">
+                <button
+                  onClick={() => setIsHistoryOpen(true)}
+                  className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
+                >
+                  <Icon
+                    icon="solar:clock-circle-bold"
+                    width="18"
+                    className="pointer-events-none"
+                  />
+                </button>
+              </Tooltip>
+              <div className="w-px h-5 bg-white/10" />
+            </>
+          )}
+
+          {/* Share Button */}
+          {canvasId && (
             <Tooltip
-              content={
-                !activeToolId ? "Select a tool to enable" : "Run Generation"
-              }
+              content={shareCopied ? "Link copied!" : "Copy share link"}
               side="top"
             >
               <button
-                onClick={onRunGeneration}
-                disabled={!activeToolId}
-                className={`rounded-full px-4 py-1.5 text-xs font-medium flex items-center gap-2 transition-colors ${
-                  activeToolId
-                    ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_25px_rgba(5,150,105,0.5)]"
-                    : "bg-zinc-700 text-zinc-500 cursor-not-allowed"
+                onClick={handleShare}
+                className={`p-1 rounded-full transition-colors ${
+                  shareCopied
+                    ? "text-emerald-400"
+                    : "text-zinc-400 hover:text-white hover:bg-white/10"
                 }`}
               >
-                <Icon icon="solar:play-circle-bold" className="pointer-events-none" />
-                Run Generation
+                <Icon
+                  icon={
+                    shareCopied ? "solar:check-circle-bold" : "solar:share-bold"
+                  }
+                  width="18"
+                  className="pointer-events-none"
+                />
               </button>
             </Tooltip>
           )}
-          <div className="w-px h-5 bg-white/10" />
-
-          {/* History Button — pointer-events-none on Icon so click fires on button, not SVG internals */}
-          <Tooltip content="Generation History" side="top">
-            <button
-              onClick={() => setIsHistoryOpen(true)}
-              className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
-            >
-              <Icon icon="solar:clock-circle-bold" width="18" className="pointer-events-none" />
-            </button>
-          </Tooltip>
         </div>
       </div>
 

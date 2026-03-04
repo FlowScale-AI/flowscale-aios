@@ -30,7 +30,10 @@ import type { ToolConfig } from "@/features/canvases/types";
 import type { ToolInputConfig } from "@/features/canvases/types";
 
 /** Rewrites a stored operator proxy URL to use the current operator host:port. */
-function rewriteOperatorUrl(url: string, currentOperatorUrl: string | null): string {
+function rewriteOperatorUrl(
+  url: string,
+  currentOperatorUrl: string | null,
+): string {
   if (!url || !currentOperatorUrl) return url;
   const match = url.match(/(\/api\/pods\/.+)$/);
   if (match) return `${currentOperatorUrl}${match[1]}`;
@@ -164,6 +167,7 @@ interface CanvasSurfaceProps {
   executionApiUrl?: string;
   projectId?: string;
   onToolInputChange?: (parameterName: string, value: any) => void;
+  readOnly?: boolean;
 }
 
 export default function CanvasSurface({
@@ -174,6 +178,7 @@ export default function CanvasSurface({
   executionApiUrl,
   projectId,
   onToolInputChange,
+  readOnly = false,
 }: CanvasSurfaceProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<ViewState>({ x: 0, y: 0, scale: 1 });
@@ -208,7 +213,8 @@ export default function CanvasSurface({
 
   // Operator URL for rewriting stored localhost URLs to current operator
   const storeOperatorUrl = usePodsStore((s) => s.operatorUrl);
-  const currentOperatorUrl = storeOperatorUrl ?? (isDesktop() ? "http://localhost:30000" : null);
+  const currentOperatorUrl =
+    storeOperatorUrl ?? (isDesktop() ? "http://localhost:30000" : null);
 
   // Tool Execution State – use pods execution in desktop mode
   const selectedPodId = usePodsStore((s) => s.selectedPodId);
@@ -221,25 +227,35 @@ export default function CanvasSurface({
   // In desktop mode: use pods execution if a pod is selected, else fall back to legacy ComfyUI execution
   const desktopExecution = selectedPodId ? podsExecution : comfyExecution;
   // EIOS tools (eios: prefix) always go through the API server regardless of desktop mode
-  const isEiosTool = activeToolId?.startsWith('eios:');
+  const isEiosTool = activeToolId?.startsWith("eios:");
   const { executionState, executeWorkflow, cancelWorkflow, reset } =
-    (isDesktop() && !isEiosTool) ? desktopExecution : cloudExecution;
+    isDesktop() && !isEiosTool ? desktopExecution : cloudExecution;
 
   // Tool config for "Send To" feature
   const { data: toolsData } = useCanvasTools();
-  const [toolConfig, setToolConfig] = useState<Record<string, ToolInputConfig> | null>(null);
+  const [toolConfig, setToolConfig] = useState<Record<
+    string,
+    ToolInputConfig
+  > | null>(null);
 
   // Load tool config when active tool changes
   useEffect(() => {
-    if (!activeToolId) { setToolConfig(null); return; }
+    if (!activeToolId) {
+      setToolConfig(null);
+      return;
+    }
     let cancelled = false;
     fetch(`/api/tool-configs/${encodeURIComponent(activeToolId)}`)
       .then((r) => (r.status === 204 ? null : r.json()))
       .then((config: ToolConfig | null) => {
         if (!cancelled) setToolConfig(config?.inputs ?? null);
       })
-      .catch(() => { /* no config yet */ });
-    return () => { cancelled = true; };
+      .catch(() => {
+        /* no config yet */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeToolId]);
 
   const params = useParams();
@@ -436,6 +452,7 @@ export default function CanvasSurface({
   const handleResizeStart = (e: React.MouseEvent, direction: string) => {
     e.stopPropagation();
     e.preventDefault();
+    if (readOnly) return;
     // Only allow resizing if exactly one object is selected
     if (selectedObjectIds.size !== 1) return;
 
@@ -458,6 +475,7 @@ export default function CanvasSurface({
   const handleRotateStart = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
+    if (readOnly) return;
     // Only allow rotating if exactly one object is selected
     if (selectedObjectIds.size !== 1) return;
 
@@ -495,6 +513,9 @@ export default function CanvasSurface({
       setIsPanning(true);
       return;
     }
+
+    // In read-only mode, only allow panning (above) — block all other interactions
+    if (readOnly) return;
 
     const currentTool = activeToolRef.current;
 
@@ -602,6 +623,7 @@ export default function CanvasSurface({
   const handleContextMenu = (e: React.MouseEvent, id?: string) => {
     e.preventDefault();
     e.stopPropagation();
+    if (readOnly) return;
 
     const rect = wrapperRef.current?.getBoundingClientRect();
     if (rect) {
@@ -615,6 +637,7 @@ export default function CanvasSurface({
   };
 
   const handleObjectMove = (id: string, newX: number, newY: number) => {
+    if (readOnly) return;
     setObjects((prev) => {
       // Find the delta for the primary moved object
       const movingObj = prev.find((o) => o.id === id);
@@ -646,6 +669,7 @@ export default function CanvasSurface({
   };
 
   const handleObjectUpdate = (id: string, updates: Partial<CanvasObject>) => {
+    if (readOnly) return;
     setObjects((prev) =>
       prev.map((obj) => (obj.id === id ? { ...obj, ...updates } : obj)),
     );
@@ -872,17 +896,32 @@ export default function CanvasSurface({
     }
 
     // Find the active tool
-    const activeTool = toolsData.tools.find((t) => t.workflow_id === activeToolId);
+    const activeTool = toolsData.tools.find(
+      (t) => t.workflow_id === activeToolId,
+    );
     if (!activeTool) return [];
 
     // Infer effective type from input metadata (same heuristic as InputsPanel)
-    const inferType = (name: string, label: string, category: string, demoType: string): string => {
+    const inferType = (
+      name: string,
+      label: string,
+      category: string,
+      demoType: string,
+    ): string => {
       if (["image", "video", "audio", "3d"].includes(demoType)) return demoType;
       const h = `${name} ${label} ${category}`.toLowerCase();
-      if (/\bimage\b|\.png|\.jpg|\.jpeg|\.webp|\bimg\b|\bphoto\b|\bpicture\b/.test(h)) return "image";
-      if (/\bvideo\b|\.mp4|\.mov|\.webm|\bclip\b|\banimation\b/.test(h)) return "video";
-      if (/\baudio\b|\.wav|\.mp3|\.flac|\bsound\b|\bmusic\b/.test(h)) return "audio";
-      if (/\b3d\b|\bmesh\b|\.glb|\.gltf|\.obj|\.fbx|\bmodel_?file\b/.test(h)) return "3d";
+      if (
+        /\bimage\b|\.png|\.jpg|\.jpeg|\.webp|\bimg\b|\bphoto\b|\bpicture\b/.test(
+          h,
+        )
+      )
+        return "image";
+      if (/\bvideo\b|\.mp4|\.mov|\.webm|\bclip\b|\banimation\b/.test(h))
+        return "video";
+      if (/\baudio\b|\.wav|\.mp3|\.flac|\bsound\b|\bmusic\b/.test(h))
+        return "audio";
+      if (/\b3d\b|\bmesh\b|\.glb|\.gltf|\.obj|\.fbx|\bmodel_?file\b/.test(h))
+        return "3d";
       return demoType;
     };
 
@@ -896,9 +935,17 @@ export default function CanvasSurface({
         if (cfg?.type) return cfg.type === mediaType;
         // ComfyUI file pickers (model selectors, image selectors) come back as
         // demo_type:"combo" — for those, always fall through to name-based inference
-        if (input.demo_type && input.demo_type !== "combo") return input.demo_type === mediaType;
+        if (input.demo_type && input.demo_type !== "combo")
+          return input.demo_type === mediaType;
         // Infer from parameter name / label / category
-        return inferType(input.parameter_name, input.label, input.category, input.demo_type) === mediaType;
+        return (
+          inferType(
+            input.parameter_name,
+            input.label,
+            input.category,
+            input.demo_type,
+          ) === mediaType
+        );
       })
       .map((input) => ({
         parameterName: input.parameter_name,
@@ -908,41 +955,44 @@ export default function CanvasSurface({
       }));
   }, [contextMenu?.objectId, activeToolId, toolsData, toolConfig, objects]);
 
-  const handleSendTo = useCallback(async (target: SendToTarget) => {
-    if (!contextMenu?.objectId) return;
-    const obj = objects.find((o) => o.id === contextMenu.objectId);
-    if (!obj?.content) return;
+  const handleSendTo = useCallback(
+    async (target: SendToTarget) => {
+      if (!contextMenu?.objectId) return;
+      const obj = objects.find((o) => o.id === contextMenu.objectId);
+      if (!obj?.content) return;
 
-    try {
-      const contentUrl = rewriteOperatorUrl(obj.content, currentOperatorUrl);
-      const response = await fetch(contentUrl);
-      const blob = await response.blob();
-
-      // Extract filename from URL
-      let filename = "file";
       try {
-        const url = new URL(contentUrl);
-        const filenameParam = url.searchParams.get("filename");
-        if (filenameParam) {
-          filename = filenameParam;
-        } else {
-          const pathParts = url.pathname.split("/").filter(Boolean);
-          if (pathParts.length > 0) {
-            filename = decodeURIComponent(pathParts[pathParts.length - 1]);
+        const contentUrl = rewriteOperatorUrl(obj.content, currentOperatorUrl);
+        const response = await fetch(contentUrl);
+        const blob = await response.blob();
+
+        // Extract filename from URL
+        let filename = "file";
+        try {
+          const url = new URL(contentUrl);
+          const filenameParam = url.searchParams.get("filename");
+          if (filenameParam) {
+            filename = filenameParam;
+          } else {
+            const pathParts = url.pathname.split("/").filter(Boolean);
+            if (pathParts.length > 0) {
+              filename = decodeURIComponent(pathParts[pathParts.length - 1]);
+            }
           }
+        } catch {
+          // URL parsing failed, use default
         }
-      } catch {
-        // URL parsing failed, use default
+
+        const file = new File([blob], filename, { type: blob.type });
+        onToolInputChange?.(target.parameterName, file);
+      } catch (err) {
+        console.error("Send To: failed to fetch content", err);
       }
 
-      const file = new File([blob], filename, { type: blob.type });
-      onToolInputChange?.(target.parameterName, file);
-    } catch (err) {
-      console.error("Send To: failed to fetch content", err);
-    }
-
-    setContextMenu(null);
-  }, [contextMenu?.objectId, objects, onToolInputChange]);
+      setContextMenu(null);
+    },
+    [contextMenu?.objectId, objects, onToolInputChange],
+  );
 
   // Tool Execution Handlers
   const handleRunGeneration = async () => {
@@ -976,6 +1026,7 @@ export default function CanvasSurface({
   };
 
   const handleResultDrop = (e: React.DragEvent) => {
+    if (readOnly) return;
     if (!draggedResult) return;
 
     const wrapper = wrapperRef.current;
@@ -1074,6 +1125,9 @@ export default function CanvasSurface({
       if (e.code === "Space" && !e.repeat) {
         setIsSpacePressed(true);
       }
+
+      // Block all editing shortcuts in read-only mode
+      if (readOnly) return;
 
       // Tool Switching
       if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
@@ -1425,12 +1479,12 @@ export default function CanvasSurface({
         handleContextMenu(e);
       }}
       onDragOver={(e) => {
-        if (draggedResult) {
+        if (!readOnly && draggedResult) {
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
         }
       }}
-      onDrop={handleResultDrop}
+      onDrop={readOnly ? undefined : handleResultDrop}
       data-canvas-surface="true"
     >
       {/* Texture/Grid Pattern */}
@@ -1445,10 +1499,13 @@ export default function CanvasSurface({
       ></div>
 
       {/* Toolbar */}
-      <CanvasToolbar activeTool={activeTool} onSelectTool={setActiveTool} />
+      {!readOnly && (
+        <CanvasToolbar activeTool={activeTool} onSelectTool={setActiveTool} />
+      )}
 
       {/* Floating Action Bar (Pill) */}
-      {selectedObjectIds.size === 1 &&
+      {!readOnly &&
+        selectedObjectIds.size === 1 &&
         (() => {
           const selectedId = Array.from(selectedObjectIds)[0];
           const obj = objects.find((o) => o.id === selectedId);
@@ -1529,7 +1586,7 @@ export default function CanvasSurface({
       </div>
 
       {/* Context Menu */}
-      {contextMenu && contextMenu.visible && (
+      {!readOnly && contextMenu && contextMenu.visible && (
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
@@ -1574,15 +1631,7 @@ export default function CanvasSurface({
               scale={view.scale}
               isSelected={selectedObjectIds.has(obj.id)}
               onSelect={(id) => {
-                // If shift key, toggle selection
-                // But DraggableObject.onSelect doesn't pass event.
-                // We might need to update DraggableObject signature or handle it here.
-                // For now, let's just select single unless shift key was handled in MouseDown?
-                // Actually MouseDown on object is handled in DraggableObject.
-                // We need to update DraggableObject to handle multi-select logic or pass event.
-                // Let's assume onSelect sets it as the "primary" or exclusive selection for now to match old behavior
-                // XOR adapt handleMouseDown in DraggableObject.
-                // For this step, I will just set it as single selection to keep it simple and working.
+                if (readOnly) return;
                 setSelectedObjectIds(new Set([id]));
               }}
               onMove={handleObjectMove}
@@ -1595,10 +1644,12 @@ export default function CanvasSurface({
               label={obj.label}
               onContextMenu={handleContextMenu}
               isFrozen={
-                activeTool !== "select" || interactionState.type !== "idle"
-              } // Freeze when drawing or transforming
-              isSpacePressed={isSpacePressed} // Pass space state for panning
-              forceBack={obj.type === "artboard"} // New prop to force background
+                readOnly ||
+                activeTool !== "select" ||
+                interactionState.type !== "idle"
+              } // Freeze in read-only mode, when drawing, or when transforming
+              isSpacePressed={isSpacePressed}
+              forceBack={obj.type === "artboard"}
             />
           ))}
 
@@ -1640,6 +1691,8 @@ export default function CanvasSurface({
         onStopGeneration={handleStopGeneration}
         onResultDragStart={handleResultDragStart}
         onReset={reset}
+        readOnly={readOnly}
+        canvasId={canvasId}
       />
 
       <ExportModal
