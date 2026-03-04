@@ -87,6 +87,73 @@ function BlurRevealImage({ src, alt }: { src: string; alt: string }) {
   )
 }
 
+function inferOutputKind(nodeType: string): 'image' | 'video' | 'audio' | 'model' | 'text' | 'file' {
+  if (['FSSaveImage', 'SaveImage', 'PreviewImage', 'SaveAnimatedWEBP', 'SaveAnimatedPNG'].includes(nodeType)) return 'image'
+  if (['FSSaveVideo', 'VHS_VideoCombine'].includes(nodeType)) return 'video'
+  if (['FSSaveAudio', 'SaveAudio', 'PreviewAudio'].includes(nodeType)) return 'audio'
+  if (['FSSave3D', 'FSHunyuan3DGenerate', 'Save3D', 'TripoSGSave', 'MeshSave'].includes(nodeType) || /Save.*3[Dd]|3[Dd].*Save|GLB|GLTF|Mesh/i.test(nodeType)) return 'model'
+  if (['FSSaveText', 'FSSaveInteger'].includes(nodeType)) return 'text'
+  return 'file'
+}
+
+function OutputLoadingPlaceholder({ kind }: { kind: 'image' | 'video' | 'audio' | 'model' | 'text' | 'file' }) {
+  if (kind === 'image') {
+    return (
+      <div className="aspect-square rounded-xl border border-white/5 bg-zinc-950 flex items-center justify-center overflow-hidden relative">
+        <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 to-zinc-950 animate-pulse" />
+        <LottieSpinner size={36} />
+      </div>
+    )
+  }
+  if (kind === 'video') {
+    return (
+      <div className="col-span-2 aspect-video rounded-xl border border-white/5 bg-zinc-950 flex flex-col items-center justify-center gap-2">
+        <Play size={32} weight="fill" className="text-zinc-700" />
+        <LottieSpinner size={24} />
+      </div>
+    )
+  }
+  if (kind === 'audio') {
+    return (
+      <div className="col-span-2 h-16 rounded-xl border border-white/5 bg-zinc-950 flex items-center justify-center gap-1 px-4">
+        {Array.from({ length: 20 }).map((_, i) => (
+          <div
+            key={i}
+            className="w-1 rounded-full bg-zinc-700 animate-pulse"
+            style={{ height: `${8 + Math.sin(i * 0.8) * 8}px`, animationDelay: `${i * 60}ms` }}
+          />
+        ))}
+      </div>
+    )
+  }
+  if (kind === 'model') {
+    return (
+      <div className="col-span-2 aspect-square rounded-xl border border-white/5 bg-zinc-950 flex flex-col items-center justify-center gap-3">
+        <div className="text-4xl opacity-30 animate-spin" style={{ animationDuration: '3s' }}>⬡</div>
+        <LottieSpinner size={24} />
+      </div>
+    )
+  }
+  if (kind === 'text') {
+    return (
+      <div className="col-span-2 rounded-xl border border-white/5 bg-zinc-950 px-4 py-4 flex flex-col gap-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div
+            key={i}
+            className="h-3 rounded bg-zinc-800 animate-pulse"
+            style={{ width: `${70 - i * 15}%`, animationDelay: `${i * 120}ms` }}
+          />
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div className="col-span-2 h-16 rounded-xl border border-white/5 bg-zinc-950 flex items-center justify-center">
+      <LottieSpinner size={28} />
+    </div>
+  )
+}
+
 let _mvLoaded = false, _mvLoading = false
 function loadMV(): Promise<void> {
   return new Promise((resolve) => {
@@ -489,9 +556,12 @@ export default function ToolPage() {
     refetchInterval: 5000,
   })
 
-  const schema: WorkflowIO[] = tool?.schemaJson
-    ? (JSON.parse(tool.schemaJson) as WorkflowIO[]).filter((f) => f.isInput)
-    : []
+  const allSchema: WorkflowIO[] = tool?.schemaJson ? JSON.parse(tool.schemaJson) : []
+  const schema: WorkflowIO[] = allSchema
+    .filter((f) => f.isInput)
+    .filter((f) => !(f.paramName === 'label' && f.nodeType.startsWith('FS')))
+  const expectedOutputKinds: Array<'image' | 'video' | 'audio' | 'model' | 'text' | 'file'> =
+    allSchema.filter((f) => !f.isInput).map((f) => inferOutputKind(f.nodeType))
 
   // Input state — keyed by nodeId__paramName
   const [inputs, setInputs] = useState<Record<string, unknown>>({})
@@ -561,7 +631,11 @@ export default function ToolPage() {
               for (const f of nodeOut.gifs ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
               for (const f of nodeOut.audio ?? []) items.push({ kind: 'audio', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
               for (const t of [...(nodeOut.text ?? []), ...(nodeOut.string ?? [])]) {
-                if (typeof t === 'string' && t.trim()) items.push({ kind: 'text', text: t })
+                if (typeof t === 'string' && t.trim()) {
+                  const k = inferKind(t)
+                  if (k !== 'file') items.push({ kind: k, filename: t, path: t })
+                  else items.push({ kind: 'text', text: t })
+                }
               }
             }
             setLatestOutputs(items)
@@ -741,8 +815,10 @@ export default function ToolPage() {
                 </h2>
 
                 {isRunning && latestOutputs.length === 0 && (
-                  <div className="w-full aspect-square max-w-sm rounded-xl border border-white/5 bg-zinc-950 flex items-center justify-center">
-                    <LottieSpinner size={36} />
+                  <div className="grid grid-cols-2 gap-3">
+                    {(expectedOutputKinds.length > 0 ? expectedOutputKinds : ['image' as const]).map((kind, i) => (
+                      <OutputLoadingPlaceholder key={i} kind={kind} />
+                    ))}
                   </div>
                 )}
 

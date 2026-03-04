@@ -94,12 +94,43 @@ const INPUT_NODE_TYPES = new Set([
 
 // Node types commonly used as outputs
 const OUTPUT_NODE_TYPES = new Set([
+  // ComfyUI built-ins — Image
   'SaveImage',
   'PreviewImage',
   'SaveAnimatedWEBP',
   'SaveAnimatedPNG',
-  'VHS_VideoCombine'
+  // ComfyUI built-ins — Video
+  'VHS_VideoCombine',
+  // ComfyUI built-ins — Audio
+  'SaveAudio',
+  'PreviewAudio',
+
+  // FlowScale nodes
+  'FSSaveImage',
+  'FSSaveVideo',
+  'FSSaveAudio',
+  'FSSaveText',
+  'FSSaveInteger',
+  'FSSave3D',
+  'FSHunyuan3DGenerate',
+  'UploadModelToPublicS3',
+  'UploadModelToPrivateS3',
+  'UploadImageToS3',
+  'UploadMediaToS3FromLink',
+  'UploadTextToS3',
+  'SaveModelToFlowscaleVolume',
+
+  // Other common 3D save nodes
+  'Save3D',
+  'TripoSGSave',
+  'MeshSave',
 ])
+
+// Returns true for any node whose class_type looks like a save/output node
+// (heuristic for custom nodes not in the static set above)
+function looksLikeOutputNode(classType: string): boolean {
+  return /Save3D|Save.*3[Dd]|3[Dd].*Save|SaveMesh|SaveGLB|SaveGLTF|SaveOBJ|SaveFBX/i.test(classType)
+}
 
 // For known node types: explicit ordered list of user-facing params to expose.
 // Unknown nodes fall back to Object.keys(node.inputs) — all non-link values.
@@ -110,6 +141,14 @@ const USER_PARAMS: Record<string, string[]> = {
   KSamplerAdvanced: ['noise_seed', 'steps', 'cfg', 'sampler_name', 'scheduler'],
   EmptyLatentImage: ['width', 'height', 'batch_size'],
   LoadImage: ['image'],
+  // FlowScale loader nodes — expose only the file/value input, not the display label
+  FSLoad3D: ['model_file'],
+  FSLoadImage: ['image'],
+  FSLoadVideo: ['video', 'skip_first_frames', 'select_every_nth'],
+  FSLoadAudio: ['audio'],
+  FSLoadText: ['default_value'],
+  FSLoadInteger: ['default_value'],
+  FSLoadLoRA: ['default_lora_name', 'lora_url'],
 }
 
 // Widget value order for graph-format nodes.
@@ -288,6 +327,14 @@ function graphToApi(graph: GraphFormat, objectInfoMap?: ObjectInfoMap): ComfyUIW
   return api
 }
 
+function inferOutputParamType(classType: string): 'image' | 'string' | 'select' | 'number' | 'boolean' {
+  if (['FSSaveText', 'FSSaveInteger'].includes(classType)) return 'string'
+  if (['FSSaveAudio', 'SaveAudio', 'PreviewAudio'].includes(classType)) return 'string'
+  if (['FSSave3D', 'FSHunyuan3DGenerate', 'Save3D', 'TripoSGSave', 'MeshSave'].includes(classType) || /Save.*3[Dd]|3[Dd].*Save/i.test(classType)) return 'string'
+  if (['FSSaveVideo', 'VHS_VideoCombine'].includes(classType)) return 'string'
+  return 'image'
+}
+
 export function analyzeWorkflow(workflow: ComfyUIWorkflow): WorkflowIO[] {
   const ios: WorkflowIO[] = []
 
@@ -295,13 +342,13 @@ export function analyzeWorkflow(workflow: ComfyUIWorkflow): WorkflowIO[] {
     const nodeTitle = (node._meta?.title as string) || node.class_type
 
     // Detect outputs
-    if (OUTPUT_NODE_TYPES.has(node.class_type)) {
+    if (OUTPUT_NODE_TYPES.has(node.class_type) || looksLikeOutputNode(node.class_type)) {
       ios.push({
         nodeId,
         nodeType: node.class_type,
         nodeTitle,
-        paramName: 'images',
-        paramType: 'image',
+        paramName: 'output',
+        paramType: inferOutputParamType(node.class_type),
         isInput: false
       })
       continue
