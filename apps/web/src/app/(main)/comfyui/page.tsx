@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   ArrowClockwise,
-  Cpu,
   CheckCircle,
   Warning,
   X,
@@ -50,9 +49,8 @@ function fmt(bytes?: number) {
 type Tab = 'overview' | 'models' | 'custom-nodes' | 'logs'
 
 export default function ComfyUIPage() {
-  const [instances, setInstances] = useState<ComfyInstance[]>([])
+  const [instance, setInstance] = useState<ComfyInstance | null>(null)
   const [scanning, setScanning] = useState(false)
-  const [selected, setSelected] = useState<ComfyInstance | null>(null)
   const [tab, setTab] = useState<Tab>('overview')
 
   const scan = useCallback(async () => {
@@ -60,111 +58,83 @@ export default function ComfyUIPage() {
     try {
       const res = await fetch('/api/comfy/scan')
       const data: ComfyInstance[] = await res.json()
-      setInstances(data)
-      if (data.length > 0 && !selected) setSelected(data[0])
+      setInstance(data.length > 0 ? data[0] : null)
     } finally {
       setScanning(false)
     }
-  }, [selected])
+  }, [])
 
   useEffect(() => { scan() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const stats = selected?.systemStats as SysInfo | null
+  const stats = instance?.systemStats as SysInfo | null
 
-  return (
-    <div className="flex h-full overflow-hidden">
-      {/* Left: instance list */}
-      <div className="w-56 shrink-0 border-r border-white/5 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-4 border-b border-white/5">
-          <span className="text-sm font-medium text-white">Instances</span>
-          <button
-            onClick={scan}
-            disabled={scanning}
-            className="text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-40"
-            title="Refresh"
-          >
-            <ArrowClockwise size={15} className={scanning ? 'animate-spin' : ''} />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {instances.length === 0 && !scanning && (
-            <div className="flex flex-col items-center gap-2 pt-8 px-3 text-center">
-              <Warning size={28} className="text-zinc-600" />
-              <p className="text-xs text-zinc-500">No running ComfyUI instances found</p>
-            </div>
-          )}
-          {instances.map((inst) => {
-            const s = inst.systemStats as SysInfo | null
-            const version = s?.system?.comfyui_version ?? '—'
-            const isSelected = selected?.port === inst.port
-            return (
-              <button
-                key={inst.port}
-                onClick={() => setSelected(inst)}
-                className={[
-                  'w-full text-left px-3 py-2.5 rounded-lg transition-colors',
-                  isSelected
-                    ? 'bg-white/10 text-white'
-                    : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-200',
-                ].join(' ')}
-              >
-                <div className="flex items-center gap-2">
-                  <div className="size-1.5 rounded-full bg-emerald-400 shrink-0" />
-                  <span className="text-sm font-medium">:{inst.port}</span>
-                </div>
-                <div className="text-[11px] text-zinc-500 mt-0.5 pl-3.5">{version}</div>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Right: detail */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {!selected ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-zinc-600">
-            <Cpu size={40} />
-            <p className="text-sm">Select an instance</p>
-          </div>
+  if (!instance) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-zinc-600">
+        {scanning ? (
+          <>
+            <ArrowClockwise size={40} className="animate-spin" />
+            <p className="text-sm">Scanning for ComfyUI…</p>
+          </>
         ) : (
           <>
-            {/* Header */}
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 shrink-0">
-              <div className="flex items-center gap-2">
-                <CheckCircle size={16} weight="fill" className="text-emerald-400" />
-                <span className="text-white font-medium">127.0.0.1:{selected.port}</span>
-              </div>
-              <span className="text-zinc-600 text-sm">
-                {(selected.systemStats as SysInfo)?.system?.comfyui_version ?? ''}
-              </span>
-            </div>
-
-            {/* Tabs */}
-            <div className="flex gap-1 px-6 pt-3 shrink-0">
-              {(['overview', 'models', 'custom-nodes', 'logs'] as Tab[]).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  className={[
-                    'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize',
-                    tab === t ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-zinc-300',
-                  ].join(' ')}
-                >
-                  {t === 'custom-nodes' ? 'Custom Nodes' : t.charAt(0).toUpperCase() + t.slice(1)}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab content */}
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              {tab === 'overview' && <OverviewTab stats={stats} />}
-              {tab === 'models' && <ModelsTab port={selected.port} />}
-              {tab === 'custom-nodes' && <CustomNodesTab port={selected.port} />}
-              {tab === 'logs' && <LogsTab port={selected.port} />}
-            </div>
+            <Warning size={40} />
+            <p className="text-sm">No running ComfyUI instance found</p>
+            <button
+              onClick={scan}
+              className="mt-1 px-4 py-2 text-xs text-zinc-400 hover:text-zinc-200 border border-zinc-800 hover:border-zinc-600 rounded-lg transition-colors"
+            >
+              Refresh
+            </button>
           </>
         )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 shrink-0">
+        <div className="flex items-center gap-2">
+          <CheckCircle size={16} weight="fill" className="text-emerald-400" />
+          <span className="text-white font-medium">127.0.0.1:{instance.port}</span>
+        </div>
+        <span className="text-zinc-600 text-sm">
+          {stats?.system?.comfyui_version ?? ''}
+        </span>
+        <button
+          onClick={scan}
+          disabled={scanning}
+          className="ml-auto text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-40"
+          title="Refresh"
+        >
+          <ArrowClockwise size={15} className={scanning ? 'animate-spin' : ''} />
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 px-6 pt-3 shrink-0">
+        {(['overview', 'models', 'custom-nodes', 'logs'] as Tab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={[
+              'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize',
+              tab === t ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-zinc-300',
+            ].join(' ')}
+          >
+            {t === 'custom-nodes' ? 'Custom Nodes' : t.charAt(0).toUpperCase() + t.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        {tab === 'overview' && <OverviewTab stats={stats} />}
+        {tab === 'models' && <ModelsTab port={instance.port} />}
+        {tab === 'custom-nodes' && <CustomNodesTab port={instance.port} />}
+        {tab === 'logs' && <LogsTab port={instance.port} />}
       </div>
     </div>
   )

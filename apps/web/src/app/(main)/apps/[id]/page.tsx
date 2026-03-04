@@ -63,6 +63,116 @@ interface ExecResult {
   seed: number
 }
 
+// ─── Output renderers ─────────────────────────────────────────────────────────
+
+function BlurRevealImage({ src, alt }: { src: string; alt: string }) {
+  const [sharp, setSharp] = useState(false)
+  useEffect(() => {
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => setSharp(true)))
+    return () => cancelAnimationFrame(id)
+  }, [])
+  return (
+    <div className="overflow-hidden rounded-lg border border-zinc-800">
+      <img
+        src={src}
+        alt={alt}
+        className="w-full block"
+        style={{
+          filter: sharp ? 'blur(0px) brightness(1)' : 'blur(28px) brightness(0.7)',
+          transform: sharp ? 'scale(1)' : 'scale(1.1)',
+          transition: 'filter 2s ease-out, transform 2s ease-out',
+        }}
+      />
+    </div>
+  )
+}
+
+let _mvLoaded = false, _mvLoading = false
+function loadMV(): Promise<void> {
+  return new Promise((resolve) => {
+    if (_mvLoaded) { resolve(); return }
+    if (typeof window !== 'undefined' && customElements.get('model-viewer')) { _mvLoaded = true; resolve(); return }
+    if (_mvLoading) { const t = setInterval(() => { if (_mvLoaded) { clearInterval(t); resolve() } }, 100); return }
+    _mvLoading = true
+    const s = document.createElement('script')
+    s.type = 'module'
+    s.src = 'https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js'
+    s.onload = () => { _mvLoaded = true; _mvLoading = false; resolve() }
+    s.onerror = () => { _mvLoading = false; resolve() }
+    document.head.appendChild(s)
+  })
+}
+
+function ModelPreview({ src, filename }: { src: string; filename: string }) {
+  const [ready, setReady] = useState(false)
+  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+  const viewable = ['glb', 'gltf'].includes(ext)
+  useEffect(() => { if (viewable) loadMV().then(() => setReady(true)) }, [viewable])
+  if (viewable && ready) {
+    return (
+      <div className="col-span-2 w-full aspect-square rounded-lg overflow-hidden border border-zinc-800">
+        {/* @ts-ignore */}
+        <model-viewer src={src} alt={filename} auto-rotate camera-controls style={{ width: '100%', height: '100%', background: '#18181b' }} />
+      </div>
+    )
+  }
+  return (
+    <a href={src} download={filename} className="col-span-2 flex items-center gap-3 px-4 py-3 rounded-lg border border-white/5 bg-zinc-900 hover:bg-zinc-800 transition-colors">
+      <Spinner size={16} className="text-violet-400" />
+      <span className="text-sm text-zinc-300 flex-1 truncate">{filename}</span>
+      <span className="text-xs text-zinc-600">Download 3D</span>
+    </a>
+  )
+}
+
+type OutputItem =
+  | { kind: 'image' | 'video' | 'audio' | 'model' | 'file'; filename: string; path: string }
+  | { kind: 'text'; text: string }
+
+function inferKind(filename: string): 'image' | 'video' | 'audio' | 'model' | 'file' {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+  if (['png', 'jpg', 'jpeg', 'webp', 'bmp'].includes(ext)) return 'image'
+  if (['gif', 'mp4', 'webm', 'avi', 'mov'].includes(ext)) return 'video'
+  if (['wav', 'mp3', 'flac', 'ogg', 'aiff', 'm4a'].includes(ext)) return 'audio'
+  if (['glb', 'gltf', 'obj', 'fbx', 'stl', 'ply'].includes(ext)) return 'model'
+  return 'file'
+}
+
+function OutputGrid({ outputs, comfyPort }: { outputs: OutputItem[]; comfyPort: number }) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {outputs.map((out, i) => {
+        if (out.kind === 'text') {
+          return (
+            <div key={i} className="col-span-2 bg-zinc-900 border border-white/5 rounded-lg px-4 py-3">
+              <p className="text-sm text-zinc-300 whitespace-pre-wrap font-mono-custom">{out.text}</p>
+            </div>
+          )
+        }
+        const url = `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`
+        if (out.kind === 'image') return <BlurRevealImage key={out.filename} src={url} alt={out.filename} />
+        if (out.kind === 'video') return <video key={out.filename} src={url} controls loop className="w-full rounded-lg border border-zinc-800 bg-black" />
+        if (out.kind === 'audio') return (
+          <div key={out.filename} className="col-span-2 flex flex-col gap-1">
+            <span className="text-xs text-zinc-500 truncate">{out.filename}</span>
+            <audio controls src={url} className="w-full" />
+          </div>
+        )
+        if (out.kind === 'model') return <ModelPreview key={out.filename} src={url} filename={out.filename} />
+        return (
+          <a key={out.filename} href={url} download={out.filename} className="col-span-2 flex items-center gap-2 px-4 py-3 rounded-lg border border-white/5 bg-zinc-900 hover:bg-zinc-800 transition-colors text-sm text-zinc-300">
+            <DownloadSimple size={14} />
+            <span className="flex-1 truncate">{out.filename}</span>
+            <span className="text-xs text-zinc-600">Download</span>
+          </a>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Input field ───────────────────────────────────────────────────────────────
+
 function InputField({
   field,
   value,
@@ -402,9 +512,8 @@ export default function ToolPage() {
 
   const [showCurl, setShowCurl] = useState(false)
   const [runningId, setRunningId] = useState<string | null>(null)
-  const [progress, setProgress] = useState<number | null>(null)
-  const [latestOutputs, setLatestOutputs] = useState<{ filename: string; path: string }[]>([])
-  const wsRef = useRef<WebSocket | null>(null)
+  const [latestOutputs, setLatestOutputs] = useState<OutputItem[]>([])
+  const sseRef = useRef<EventSource | null>(null)
 
   const runMutation = useMutation<ExecResult, Error>({
     mutationFn: async () => {
@@ -421,71 +530,84 @@ export default function ToolPage() {
     },
     onSuccess: (result) => {
       setRunningId(result.executionId)
-      setProgress(0)
       setLatestOutputs([])
 
-      // Connect WebSocket for live progress
-      try {
-        const ws = new WebSocket(`ws://localhost:${result.comfyPort}/ws?clientId=${result.clientId}`)
-        wsRef.current = ws
-        ws.onmessage = (evt) => {
-          try {
-            const msg = JSON.parse(evt.data as string)
-            if (msg.type === 'progress') {
-              const pct = msg.data.max ? Math.round((msg.data.value / msg.data.max) * 100) : 0
-              setProgress(pct)
-            }
-          } catch { /* binary preview frame */ }
-        }
-        ws.onerror = () => { wsRef.current = null }
-      } catch { /* WebSocket unavailable */ }
+      let done = false
 
+      const finish = async () => {
+        if (done) return
+        done = true
+        sseRef.current?.close()
+        sseRef.current = null
+        clearInterval(pollInterval)
+
+        try {
+          const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
+          if (histRes.ok) {
+            const hist = await histRes.json() as Record<string, {
+              status?: { status_str?: string }
+              outputs?: Record<string, {
+                images?: { filename: string; subfolder: string }[]
+                gifs?: { filename: string; subfolder: string }[]
+                audio?: { filename: string; subfolder: string }[]
+                text?: string[]
+                string?: string[]
+              }>
+            }>
+            const entry = hist[result.promptId]
+            const items: OutputItem[] = []
+            for (const nodeOut of Object.values(entry?.outputs ?? {})) {
+              for (const f of nodeOut.images ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+              for (const f of nodeOut.gifs ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+              for (const f of nodeOut.audio ?? []) items.push({ kind: 'audio', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+              for (const t of [...(nodeOut.text ?? []), ...(nodeOut.string ?? [])]) {
+                if (typeof t === 'string' && t.trim()) items.push({ kind: 'text', text: t })
+              }
+            }
+            setLatestOutputs(items)
+            const fileItems = items.filter((i): i is Extract<OutputItem, { filename: string }> => 'filename' in i)
+            await fetch(`/api/executions/${result.executionId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                status: entry?.status?.status_str === 'error' ? 'error' : 'completed',
+                outputsJson: JSON.stringify(fileItems),
+                completedAt: Date.now(),
+              }),
+            })
+            qc.invalidateQueries({ queryKey: ['executions', id] })
+          }
+        } catch { /* ignore */ }
+
+        setRunningId(null)
+      }
+
+      // SSE proxy for completion detection (avoids CORS on direct WS)
+      const sse = new EventSource(`/api/comfy/${result.comfyPort}/ws`)
+      sseRef.current = sse
+      sse.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data) as { type: string; data?: Record<string, unknown> }
+          if (msg.data?.prompt_id !== result.promptId) return
+          if (msg.type === 'executing' && msg.data?.node === null) { sse.close(); finish() }
+          else if (msg.type === 'execution_error') { sse.close(); finish() }
+        } catch { /* ignore */ }
+      }
+      sse.onerror = () => { sse.close() }
+
+      // Fallback poll
       const pollInterval = setInterval(async () => {
+        if (done) { clearInterval(pollInterval); return }
         try {
           const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
           if (!histRes.ok) return
-          const hist = await histRes.json() as Record<string, {
-            status?: { completed?: boolean; status_str?: string }
-            outputs?: Record<string, { images?: { filename: string; subfolder: string; type: string }[] }>
-          }>
-          const entry = hist[result.promptId]
-          if (!entry?.status?.completed) return
-
-          clearInterval(pollInterval)
-          wsRef.current?.close()
-          wsRef.current = null
-          const imgs: { filename: string; path: string }[] = []
-          for (const nodeOut of Object.values(entry.outputs ?? {})) {
-            for (const img of nodeOut.images ?? []) {
-              imgs.push({
-                filename: img.filename,
-                path: `${img.subfolder ? img.subfolder + '/' : ''}${img.filename}`,
-              })
-            }
-          }
-          setLatestOutputs(imgs)
-          setRunningId(null)
-          setProgress(null)
-
-          await fetch(`/api/executions/${result.executionId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              status: entry.status.status_str === 'error' ? 'error' : 'completed',
-              outputsJson: JSON.stringify(imgs),
-              completedAt: Date.now(),
-            }),
-          })
-          qc.invalidateQueries({ queryKey: ['executions', id] })
+          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean } }>
+          if (hist[result.promptId]?.status?.completed) finish()
         } catch { /* ignore */ }
-      }, 2000)
+      }, 3000)
 
       setTimeout(() => {
-        clearInterval(pollInterval)
-        wsRef.current?.close()
-        wsRef.current = null
-        setRunningId(null)
-        setProgress(null)
+        if (!done) { done = true; sseRef.current?.close(); sseRef.current = null; clearInterval(pollInterval); setRunningId(null) }
       }, 300_000)
     },
   })
@@ -540,7 +662,7 @@ export default function ToolPage() {
           {isRunning ? (
             <>
               <LottieSpinner size={14} />
-              {progress !== null ? `${progress}%` : 'Running…'}
+              Running…
             </>
           ) : (
             <>
@@ -619,41 +741,13 @@ export default function ToolPage() {
                 </h2>
 
                 {isRunning && latestOutputs.length === 0 && (
-                  <div className="flex items-center gap-3 text-zinc-500 text-sm">
-                    <LottieSpinner size={14} />
-                    Generating…
-                    {progress !== null && (
-                      <div className="flex-1 bg-zinc-800 rounded-full h-1.5 max-w-xs">
-                        <div
-                          className="bg-emerald-500 h-full rounded-full transition-all"
-                          style={{ width: `${progress}%` }}
-                        />
-                      </div>
-                    )}
+                  <div className="w-full aspect-square max-w-sm rounded-xl border border-white/5 bg-zinc-950 flex items-center justify-center">
+                    <LottieSpinner size={36} />
                   </div>
                 )}
 
-                {latestOutputs.length > 0 && (
-                  <StaggerGrid className="grid grid-cols-2 gap-3">
-                    {latestOutputs.map((out) => (
-                      <StaggerItem key={out.filename}>
-                        <div className="relative group rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800">
-                          <img
-                            src={`/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`}
-                            alt={out.filename}
-                            className="w-full h-auto object-cover"
-                          />
-                          <a
-                            href={`/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`}
-                            download={out.filename}
-                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 bg-black/60 rounded-md text-white"
-                          >
-                            <DownloadSimple size={14} />
-                          </a>
-                        </div>
-                      </StaggerItem>
-                    ))}
-                  </StaggerGrid>
+                {latestOutputs.length > 0 && tool.comfyPort && (
+                  <OutputGrid outputs={latestOutputs} comfyPort={tool.comfyPort} />
                 )}
 
                 {!isRunning && latestOutputs.length === 0 && (
