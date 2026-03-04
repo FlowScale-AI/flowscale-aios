@@ -1,0 +1,72 @@
+appId: ai.flowscale.eios
+productName: FlowScale EIOS
+copyright: Copyright © 2024-2026 FlowScale
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**
+  - package.json
+  - "!node_modules/**"
+
+# Include the compiled JS output and package.json only
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  signAndEditExecutable: false
+  icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+
+dmg:
+  artifactName: "${productName}-${version}-${arch}.dmg"
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: rpm
+      arch:
+        - x64
+  category: Development
+  icon: build/icons
+  mimeTypes:
+    - x-scheme-handler/flowscaleeios
+
+appImage:
+  artifactName: "${productName}-${version}-${arch}.AppImage"
+
+rpm:
+  artifactName: "${productName}-${version}-${arch}.rpm"
+
+# Protocol handler for OAuth callback
+protocols:
+  - name: FlowScale EIOS
+    schemes:
+      - flowscaleeios

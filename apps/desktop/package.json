@@ -9,19 +9,19 @@
   "private": true,
   "main": "dist/main.js",
   "scripts": {
+    "clean": "node -e \"const fs=require('fs');['dist','release'].forEach(d=>{if(fs.existsSync(d)){fs.rmSync(d,{recursive:true,force:true})}})\"",
     "dev": "electron dist/main.js",
     "build": "tsc",
     "package": "electron-builder --config electron-builder.yml --publish never",
-    "rebuild": "electron-rebuild",
-    "postinstall": "electron-rebuild"
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "electron-log": "^5.3.0"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.0.3",
     "@types/node": "^22.15.17",
     "electron": "^39.0.0",
+    "electron-builder": "^26.0.0",
     "typescript": "^5.8.3"
   }
 }

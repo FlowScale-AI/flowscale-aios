@@ -57,6 +57,7 @@ build/
 legacy/
 .playwright-mcp/
 apps/desktop/node_modules/
+apps/desktop/release/
 apps/web/.next/
 node_modules/
 apps/web/node_modules/
