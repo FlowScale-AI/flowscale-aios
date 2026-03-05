@@ -11,6 +11,7 @@ import {
   connectWS,
 } from "@/lib/comfyui-client";
 import { graphToApiFormat, resolveWidgetValues } from "@/lib/comfyui-tool-mapper";
+import { getComfyOrgApiKey } from "@/lib/platform";
 
 /**
  * Drop-in replacement for useToolExecution that talks to a local ComfyUI
@@ -131,7 +132,7 @@ export const useComfyUIExecution = () => {
           logs: [...prev.logs, "Submitting to ComfyUI..."],
         }));
 
-        promptId = await queuePrompt(workflow, clientId);
+        promptId = await queuePrompt(workflow, clientId, undefined, getComfyOrgApiKey() || undefined);
 
         setExecutionState((prev) => ({
           ...prev,

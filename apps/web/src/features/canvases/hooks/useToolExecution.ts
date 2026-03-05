@@ -7,6 +7,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import type { ExecutionState } from "../types";
+import { getComfyOrgApiKey } from "@/lib/platform";
 
 interface UseToolExecutionProps {
   apiUrl?: string;
@@ -23,7 +24,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<EventSource | null>(null);
 
   const clearPoll = () => {
     if (pollTimerRef.current) {
@@ -77,7 +78,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
         const res = await fetch(`/api/tools/${toolId}/executions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inputs: apiInputs }),
+          body: JSON.stringify({ inputs: apiInputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
         });
 
         if (!res.ok) {
@@ -87,11 +88,12 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
 
         ({ executionId, promptId, comfyPort, seed, clientId } = await res.json());
 
-        // Connect WebSocket for live progress updates
+        // Connect to server-side SSE proxy for live progress updates
+        // (avoids direct WS to ComfyUI which triggers CORS host/origin mismatch)
         try {
-          const ws = new WebSocket(`ws://localhost:${comfyPort}/ws?clientId=${clientId}`);
-          wsRef.current = ws;
-          ws.onmessage = (evt) => {
+          const sse = new EventSource(`/api/comfy/${comfyPort}/ws`);
+          wsRef.current = sse;
+          sse.onmessage = (evt) => {
             try {
               const msg = JSON.parse(evt.data as string);
               if (msg.type === "progress") {
@@ -104,10 +106,10 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
                   logs: [...prev.logs, `Executing node: ${msg.data.node}`],
                 }));
               }
-            } catch { /* binary preview frame */ }
+            } catch { /* ignore parse errors */ }
           };
-          ws.onerror = () => { wsRef.current = null; };
-        } catch { /* WebSocket unavailable */ }
+          sse.onerror = () => { sse.close(); wsRef.current = null; };
+        } catch { /* SSE unavailable */ }
       } catch (err: any) {
         setExecutionState({
           status: "error",

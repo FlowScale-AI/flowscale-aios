@@ -31,7 +31,8 @@ export type ObjectInfoMap = Record<string, ObjectInfoNodeDef>
  *  than a node connection link. */
 function isWidgetInputSpec(spec: ObjInfoInputSpec): boolean {
   const type = spec[0]
-  if (Array.isArray(type)) return true // COMBO dropdown
+  if (Array.isArray(type)) return true // COMBO dropdown (old format: options array)
+  if (type === 'COMBO') return true    // COMBO dropdown (new format: "COMBO" string + options in spec[1])
   return type === 'INT' || type === 'FLOAT' || type === 'STRING' || type === 'BOOLEAN'
 }
 

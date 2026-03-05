@@ -8,7 +8,9 @@
     "start": "next start --port 14173",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "cy:open": "cypress open",
+    "cy:run": "cypress run"
   },
   "dependencies": {
     "@flowscale/workflow": "workspace:*",
@@ -40,6 +42,7 @@
     "@types/react-dom": "^19.1.5",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.5.14",
+    "cypress": "^15.11.0",
     "drizzle-kit": "^0.31.1",
     "tailwindcss": "^4.1.6",
     "typescript": "^5.8.3"

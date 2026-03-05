@@ -28,7 +28,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!tool.comfyPort) return NextResponse.json({ error: 'No ComfyUI port configured for this tool' }, { status: 400 })
 
   const body = await req.json()
-  const { inputs } = body
+  const { inputs, comfyOrgApiKey } = body
 
   // Generate a random seed if not provided in inputs
   const seed = inputs?.seed ?? Math.floor(Math.random() * 2 ** 32)
@@ -91,10 +91,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   })
 
   // Queue the prompt via embedded ComfyUI proxy (non-blocking)
+  const promptPayload: Record<string, unknown> = { prompt: workflow, client_id: clientId }
+  if (comfyOrgApiKey) {
+    promptPayload.extra_data = { api_key_comfy_org: comfyOrgApiKey }
+  }
   const queueRes = await fetch(`http://localhost:${tool.comfyPort}/prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: workflow, client_id: clientId }),
+    body: JSON.stringify(promptPayload),
   })
 
   if (!queueRes.ok) {

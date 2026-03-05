@@ -6,8 +6,11 @@ import {
   ArrowCounterClockwise,
   ArrowLeft,
   CheckCircle,
+  Eye,
+  EyeSlash,
   Flask as FlaskConical,
   Gear,
+  Key,
   MagicWand,
   Monitor,
   Plus,
@@ -18,6 +21,7 @@ import {
   Wrench,
   X,
 } from 'phosphor-react'
+import { getComfyOrgApiKey, setComfyOrgApiKey } from '@/lib/platform'
 import { LottieSpinner, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { ToolTestPlayground } from '@/components/ToolTestPlayground'
@@ -1223,7 +1227,115 @@ function OverviewTab({ stats }: { stats: SysInfo | null }) {
           </div>
         </Section>
       )}
+
+      <ComfyOrgApiKeySection />
     </div>
+  )
+}
+
+// ─── ComfyOrg API Key ─────────────────────────────────────────────────────────
+
+function ComfyOrgApiKeySection() {
+  const [key, setKey] = useState('')
+  const [show, setShow] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    setKey(getComfyOrgApiKey())
+  }, [])
+
+  const handleSave = () => {
+    setComfyOrgApiKey(key.trim())
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  const handleClear = () => {
+    setKey('')
+    setComfyOrgApiKey('')
+    setSaved(false)
+  }
+
+  return (
+    <Section title="ComfyUI API Key">
+      <div className="bg-white/5 rounded-xl p-4 space-y-4">
+        <div className="flex items-start gap-3">
+          <Key size={16} className="text-zinc-400 mt-0.5 shrink-0" />
+          <div className="space-y-2 flex-1 min-w-0">
+            <p className="text-sm text-zinc-300">
+              Required for workflows that use <span className="text-white font-medium">API nodes</span> (OpenAI, Stability, Flux, Kling, etc.).
+              These nodes call external services through ComfyUI&apos;s API proxy and need a ComfyOrg API key for authentication.
+            </p>
+
+            {/* Input */}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={show ? 'text' : 'password'}
+                  value={key}
+                  onChange={(e) => { setKey(e.target.value); setSaved(false) }}
+                  placeholder="comfyui-xxxxxxxx..."
+                  spellCheck={false}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShow(!show)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  {show ? <EyeSlash size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              <button
+                onClick={handleSave}
+                disabled={!key.trim()}
+                className="px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg transition-colors shrink-0"
+              >
+                {saved ? 'Saved' : 'Save'}
+              </button>
+              {key && (
+                <button
+                  onClick={handleClear}
+                  className="px-3 py-2 text-sm text-zinc-400 hover:text-red-400 border border-zinc-700 hover:border-red-500/30 rounded-lg transition-colors shrink-0"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {/* Instructions */}
+            <details className="group">
+              <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-400 transition-colors select-none">
+                How to get an API key
+              </summary>
+              <div className="mt-3 space-y-2 text-xs text-zinc-400 bg-zinc-900/50 rounded-lg p-3 border border-zinc-800">
+                <ol className="list-decimal list-inside space-y-1.5">
+                  <li>
+                    Go to{' '}
+                    <a
+                      href="https://platform.comfy.org/login"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
+                    >
+                      platform.comfy.org
+                    </a>{' '}
+                    and sign in (or create an account)
+                  </li>
+                  <li>Navigate to <span className="text-zinc-300">API Keys</span> in the dashboard</li>
+                  <li>Click <span className="text-zinc-300">Create API Key</span> and copy the generated key</li>
+                  <li>Paste it above and click <span className="text-zinc-300">Save</span></li>
+                </ol>
+                <p className="pt-1.5 border-t border-zinc-800 text-zinc-500">
+                  The key is stored locally in your browser and sent to ComfyUI with each workflow execution.
+                  API node usage is billed through your ComfyOrg account.
+                </p>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+    </Section>
   )
 }
 

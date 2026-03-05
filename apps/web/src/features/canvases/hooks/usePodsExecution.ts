@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import type { ExecutionState } from "../types";
 import { graphToApiFormat, resolveWidgetValues } from "@/lib/comfyui-tool-mapper";
 import { usePodsStore } from "@/store/podsStore";
-import { isDesktop } from "@/lib/platform";
+import { isDesktop, getComfyOrgApiKey } from "@/lib/platform";
 
 // In desktop mode the operator always runs on this address
 const DESKTOP_OPERATOR_URL = "http://localhost:30000";
@@ -56,11 +56,16 @@ async function opQueuePrompt(
   podId: string,
   workflow: Record<string, any>,
   clientId: string,
+  apiKey?: string,
 ): Promise<string> {
+  const payload: Record<string, any> = { prompt: workflow, client_id: clientId };
+  if (apiKey) {
+    payload.extra_data = { api_key_comfy_org: apiKey };
+  }
   const res = await opFetch(opUrl, podId, "/queue", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: workflow, client_id: clientId }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`Queue failed: ${res.statusText}`);
   const data = await res.json();
@@ -311,7 +316,7 @@ export const usePodsExecution = (podId: string | null) => {
           logs: [...prev.logs, "Submitting to operator..."],
         }));
 
-        promptId = await opQueuePrompt(opUrl, podId, workflow, clientId);
+        promptId = await opQueuePrompt(opUrl, podId, workflow, clientId, getComfyOrgApiKey() || undefined);
 
         setExecutionState((prev) => ({
           ...prev,
