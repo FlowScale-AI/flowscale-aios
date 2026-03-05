@@ -20,7 +20,7 @@ const COMING_SOON = [
     description: 'Browse and deploy models directly from Hugging Face Hub. Run inference pipelines locally or in the cloud.',
   },
   {
-    logo: 'https://cdn.simpleicons.org/openai/white',
+    logo: '/openai-logo.svg',
     label: 'OpenAI',
     description: 'Integrate GPT and DALL·E models into your workflows for text generation, image creation, and more.',
   },
