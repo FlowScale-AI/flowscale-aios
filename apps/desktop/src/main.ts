@@ -13,51 +13,60 @@ log.initialize()
 const isDev = !app.isPackaged
 const EIOS_PORT = 14173
 
-// Set app name — on Wayland this becomes the window's app_id, which KDE uses to match .desktop files
+// Set app name and desktop file name so KDE Wayland matches the window to flowscale-aios.desktop
 app.setName('flowscale-aios')
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('class', 'flowscale-aios')
+  // Tells Wayland compositors (KDE/GNOME) which .desktop file owns this window → correct icon
+  ;(app as any).setDesktopName('flowscale-aios.desktop')
 }
 
 // Register OAuth protocol handler before single-instance lock (Windows/Linux)
 if (process.platform !== 'darwin') {
   if (isDev) {
     app.setAsDefaultProtocolClient('flowscaleeios', process.execPath, [__filename])
-
-    if (process.platform === 'linux') {
-      try {
-        // Install app icon to hicolor theme so KDE picks it up
-        const iconsDir = path.join(app.getPath('home'), '.local/share/icons/hicolor/256x256/apps')
-        if (!existsSync(iconsDir)) mkdirSync(iconsDir, { recursive: true })
-        const iconSrc = path.join(__dirname, '..', 'assets', 'icon.png')
-        const iconDest = path.join(iconsDir, 'flowscale-aios.png')
-        if (existsSync(iconSrc)) copyFileSync(iconSrc, iconDest)
-
-        const appsDir = path.join(app.getPath('home'), '.local/share/applications')
-        if (!existsSync(appsDir)) mkdirSync(appsDir, { recursive: true })
-        const desktopFile = path.join(appsDir, 'flowscale-aios.desktop')
-        const content = [
-          '[Desktop Entry]',
-          'Name=FlowScale AI OS',
-          `Exec=${process.execPath} ${__filename} %u`,
-          'Icon=flowscale-aios',
-          'StartupWMClass=flowscale-aios',
-          'StartupNotify=false',
-          'Terminal=false',
-          'Type=Application',
-          'Categories=Development;',
-          'MimeType=x-scheme-handler/flowscaleeios;',
-          '',
-        ].join('\n')
-        writeFileSync(desktopFile, content, 'utf-8')
-        execSync(`update-desktop-database ${appsDir}`)
-        execSync(`xdg-mime default flowscale-aios.desktop x-scheme-handler/flowscaleeios`)
-      } catch (err) {
-        log.warn('[protocol] Failed to register Linux protocol handler:', err)
-      }
-    }
   } else {
     app.setAsDefaultProtocolClient('flowscaleeios')
+  }
+
+  if (process.platform === 'linux') {
+    // Install icon + .desktop file on every launch (dev and production) so the
+    // taskbar icon is always up to date regardless of how the app was launched.
+    try {
+      // Write icon — use nativeImage so this works whether assets are on disk or in an asar
+      const iconsDir = path.join(app.getPath('home'), '.local/share/icons/hicolor/256x256/apps')
+      if (!existsSync(iconsDir)) mkdirSync(iconsDir, { recursive: true })
+      const iconSrc = path.join(__dirname, '..', 'assets', 'icon.png')
+      const iconDest = path.join(iconsDir, 'flowscale-aios.png')
+      const img = nativeImage.createFromPath(iconSrc)
+      if (!img.isEmpty()) writeFileSync(iconDest, img.toPNG())
+
+      // Write .desktop file pointing to this binary
+      const appsDir = path.join(app.getPath('home'), '.local/share/applications')
+      if (!existsSync(appsDir)) mkdirSync(appsDir, { recursive: true })
+      const desktopFile = path.join(appsDir, 'flowscale-aios.desktop')
+      const execLine = isDev
+        ? `Exec=${process.execPath} ${__filename} %u`
+        : `Exec=${process.execPath} %u`
+      const content = [
+        '[Desktop Entry]',
+        'Name=FlowScale AI OS',
+        execLine,
+        'Icon=flowscale-aios',
+        'StartupWMClass=flowscale-aios',
+        'StartupNotify=false',
+        'Terminal=false',
+        'Type=Application',
+        'Categories=Development;',
+        'MimeType=x-scheme-handler/flowscaleeios;',
+        '',
+      ].join('\n')
+      writeFileSync(desktopFile, content, 'utf-8')
+      execSync(`update-desktop-database ${appsDir}`)
+      execSync(`xdg-mime default flowscale-aios.desktop x-scheme-handler/flowscaleeios`)
+    } catch (err) {
+      log.warn('[linux] Failed to register icon/.desktop:', err)
+    }
   }
 }
 
