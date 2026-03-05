@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import {
   AppWindow,
   GearSix,
+  ImageSquare,
   Infinity as InfinityIcon,
   Users,
   SignOut,
@@ -14,16 +15,17 @@ import type { Role } from '@/lib/auth'
 
 const ALL_NAV_ITEMS = [
   { href: '/apps', icon: AppWindow, label: 'Apps' },
+  { href: '/outputs', icon: ImageSquare, label: 'Assets' },
   { href: '/integrations', icon: Plugs, label: 'Integrations' },
   { href: '/users', icon: Users, label: 'Users' },
   { href: '/settings', icon: GearSix, label: 'Settings' },
 ]
 
 const ROLE_PATHS: Record<Role, string[]> = {
-  admin: ['/apps', '/integrations', '/users', '/settings'],
-  pipeline_td: ['/apps', '/integrations', '/users', '/settings'],
-  dev: ['/apps', '/integrations', '/settings'],
-  artist: ['/apps'],
+  admin: ['/apps', '/outputs', '/integrations', '/users', '/settings'],
+  pipeline_td: ['/apps', '/outputs', '/integrations', '/users', '/settings'],
+  dev: ['/apps', '/outputs', '/integrations', '/settings'],
+  artist: ['/apps', '/outputs'],
 }
 
 export default function Sidebar({ role, username }: { role: Role; username: string }) {
