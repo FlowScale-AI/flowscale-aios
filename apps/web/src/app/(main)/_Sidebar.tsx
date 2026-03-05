@@ -15,10 +15,10 @@ import {
 import type { Role } from '@/lib/auth'
 
 const ALL_NAV_ITEMS = [
+  { href: '/explore', icon: Compass, label: 'Explore' },
   { href: '/apps', icon: AppWindow, label: 'Apps' },
   { href: '/outputs', icon: ImageSquare, label: 'Assets' },
   { href: '/integrations', icon: Plugs, label: 'Integrations' },
-  { href: '/explore', icon: Compass, label: 'Explore' },
   { href: '/users', icon: Users, label: 'Users' },
   { href: '/settings', icon: GearSix, label: 'Settings' },
 ]
