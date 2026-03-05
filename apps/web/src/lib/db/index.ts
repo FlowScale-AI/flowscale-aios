@@ -3,10 +3,11 @@ import Database from 'better-sqlite3'
 import { join } from 'path'
 import { homedir } from 'os'
 import { mkdirSync } from 'fs'
+import crypto from 'crypto'
 import * as schema from './schema'
 
 const DB_DIR = join(homedir(), '.flowscale')
-const DB_PATH = join(DB_DIR, 'eios.db')
+const DB_PATH = join(DB_DIR, 'aios.db')
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null
 
@@ -86,7 +87,54 @@ export function getDb() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_canvas_items_canvas_id ON canvas_items(canvas_id);
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'artist',
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      approved_at INTEGER,
+      approved_by TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE TABLE IF NOT EXISTS setup (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      initial_password TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
   `)
+
+  // First-run: seed admin user if no users exist
+  const userCount = sqlite.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }
+  if (userCount.count === 0) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+    const bytes = crypto.randomBytes(12)
+    let password = ''
+    for (let i = 0; i < 12; i++) {
+      password += chars[bytes[i] % chars.length]
+    }
+    const salt = crypto.randomBytes(16).toString('hex')
+    const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex')
+    const passwordHash = `${salt}:${hash}`
+    const id = crypto.randomUUID()
+    const now = Date.now()
+    sqlite
+      .prepare(
+        'INSERT INTO users (id, username, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run(id, 'admin', passwordHash, 'admin', 'active', now)
+    sqlite.prepare('INSERT OR REPLACE INTO setup (id, initial_password) VALUES (1, ?)').run(password)
+  }
 
   _db = drizzle(sqlite, { schema })
   return _db

@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   UploadSimple,
@@ -19,6 +19,7 @@ import {
   X,
 } from 'phosphor-react'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
+import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 
 interface WorkflowIO {
   nodeId: string
@@ -41,6 +42,16 @@ interface Tool {
   name: string
   comfyPort: number | null
   schemaJson: string
+}
+
+interface FullToolData {
+  id: string
+  name: string
+  description: string | null
+  workflowJson: string
+  schemaJson: string
+  comfyPort: number | null
+  status: string
 }
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
@@ -286,25 +297,7 @@ function StepAttach({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">ComfyUI Instance</span>
-            {instances.length > 1 && (
-              <div className="flex gap-1">
-                {instances.map((inst) => (
-                  <button
-                    key={inst.port}
-                    onClick={() => setSelectedPort(inst.port)}
-                    className={[
-                      'px-2 py-0.5 rounded text-xs border transition-colors',
-                      selectedPort === inst.port
-                        ? 'border-emerald-500 bg-emerald-600/10 text-emerald-300'
-                        : 'border-zinc-800 text-zinc-500 hover:border-zinc-600',
-                    ].join(' ')}
-                  >
-                    :{inst.port}
-                  </button>
-                ))}
-              </div>
-            )}
-            {instances.length === 1 && selectedPort && (
+            {selectedPort && (
               <span className="text-xs text-zinc-600 font-mono-custom">:{selectedPort}</span>
             )}
           </div>
@@ -465,24 +458,34 @@ function StepConfigure({
   initialName,
   onBack,
   onNext,
+  toolId,
+  initialSchema,
+  initialDescription,
 }: {
   workflowJson: string
   initialName: string
   onBack: () => void
   onNext: (tool: Tool) => void
+  toolId?: string
+  initialSchema?: WorkflowIO[]
+  initialDescription?: string
 }) {
-  const [schema, setSchema] = useState<WorkflowIO[] | null>(null)
+  const [schema, setSchema] = useState<WorkflowIO[] | null>(initialSchema ?? null)
   const [workflowHash, setWorkflowHash] = useState('')
   const [instances, setInstances] = useState<ComfyInstance[]>([])
   const [scanning, setScanning] = useState(false)
   const [selectedPort, setSelectedPort] = useState<number | null>(null)
   const [name, setName] = useState(initialName)
-  const [description, setDescription] = useState('')
+  const [description, setDescription] = useState(initialDescription ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [analyzeError, setAnalyzeError] = useState('')
   // Keys of enabled (visible) fields — format: "nodeId__paramName"
-  const [enabledKeys, setEnabledKeys] = useState<Set<string>>(new Set())
+  const [enabledKeys, setEnabledKeys] = useState<Set<string>>(() =>
+    initialSchema
+      ? new Set(initialSchema.map((f) => `${f.nodeId}__${f.paramName}`))
+      : new Set()
+  )
 
   const fieldKey = (f: WorkflowIO) => `${f.nodeId}__${f.paramName}`
 
@@ -515,12 +518,12 @@ function StepConfigure({
     }
   }, [workflowJson])
 
-  // Analyze on mount (no port yet — uses static widget-param table)
-  useEffect(() => { runAnalyze() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  // Analyze on mount — skip if editing (schema already loaded from existing tool)
+  useEffect(() => { if (!initialSchema) runAnalyze() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-analyze when a port is selected so /object_info can resolve custom nodes
+  // Re-analyze when a port is selected — skip in edit mode to preserve existing schema choices
   useEffect(() => {
-    if (selectedPort) runAnalyze(selectedPort)
+    if (selectedPort && !toolId) runAnalyze(selectedPort)
   }, [selectedPort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDefaultChange = useCallback((nodeId: string, paramName: string, value: unknown) => {
@@ -558,38 +561,50 @@ function StepConfigure({
     setSaving(true)
     setError('')
     try {
-      const res = await fetch('/api/tools', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim() || null,
-          workflowJson,
-          workflowHash,
-          schemaJson: JSON.stringify(visibleSchema),
-          comfyPort: selectedPort,
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        setError(err.error ?? 'Failed to save tool')
-        return
+      let tool: Tool
+      if (toolId) {
+        const res = await fetch(`/api/tools/${toolId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.trim(),
+            description: description.trim() || null,
+            schemaJson: JSON.stringify(visibleSchema),
+            comfyPort: selectedPort,
+          }),
+        })
+        if (!res.ok) {
+          const err = await res.json()
+          setError(err.error ?? 'Failed to update tool')
+          return
+        }
+        tool = await res.json()
+      } else {
+        const res = await fetch('/api/tools', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.trim(),
+            description: description.trim() || null,
+            workflowJson,
+            workflowHash,
+            schemaJson: JSON.stringify(visibleSchema),
+            comfyPort: selectedPort,
+          }),
+        })
+        if (!res.ok) {
+          const err = await res.json()
+          setError(err.error ?? 'Failed to save tool')
+          return
+        }
+        tool = await res.json()
       }
-      const tool: Tool = await res.json()
       onNext(tool)
     } catch {
-      setError('Failed to save tool')
+      setError(toolId ? 'Failed to update tool' : 'Failed to save tool')
     } finally {
       setSaving(false)
     }
-  }
-
-  const getDeviceName = (inst: ComfyInstance) => {
-    try {
-      const stats = inst.systemStats as { devices?: { name: string }[] }
-      if (stats?.devices?.[0]?.name) return stats.devices[0].name
-    } catch { /* ignore */ }
-    return 'Unknown device'
   }
 
   return (
@@ -786,66 +801,29 @@ function StepConfigure({
         )
       })()}
 
-      {/* ComfyUI selector */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-            ComfyUI Instance
-          </h3>
-          <button
-            onClick={scanPorts}
-            disabled={scanning}
-            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50"
-          >
-            <ArrowCounterClockwise size={12} className={scanning ? 'animate-spin' : ''} />
-            {scanning ? 'Scanning…' : 'Refresh'}
-          </button>
+      {/* ComfyUI status */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">ComfyUI Instance</span>
+          {scanning && <LottieSpinner size={12} />}
+          {!scanning && selectedPort && (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-400 font-mono-custom">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+              :{selectedPort}
+            </span>
+          )}
+          {!scanning && !selectedPort && (
+            <span className="text-xs text-amber-500">No ComfyUI detected</span>
+          )}
         </div>
-
-        {scanning && instances.length === 0 && (
-          <div className="flex items-center gap-2 text-zinc-500 text-sm py-3">
-            <LottieSpinner size={14} />
-            Scanning ports 6188-16188...
-          </div>
-        )}
-
-        {!scanning && instances.length === 0 && (
-          <div className="flex items-center gap-3 p-4 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-sm">
-            <Monitor size={16} weight="duotone" />
-            No running ComfyUI detected. Start ComfyUI and click Refresh.
-          </div>
-        )}
-
-        {instances.length > 0 && (
-          <div className="flex flex-col gap-2">
-            {instances.map((inst) => (
-              <label
-                key={inst.port}
-                className={[
-                  'flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition-colors',
-                  selectedPort === inst.port
-                    ? 'border-emerald-500 bg-emerald-600/10'
-                    : 'border-zinc-800 hover:border-zinc-600',
-                ].join(' ')}
-              >
-                <input
-                  type="radio"
-                  name="comfy-port"
-                  value={inst.port}
-                  checked={selectedPort === inst.port}
-                  onChange={() => setSelectedPort(inst.port)}
-                  className="accent-emerald-500"
-                />
-                <Monitor size={16} weight="duotone" className="text-zinc-400" />
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-zinc-200">Port {inst.port}</div>
-                  <div className="text-xs text-zinc-500">{getDeviceName(inst)}</div>
-                </div>
-                <div className="w-2 h-2 rounded-full bg-emerald-500" />
-              </label>
-            ))}
-          </div>
-        )}
+        <button
+          onClick={scanPorts}
+          disabled={scanning}
+          className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50"
+        >
+          <ArrowCounterClockwise size={12} className={scanning ? 'animate-spin' : ''} />
+          {scanning ? 'Scanning…' : 'Refresh'}
+        </button>
       </div>
 
       {/* Name + Description */}
@@ -893,11 +871,173 @@ function StepConfigure({
           className="flex items-center gap-2 px-5 py-2.5 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {saving ? <LottieSpinner size={14} /> : null}
-          {selectedPort ? 'Save & Test' : 'Save (test later)'}
+          {toolId
+            ? (selectedPort ? 'Update & Test' : 'Update (test later)')
+            : (selectedPort ? 'Save & Test' : 'Save (test later)')}
           <ArrowRight size={14} />
         </button>
       </div>
     </div>
+  )
+}
+
+// ─── Output-type inference & loading placeholders ─────────────────────────────
+
+function inferOutputKind(nodeType: string): 'image' | 'video' | 'audio' | 'model' | 'text' | 'file' {
+  if (['FSSaveImage', 'SaveImage', 'PreviewImage', 'SaveAnimatedWEBP', 'SaveAnimatedPNG'].includes(nodeType)) return 'image'
+  if (['FSSaveVideo', 'VHS_VideoCombine'].includes(nodeType)) return 'video'
+  if (['FSSaveAudio', 'SaveAudio', 'PreviewAudio'].includes(nodeType)) return 'audio'
+  if (['FSSave3D', 'FSHunyuan3DGenerate', 'Save3D', 'TripoSGSave', 'MeshSave'].includes(nodeType) || /Save.*3[Dd]|3[Dd].*Save|GLB|GLTF|Mesh/i.test(nodeType)) return 'model'
+  if (['FSSaveText', 'FSSaveInteger'].includes(nodeType)) return 'text'
+  return 'file'
+}
+
+function OutputLoadingPlaceholder({ kind }: { kind: 'image' | 'video' | 'audio' | 'model' | 'text' | 'file' }) {
+  if (kind === 'image') {
+    return (
+      <div className="aspect-square rounded-xl border border-white/5 bg-zinc-950 flex items-center justify-center overflow-hidden relative">
+        <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 to-zinc-950 animate-pulse" />
+        <LottieSpinner size={36} />
+      </div>
+    )
+  }
+  if (kind === 'video') {
+    return (
+      <div className="col-span-2 aspect-video rounded-xl border border-white/5 bg-zinc-950 flex flex-col items-center justify-center gap-2">
+        <Play size={32} weight="fill" className="text-zinc-700" />
+        <LottieSpinner size={24} />
+      </div>
+    )
+  }
+  if (kind === 'audio') {
+    return (
+      <div className="col-span-2 h-16 rounded-xl border border-white/5 bg-zinc-950 flex items-center justify-center gap-1 px-4">
+        {Array.from({ length: 20 }).map((_, i) => (
+          <div
+            key={i}
+            className="w-1 rounded-full bg-zinc-700 animate-pulse"
+            style={{ height: `${8 + Math.sin(i * 0.8) * 8}px`, animationDelay: `${i * 60}ms` }}
+          />
+        ))}
+      </div>
+    )
+  }
+  if (kind === 'model') {
+    return (
+      <div className="col-span-2 aspect-square rounded-xl border border-white/5 bg-zinc-950 flex flex-col items-center justify-center gap-3">
+        <div className="text-4xl opacity-30 animate-spin" style={{ animationDuration: '3s' }}>⬡</div>
+        <LottieSpinner size={24} />
+      </div>
+    )
+  }
+  if (kind === 'text') {
+    return (
+      <div className="col-span-2 rounded-xl border border-white/5 bg-zinc-950 px-4 py-4 flex flex-col gap-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div
+            key={i}
+            className="h-3 rounded bg-zinc-800 animate-pulse"
+            style={{ width: `${70 - i * 15}%`, animationDelay: `${i * 120}ms` }}
+          />
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div className="col-span-2 h-16 rounded-xl border border-white/5 bg-zinc-950 flex items-center justify-center">
+      <LottieSpinner size={28} />
+    </div>
+  )
+}
+
+// ─── Blur-reveal image ────────────────────────────────────────────────────────
+
+function BlurRevealImage({ src, alt }: { src: string; alt: string }) {
+  const [sharp, setSharp] = useState(false)
+
+  useEffect(() => {
+    // Double-rAF ensures the blurry state is painted before the transition fires
+    const id = requestAnimationFrame(() =>
+      requestAnimationFrame(() => setSharp(true))
+    )
+    return () => cancelAnimationFrame(id)
+  }, [])
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-zinc-800">
+      <img
+        src={src}
+        alt={alt}
+        className="w-full block"
+        style={{
+          filter: sharp ? 'blur(0px) brightness(1)' : 'blur(28px) brightness(0.7)',
+          transform: sharp ? 'scale(1)' : 'scale(1.1)',
+          transition: 'filter 2s ease-out, transform 2s ease-out',
+        }}
+      />
+    </div>
+  )
+}
+
+// ─── 3-D model preview ────────────────────────────────────────────────────────
+
+let _modelViewerLoaded = false
+let _modelViewerLoading = false
+function loadModelViewer(): Promise<void> {
+  return new Promise((resolve) => {
+    if (_modelViewerLoaded) { resolve(); return }
+    if (typeof window !== 'undefined' && customElements.get('model-viewer')) {
+      _modelViewerLoaded = true; resolve(); return
+    }
+    if (_modelViewerLoading) {
+      const t = setInterval(() => { if (_modelViewerLoaded) { clearInterval(t); resolve() } }, 100)
+      return
+    }
+    _modelViewerLoading = true
+    const s = document.createElement('script')
+    s.type = 'module'
+    s.src = 'https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js'
+    s.onload = () => { _modelViewerLoaded = true; _modelViewerLoading = false; resolve() }
+    s.onerror = () => { _modelViewerLoading = false; resolve() }
+    document.head.appendChild(s)
+  })
+}
+
+function ModelPreview({ src, filename }: { src: string; filename: string }) {
+  const [ready, setReady] = useState(false)
+  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+  const isViewable = ['glb', 'gltf'].includes(ext)
+
+  useEffect(() => {
+    if (isViewable) loadModelViewer().then(() => setReady(true))
+  }, [isViewable])
+
+  if (isViewable && ready) {
+    return (
+      <div className="col-span-2 w-full aspect-square rounded-xl overflow-hidden border border-white/5">
+        {/* @ts-ignore */}
+        <model-viewer
+          src={src}
+          alt={filename}
+          auto-rotate
+          camera-controls
+          style={{ width: '100%', height: '100%', background: '#18181b' }}
+        />
+      </div>
+    )
+  }
+
+  // Non-viewable 3D formats (OBJ, FBX, STL…) — download link
+  return (
+    <a
+      href={src}
+      download={filename}
+      className="col-span-2 flex items-center gap-3 px-4 py-3 rounded-xl border border-white/5 bg-zinc-900 hover:bg-zinc-800 transition-colors"
+    >
+      <Spinner size={16} className="text-violet-400" />
+      <span className="text-sm text-zinc-300 flex-1 truncate">{filename}</span>
+      <span className="text-xs text-zinc-600">Download 3D</span>
+    </a>
   )
 }
 
@@ -912,9 +1052,12 @@ function StepTest({
   onBack: () => void
   onNext: () => void
 }) {
-  const schema: WorkflowIO[] = tool.schemaJson
-    ? (JSON.parse(tool.schemaJson) as WorkflowIO[]).filter((f) => f.isInput)
-    : []
+  const allSchema: WorkflowIO[] = tool.schemaJson ? JSON.parse(tool.schemaJson) : []
+  const schema: WorkflowIO[] = allSchema
+    .filter((f) => f.isInput)
+    .filter((f) => !(f.paramName === 'label' && f.nodeType.startsWith('FS')))
+  const expectedOutputKinds: Array<'image' | 'video' | 'audio' | 'model' | 'text' | 'file'> =
+    allSchema.filter((f) => !f.isInput).map((f) => inferOutputKind(f.nodeType))
 
   const [inputs, setInputs] = useState<Record<string, unknown>>(() => {
     const defaults: Record<string, unknown> = {}
@@ -925,16 +1068,20 @@ function StepTest({
   })
 
   const [running, setRunning] = useState(false)
-  const [progress, setProgress] = useState<number | null>(null)
-  const [outputs, setOutputs] = useState<{ filename: string }[]>([])
+  const [progress, setProgress] = useState(0)
+  type OutputFile = { filename: string; kind: 'image' | 'video' | 'audio' | 'model' | 'file' }
+  type OutputText = { text: string; kind: 'text' }
+  type OutputItem = OutputFile | OutputText
+  const [outputs, setOutputs] = useState<OutputItem[]>([])
   const [execMeta, setExecMeta] = useState<{ seed: number; elapsed: string } | null>(null)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<string[]>([])
+  const [logsOpen, setLogsOpen] = useState(false)
 
   const handleRun = async () => {
     setRunning(true)
     setProgress(0)
     setOutputs([])
-    setError('')
+    setError([])
     setExecMeta(null)
     const startTime = Date.now()
 
@@ -946,7 +1093,10 @@ function StepTest({
       })
       if (!res.ok) {
         const err = await res.json()
-        setError(err.error ?? 'Run failed')
+        const lines: string[] = err.error
+          ? String(err.error).split('\n').filter(Boolean)
+          : ['Run failed']
+        setError(lines)
         setRunning(false)
         return
       }
@@ -958,59 +1108,127 @@ function StepTest({
         seed: number
       }
 
-      // Poll history until completed
-      const pollInterval = setInterval(async () => {
+      let done = false
+
+      const finish = async (failed = false) => {
+        if (done) return
+        done = true
+
+        if (failed) {
+          setError(['Execution failed'])
+          setRunning(false)
+          return
+        }
+
+        // Fetch output files from history
         try {
           const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
-          if (!histRes.ok) return
-          const hist = await histRes.json() as Record<string, {
-            status?: { completed?: boolean; status_str?: string }
-            outputs?: Record<string, { images?: { filename: string; subfolder: string; type: string }[] }>
-          }>
-          const entry = hist[result.promptId]
-          if (!entry) return
-
-          if (entry.status?.completed) {
-            clearInterval(pollInterval)
-            // Extract output images
-            const images: { filename: string }[] = []
-            for (const nodeOut of Object.values(entry.outputs ?? {})) {
-              for (const img of nodeOut.images ?? []) {
-                images.push({ filename: img.filename })
+          if (histRes.ok) {
+            const hist = await histRes.json() as Record<string, {
+              status?: { status_str?: string }
+              outputs?: Record<string, {
+                images?: { filename: string }[]
+                gifs?: { filename: string }[]
+                audio?: { filename: string }[]
+                text?: string[]
+                string?: string[]
+              }>
+            }>
+            const entry = hist[result.promptId]
+            const inferKind = (filename: string): 'image' | 'video' | 'audio' | 'model' | 'file' => {
+              const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+              if (['png', 'jpg', 'jpeg', 'webp', 'bmp'].includes(ext)) return 'image'
+              if (['gif', 'mp4', 'webm', 'avi', 'mov'].includes(ext)) return 'video'
+              if (['wav', 'mp3', 'flac', 'ogg', 'aiff', 'm4a'].includes(ext)) return 'audio'
+              if (['glb', 'gltf', 'obj', 'fbx', 'stl', 'ply'].includes(ext)) return 'model'
+              return 'file'
+            }
+            const files: OutputItem[] = []
+            for (const nodeOut of Object.values(entry?.outputs ?? {})) {
+              for (const f of nodeOut.images ?? []) files.push({ filename: f.filename, kind: inferKind(f.filename) })
+              for (const f of nodeOut.gifs ?? []) files.push({ filename: f.filename, kind: inferKind(f.filename) })
+              for (const f of nodeOut.audio ?? []) files.push({ filename: f.filename, kind: 'audio' })
+              for (const t of [...(nodeOut.text ?? []), ...(nodeOut.string ?? [])]) {
+                if (typeof t === 'string' && t.trim()) {
+                  const k = inferKind(t)
+                  if (k !== 'file') files.push({ filename: t, kind: k })
+                  else files.push({ text: t, kind: 'text' })
+                }
               }
             }
-            setOutputs(images)
+            setOutputs(files)
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
             setExecMeta({ seed: result.seed, elapsed: `${elapsed}s` })
-            setRunning(false)
-            setProgress(null)
 
-            // Update execution record
             await fetch(`/api/executions/${result.executionId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                status: entry.status.status_str === 'error' ? 'error' : 'completed',
-                outputsJson: JSON.stringify(images),
+                status: entry?.status?.status_str === 'error' ? 'error' : 'completed',
+                outputsJson: JSON.stringify(files),
                 completedAt: Date.now(),
               }),
-            })
+            }).catch(() => {})
           }
         } catch { /* ignore */ }
-      }, 2000)
+
+        setRunning(false)
+      }
+
+      // Subscribe to SSE proxy for real-time progress events
+      const sse = new EventSource(`/api/comfy/${result.comfyPort}/ws`)
+
+      sse.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data) as { type: string; data?: Record<string, unknown> }
+          if (msg.data?.prompt_id !== result.promptId) return
+
+          if (msg.type === 'progress') {
+            const value = msg.data?.value as number
+            const max = msg.data?.max as number
+            if (max > 0) setProgress(Math.round((value / max) * 100))
+          } else if (msg.type === 'executing' && msg.data?.node === null) {
+            // null node = this prompt finished
+            setProgress(100)
+            sse.close()
+            finish()
+          } else if (msg.type === 'execution_error') {
+            sse.close()
+            finish(true)
+          }
+        } catch { /* ignore */ }
+      }
+
+      sse.onerror = () => { sse.close() }
+
+      // Fallback poll in case SSE misses the completion event
+      const pollInterval = setInterval(async () => {
+        if (done) { clearInterval(pollInterval); return }
+        try {
+          const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
+          if (!histRes.ok) return
+          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean } }>
+          if (hist[result.promptId]?.status?.completed) {
+            clearInterval(pollInterval)
+            sse.close()
+            finish()
+          }
+        } catch { /* ignore */ }
+      }, 3000)
 
       // Timeout after 5 minutes
       setTimeout(() => {
-        clearInterval(pollInterval)
-        if (running) {
-          setError('Timed out waiting for ComfyUI')
+        if (!done) {
+          done = true
+          sse.close()
+          clearInterval(pollInterval)
+          setError(['Timed out waiting for ComfyUI'])
           setRunning(false)
-          setProgress(null)
         }
       }, 300_000)
 
     } catch {
-      setError('Failed to start execution')
+      setError(['Failed to start execution'])
       setRunning(false)
     }
   }
@@ -1067,7 +1285,7 @@ function StepTest({
           {running ? (
             <>
               <LottieSpinner size={14} />
-              {progress !== null ? `${progress}%` : 'Running…'}
+              Running…
             </>
           ) : (
             <>
@@ -1076,39 +1294,99 @@ function StepTest({
             </>
           )}
         </button>
-
-        {running && progress !== null && (
-          <div className="flex-1 bg-zinc-800 rounded-full h-1.5 max-w-xs">
-            <div
-              className="bg-emerald-500 h-full rounded-full transition-all"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        )}
       </div>
 
-      {error && (
-        <div className="flex items-center gap-2 text-red-400 text-sm">
-          <Warning size={14} weight="fill" />
-          {error}
+      {error.length > 0 && (
+        <div className="flex flex-col gap-1 bg-red-950/20 border border-red-900/30 rounded-xl px-4 py-3">
+          {error.map((line, i) => (
+            <div key={i} className="flex items-start gap-2 text-red-400 text-sm font-mono">
+              {i === 0 && <Warning size={14} weight="fill" className="shrink-0 mt-0.5" />}
+              {i > 0 && <span className="w-[14px] shrink-0" />}
+              <span>{line}</span>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Output preview */}
-      {outputs.length > 0 && (
+      {/* ComfyUI logs */}
+      {tool.comfyPort && (
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => setLogsOpen((v) => !v)}
+            className="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors w-fit"
+          >
+            <span className={`transition-transform ${logsOpen ? 'rotate-90' : ''}`}>▶</span>
+            ComfyUI Logs
+          </button>
+          {logsOpen && (
+            <div className="h-48">
+              <ComfyLogsPanel port={tool.comfyPort} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Output preview / loading placeholder */}
+      {(running || outputs.length > 0) && (
         <div>
           <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Output Preview</h3>
-          <StaggerGrid className="grid grid-cols-2 gap-3">
-            {outputs.map((out) => (
-              <StaggerItem key={out.filename}>
-                <img
-                  src={`/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`}
-                  alt={out.filename}
-                  className="w-full rounded-xl border border-zinc-800"
-                />
-              </StaggerItem>
-            ))}
-          </StaggerGrid>
+          {running ? (
+            <div className="grid grid-cols-2 gap-3">
+              {(expectedOutputKinds.length > 0 ? expectedOutputKinds : ['image' as const]).map((kind, i) => (
+                <OutputLoadingPlaceholder key={i} kind={kind} />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {outputs.map((out, i) => {
+                if (out.kind === 'text') {
+                  return (
+                    <div key={i} className="col-span-2 bg-zinc-900 border border-white/5 rounded-xl px-4 py-3">
+                      <p className="text-sm text-zinc-300 whitespace-pre-wrap font-mono-custom">{out.text}</p>
+                    </div>
+                  )
+                }
+                const url = `/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`
+                if (out.kind === 'image') {
+                  return <BlurRevealImage key={out.filename} src={url} alt={out.filename} />
+                }
+                if (out.kind === 'video') {
+                  return (
+                    <video
+                      key={out.filename}
+                      src={url}
+                      controls
+                      loop
+                      className="w-full rounded-xl border border-zinc-800 bg-black"
+                    />
+                  )
+                }
+                if (out.kind === 'audio') {
+                  return (
+                    <div key={out.filename} className="col-span-2 flex flex-col gap-1">
+                      <span className="text-xs text-zinc-500 truncate">{out.filename}</span>
+                      <audio controls src={url} className="w-full" />
+                    </div>
+                  )
+                }
+                if (out.kind === 'model') {
+                  return <ModelPreview key={out.filename} src={url} filename={out.filename} />
+                }
+                return (
+                  <a
+                    key={out.filename}
+                    href={url}
+                    download={out.filename}
+                    className="col-span-2 flex items-center gap-2 px-4 py-3 rounded-xl border border-white/5 bg-zinc-900 hover:bg-zinc-800 transition-colors text-sm text-zinc-300"
+                  >
+                    <Spinner size={14} className="text-zinc-500" />
+                    {out.filename}
+                    <span className="ml-auto text-xs text-zinc-600">Download</span>
+                  </a>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1257,19 +1535,53 @@ const stepVariants = {
   exit: { opacity: 0, y: -12 },
 }
 
-export default function BuildToolPage() {
-  const [step, setStep] = useState(0)
+function BuildToolPageInner() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const editId = searchParams.get('id')
+
+  const [step, setStep] = useState(editId ? 1 : 0)
   const [workflowJson, setWorkflowJson] = useState('')
   const [workflowName, setWorkflowName] = useState('')
   const [tool, setTool] = useState<Tool | null>(null)
+  const [editToolData, setEditToolData] = useState<FullToolData | null>(null)
+  const [loadingEditTool, setLoadingEditTool] = useState(!!editId)
+
+  useEffect(() => {
+    if (!editId) return
+    fetch(`/api/tools/${editId}`)
+      .then((r) => r.json())
+      .then((t: FullToolData) => {
+        setEditToolData(t)
+        setWorkflowJson(t.workflowJson)
+        setWorkflowName(t.name)
+        setTool({ id: t.id, name: t.name, comfyPort: t.comfyPort, schemaJson: t.schemaJson })
+      })
+      .catch(() => {})
+      .finally(() => setLoadingEditTool(false))
+  }, [editId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loadingEditTool) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <LottieSpinner size={32} />
+      </div>
+    )
+  }
 
   return (
     <div className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
         <div>
-          <h1 className="font-tech text-xl font-semibold text-zinc-100">Build Tool</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">Turn a ComfyUI workflow into a production-ready tool</p>
+          <h1 className="font-tech text-xl font-semibold text-zinc-100">
+            {editId ? 'Edit Tool' : 'Build Tool'}
+          </h1>
+          <p className="text-sm text-zinc-500 mt-0.5">
+            {editId
+              ? 'Update configuration, test, and redeploy your tool'
+              : 'Turn a ComfyUI workflow into a production-ready tool'}
+          </p>
         </div>
       </div>
 
@@ -1306,8 +1618,11 @@ export default function BuildToolPage() {
               <StepConfigure
                 workflowJson={workflowJson}
                 initialName={workflowName}
-                onBack={() => setStep(0)}
+                onBack={() => editId ? router.push('/integrations/comfyui') : setStep(0)}
                 onNext={(t) => { setTool(t); setStep(2) }}
+                toolId={editId ?? undefined}
+                initialSchema={editToolData ? JSON.parse(editToolData.schemaJson) : undefined}
+                initialDescription={editToolData?.description ?? undefined}
               />
             </motion.div>
           )}
@@ -1346,5 +1661,13 @@ export default function BuildToolPage() {
         </AnimatePresence>
       </div>
     </div>
+  )
+}
+
+export default function BuildToolPage() {
+  return (
+    <Suspense>
+      <BuildToolPageInner />
+    </Suspense>
   )
 }

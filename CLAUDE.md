@@ -20,7 +20,7 @@ pnpm --filter @flowscale/eios-web build
 
 # Start Electron desktop (must build first, and web must be running on 14173)
 pnpm --filter @flowscale/eios-desktop build
-./node_modules/.bin/electron apps/desktop/dist/main.js
+apps/desktop/node_modules/.bin/electron apps/desktop/dist/main.js
 ```
 
 There is no test runner configured. Typecheck is the primary correctness tool — always run after changes.
@@ -38,10 +38,19 @@ Turborepo + pnpm workspaces with three packages:
 ### Data flow
 
 All ComfyUI communication goes through Next.js API routes (CORS-free):
-- `GET /api/comfy/scan` — TCP-probes ports 8188–9188 to find running ComfyUI instances
+- `GET /api/comfy/scan` — TCP-probes ports **6188–16188** to find running ComfyUI instances
 - `GET|POST /api/comfy/[port]/[...path]` — transparent proxy to `http://127.0.0.1:[port]/[path]`; uses `url.pathname` (not decoded route params) to preserve `%2F` encoding needed for ComfyUI's `/userdata` routes
 
 Persistence is local SQLite at `~/.flowscale/eios.db` via Drizzle ORM + better-sqlite3. Schema is in `apps/web/src/lib/db/schema.ts`; the DB is initialised in `apps/web/src/lib/db/index.ts`.
+
+### Database schema
+
+Five tables (see `apps/web/src/lib/db/schema.ts` for Drizzle types):
+- **`tools`** — saved tool definitions; `schemaJson` stores `WorkflowIO[]`; `layout` is `'left-right' | 'canvas'`; `status` is `'dev' | 'production'`
+- **`executions`** — run history per tool; cascades on tool delete; `status` is `'running' | 'completed' | 'error'`
+- **`canvases`** — visual boards; viewport + settings stored as JSON strings
+- **`canvas_items`** — draggable objects on a canvas; composite PK `(canvas_id, id)`
+- **`tool_configs`** — input/output visibility config keyed by `workflow_id`
 
 ### Workflow analysis (`packages/workflow`)
 
@@ -65,9 +74,17 @@ Four-step flow: **Attach → Auto-Configure → Test → Deploy**. All four step
 
 Desktop-only APIs are exposed via `window.desktop` (typed in `apps/web/src/types/desktop.d.ts`):
 - `window.desktop.dialog.openFile()` — native file picker, returns JSON string
+- `window.desktop.shell.openExternal(url)` — open URL in system browser
 - `window.desktop.auth.*` — PKCE OAuth against `https://dev-api.flowscale.ai`
 
 In browser mode `window.desktop` is `undefined`; feature-gate with `if (window.desktop)`.
+
+### Key utilities
+
+- **`apps/web/src/lib/axios.ts`** — pre-configured Axios instance with base `/`; response interceptor auto-unwraps `.data`, so callers receive the payload directly
+- **`apps/web/src/lib/comfyui-client.ts`** — typed REST + WebSocket client for ComfyUI (`queuePrompt`, `getHistory`, `connectWS`, etc.)
+- **`apps/web/src/lib/platform.ts`** — `isDesktop()` check; `getComfyUIUrl()` / `setComfyUIUrl()` backed by localStorage
+- **`apps/web/src/store/podsStore.ts`** — Zustand store; `refreshPods()` calls `/api/comfy/scan` and populates `pods[]`
 
 ### Reserved ports
 

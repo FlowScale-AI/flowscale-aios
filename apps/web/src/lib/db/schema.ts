@@ -60,9 +60,34 @@ export const toolConfigs = sqliteTable('tool_configs', {
   configJson: text('config_json').notNull(),
 })
 
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  username: text('username').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  role: text('role').notNull().default('artist'), // 'admin'|'pipeline_td'|'dev'|'artist'
+  status: text('status').notNull().default('pending'), // 'active'|'pending'|'disabled'
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch() * 1000)`),
+  approvedAt: integer('approved_at'),
+  approvedBy: text('approved_by'),
+})
+
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  expiresAt: integer('expires_at').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch() * 1000)`),
+})
+
+export const setup = sqliteTable('setup', {
+  id: integer('id').primaryKey(),
+  initialPassword: text('initial_password').notNull(),
+})
+
 export type Tool = typeof tools.$inferSelect
 export type NewTool = typeof tools.$inferInsert
 export type Execution = typeof executions.$inferSelect
 export type NewExecution = typeof executions.$inferInsert
 export type Canvas = typeof canvases.$inferSelect
 export type CanvasItemRow = typeof canvasItems.$inferSelect
+export type User = typeof users.$inferSelect
+export type Session = typeof sessions.$inferSelect

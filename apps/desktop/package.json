@@ -1,7 +1,7 @@
 {
-  "name": "@flowscale/eios-desktop",
+  "name": "@flowscale/aios-desktop",
   "version": "0.1.0",
-  "description": "FlowScale EIOS desktop application",
+  "description": "FlowScale AI OS desktop application",
   "author": {
     "name": "FlowScale",
     "email": "hello@flowscale.ai"
@@ -12,6 +12,9 @@
     "dev": "electron dist/main.js",
     "build": "tsc",
     "package": "electron-builder --config electron-builder.yml --publish never",
+    "package:mac": "electron-builder --config electron-builder.yml --mac --publish never",
+    "package:linux": "electron-builder --config electron-builder.yml --linux --publish never",
+    "package:win": "electron-builder --config electron-builder.yml --win --publish never",
     "rebuild": "electron-rebuild",
     "postinstall": "electron-rebuild"
   },
@@ -22,6 +25,7 @@
     "@electron/rebuild": "^4.0.3",
     "@types/node": "^22.15.17",
     "electron": "^39.0.0",
+    "electron-builder": "^25.1.8",
     "typescript": "^5.8.3"
   }
 }

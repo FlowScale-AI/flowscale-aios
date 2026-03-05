@@ -149,7 +149,10 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
 
           const hist = await histRes.json() as Record<string, {
             status?: { completed?: boolean; status_str?: string };
-            outputs?: Record<string, { images?: { filename: string; subfolder: string; type: string }[] }>;
+            outputs?: Record<string, {
+              images?: { filename: string; subfolder: string; type: string }[];
+              text?: string[];
+            }>;
           }>;
 
           const entry = hist[promptId];
@@ -176,6 +179,18 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
                 label: img.filename,
                 run_id: promptId,
               };
+            }
+            for (const t of nodeOut.text ?? []) {
+              if (typeof t === "string" && t.trim()) {
+                const key = `text_${Object.keys(resultsMap).length}`;
+                resultsMap[key] = {
+                  content_type: "text/plain",
+                  data: t,
+                  filename: key,
+                  label: t.length > 40 ? t.slice(0, 40) + "…" : t,
+                  run_id: promptId,
+                };
+              }
             }
           }
 
