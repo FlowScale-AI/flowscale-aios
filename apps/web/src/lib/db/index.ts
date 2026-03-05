@@ -64,6 +64,7 @@ export function getDb() {
       description TEXT NOT NULL DEFAULT '',
       viewport_json TEXT NOT NULL DEFAULT '{"x":0,"y":0,"zoom":1}',
       settings_json TEXT NOT NULL DEFAULT '{"grid_size":8,"snap_to_grid":false,"background":"#ffffff"}',
+      is_shared INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -113,6 +114,9 @@ export function getDb() {
 
     CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
   `)
+
+  // Migrations for existing DBs
+  try { sqlite.exec(`ALTER TABLE canvases ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0`) } catch { /* column already exists */ }
 
   // First-run: seed admin user if no users exist
   const userCount = sqlite.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }

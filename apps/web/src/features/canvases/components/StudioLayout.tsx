@@ -7,7 +7,11 @@ import CanvasSurface from "./CanvasSurface";
 import { useCanvasTools } from "@/features/canvases/api/getCanvasTools";
 import { useGetDeployedClusters } from "@/features/canvases/api";
 
-export default function StudioLayout() {
+export default function StudioLayout({
+  readOnly = false,
+}: {
+  readOnly?: boolean;
+}) {
   const [activeToolId, setActiveToolId] = useState<string | undefined>(
     undefined,
   );
@@ -15,7 +19,12 @@ export default function StudioLayout() {
   const [isExecuting, setIsExecuting] = useState(false);
 
   // Get tools data to find the project_id for the selected tool
-  const { data: toolsData, isLoading: isToolsLoading, refetch: refetchTools, isRefetching: isToolsRefetching } = useCanvasTools();
+  const {
+    data: toolsData,
+    isLoading: isToolsLoading,
+    refetch: refetchTools,
+    isRefetching: isToolsRefetching,
+  } = useCanvasTools();
 
   // Find the project_id of the active tool — always "local" in EIOS
   const activeProjectId = useMemo(() => {
@@ -62,22 +71,27 @@ export default function StudioLayout() {
     setToolInputs(inputs);
   }, []);
 
-  const handleToolInputChange = useCallback((parameterName: string, value: any) => {
-    setToolInputs(prev => ({ ...prev, [parameterName]: value }));
-  }, []);
+  const handleToolInputChange = useCallback(
+    (parameterName: string, value: any) => {
+      setToolInputs((prev) => ({ ...prev, [parameterName]: value }));
+    },
+    [],
+  );
 
   return (
     <div className="flex h-full w-full overflow-hidden">
-      {/* Left: Tool Categories */}
-      <ToolCategories
-        toolsData={toolsData}
-        isToolsLoading={isToolsLoading}
-        onSelectTool={handleSelectTool}
-        activeToolId={activeToolId}
-        isExecuting={isExecuting}
-        onSync={() => refetchTools()}
-        isSyncing={isToolsRefetching}
-      />
+      {/* Left: Tool Categories — hidden in read-only (shared view) */}
+      {!readOnly && (
+        <ToolCategories
+          toolsData={toolsData}
+          isToolsLoading={isToolsLoading}
+          onSelectTool={handleSelectTool}
+          activeToolId={activeToolId}
+          isExecuting={isExecuting}
+          onSync={() => refetchTools()}
+          isSyncing={isToolsRefetching}
+        />
+      )}
 
       {/* Center: Canvas Surface */}
       <CanvasSurface
@@ -88,14 +102,17 @@ export default function StudioLayout() {
         executionApiUrl={executionApiUrl}
         projectId={activeProjectId}
         onToolInputChange={handleToolInputChange}
+        readOnly={readOnly}
       />
 
-      {/* Right: Inputs Panel */}
-      <InputsPanel
-        activeToolId={activeToolId}
-        onInputsChange={handleInputsChange}
-        externalInputs={toolInputs}
-      />
+      {/* Right: Inputs Panel — hidden in read-only (shared view) */}
+      {!readOnly && (
+        <InputsPanel
+          activeToolId={activeToolId}
+          onInputsChange={handleInputsChange}
+          externalInputs={toolInputs}
+        />
+      )}
     </div>
   );
 }
