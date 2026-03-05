@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { AppWindow, ArrowRight, ArrowUpRight, Warning, MagnifyingGlass, Trash } from 'phosphor-react'
+import { ArrowUpRight, Warning, MagnifyingGlass, Trash, Palette } from 'phosphor-react'
 import { PageTransition, FadeIn, StaggerGrid, StaggerItem, SkeletonCard, Modal } from '@/components/ui'
 
 interface Tool {
@@ -21,6 +21,29 @@ interface Tool {
 // Tool card
 // ---------------------------------------------------------------------------
 
+function CanvasCard() {
+  return (
+    <div className="group relative h-full">
+      <Link href="/canvas" className="block h-full">
+        <div className="relative h-full overflow-hidden rounded-lg border border-white/5 bg-[var(--color-background-panel)] p-5 transition-all duration-200 group-hover:border-zinc-700 group-hover:bg-zinc-800/50">
+          <div className="relative z-10 flex flex-col gap-3">
+            <div className="flex size-10 items-center justify-center rounded-md border border-white/10 bg-white/5 transition-colors duration-200 group-hover:bg-emerald-500/10 group-hover:border-emerald-500/20 group-hover:text-emerald-400 text-zinc-400">
+              <Palette size={20} weight="duotone" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="font-tech text-base font-medium text-zinc-100 group-hover:text-white transition-colors">Canvas</h3>
+              <p className="text-sm text-zinc-500 line-clamp-2 leading-relaxed">Visual boards for building and arranging your AI workflows.</p>
+            </div>
+          </div>
+          <div className="absolute top-5 right-5 opacity-0 -translate-x-2 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0">
+            <ArrowUpRight size={16} className="text-zinc-400" />
+          </div>
+        </div>
+      </Link>
+    </div>
+  )
+}
+
 function ToolCard({ tool, onDelete }: { tool: Tool; onDelete: (tool: Tool) => void }) {
   return (
     <div className="group relative h-full">
@@ -32,8 +55,8 @@ function ToolCard({ tool, onDelete }: { tool: Tool; onDelete: (tool: Tool) => vo
           {/* Content */}
           <div className="relative z-10 flex flex-col gap-3">
             {/* Icon */}
-            <div className="flex size-10 items-center justify-center rounded-md border border-white/10 bg-white/5 transition-colors duration-200 group-hover:bg-emerald-500/10 group-hover:border-emerald-500/20 group-hover:text-emerald-400 text-zinc-400">
-              <AppWindow size={20} weight="duotone" />
+            <div className="flex size-10 items-center justify-center rounded-md border border-white/10 bg-white/5 overflow-hidden">
+              <img src="/comfyui-logo.png" alt="ComfyUI" className="size-7 object-contain" />
             </div>
 
             {/* Text */}
@@ -146,11 +169,6 @@ export default function AppsPage() {
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                     />
-                    <div className="hidden md:flex items-center gap-1">
-                      <kbd className="hidden sm:inline-flex h-5 items-center gap-1 rounded border border-white/10 bg-white/5 px-1.5 font-mono-custom text-[10px] font-medium text-zinc-500">
-                        <span className="text-xs">&#8984;</span>K
-                      </kbd>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -189,27 +207,6 @@ export default function AppsPage() {
               </div>
             )}
 
-            {/* Empty state */}
-            {!isLoading && !error && tools?.length === 0 && (
-              <FadeIn>
-                <div className="flex flex-col items-center justify-center py-24 text-center">
-                  <div className="flex size-16 items-center justify-center rounded-2xl bg-zinc-900 border border-white/5 mb-4">
-                    <AppWindow size={28} weight="duotone" className="text-zinc-600" />
-                  </div>
-                  <h2 className="font-tech text-base font-medium text-zinc-300 mb-2">No tools deployed yet</h2>
-                  <p className="text-sm text-zinc-500 mb-6 max-w-xs">
-                    Go to Build Tool to create and deploy a ComfyUI workflow as a production tool.
-                  </p>
-                  <Link
-                    href="/build-tool"
-                    className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md transition-colors"
-                  >
-                    Open Build Tool
-                    <ArrowRight size={14} />
-                  </Link>
-                </div>
-              </FadeIn>
-            )}
 
             {/* Search no results */}
             {!isLoading && !error && tools && tools.length > 0 && filteredTools.length === 0 && (
@@ -221,8 +218,11 @@ export default function AppsPage() {
             )}
 
             {/* Grid */}
-            {!isLoading && !error && filteredTools.length > 0 && (
+            {!isLoading && !error && (
               <StaggerGrid className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <StaggerItem key="canvas">
+                  <CanvasCard />
+                </StaggerItem>
                 {filteredTools.map((tool) => (
                   <StaggerItem key={tool.id}>
                     <ToolCard tool={tool} onDelete={setDeleteTarget} />

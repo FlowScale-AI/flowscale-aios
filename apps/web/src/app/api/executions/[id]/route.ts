@@ -19,7 +19,7 @@ async function saveOutputsToDisk(
     return
   }
 
-  const toolDir = join(homedir(), '.flowscale', 'eios-outputs', toolId)
+  const toolDir = join(homedir(), '.flowscale', 'aios-outputs', toolId)
   await mkdir(toolDir, { recursive: true })
 
   await Promise.allSettled(

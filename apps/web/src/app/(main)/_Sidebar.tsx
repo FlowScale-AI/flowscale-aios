@@ -4,30 +4,30 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   AppWindow,
-  Wrench,
-  Palette,
   GearSix,
+  ImageSquare,
   Infinity as InfinityIcon,
   Users,
   SignOut,
-  Cpu,
+  Plugs,
+  Compass,
 } from 'phosphor-react'
 import type { Role } from '@/lib/auth'
 
 const ALL_NAV_ITEMS = [
+  { href: '/explore', icon: Compass, label: 'Explore' },
   { href: '/apps', icon: AppWindow, label: 'Apps' },
-  { href: '/build-tool', icon: Wrench, label: 'Build Tool' },
-  { href: '/canvas', icon: Palette, label: 'Canvas' },
-  { href: '/comfyui', icon: Cpu, label: 'ComfyUI' },
+  { href: '/outputs', icon: ImageSquare, label: 'Assets' },
+  { href: '/integrations', icon: Plugs, label: 'Integrations' },
   { href: '/users', icon: Users, label: 'Users' },
   { href: '/settings', icon: GearSix, label: 'Settings' },
 ]
 
 const ROLE_PATHS: Record<Role, string[]> = {
-  admin: ['/apps', '/build-tool', '/canvas', '/comfyui', '/users', '/settings'],
-  pipeline_td: ['/apps', '/build-tool', '/canvas', '/comfyui', '/users', '/settings'],
-  dev: ['/apps', '/build-tool', '/canvas', '/comfyui', '/settings'],
-  artist: ['/apps', '/canvas'],
+  admin: ['/apps', '/outputs', '/integrations', '/explore', '/users', '/settings'],
+  pipeline_td: ['/apps', '/outputs', '/integrations', '/explore', '/users', '/settings'],
+  dev: ['/apps', '/outputs', '/integrations', '/explore', '/settings'],
+  artist: ['/apps', '/outputs', '/explore'],
 }
 
 export default function Sidebar({ role, username }: { role: Role; username: string }) {

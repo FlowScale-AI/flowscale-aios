@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Plus, Palette, Trash, DotsThree } from 'phosphor-react'
+import { Plus, Palette, Trash, DotsThree, ArrowLeft } from 'phosphor-react'
 import { getCanvasList } from '@/features/canvases/api/getCanvasList'
 import { deleteCanvas } from '@/features/canvases/api/deleteCanvas'
 import type { Canvas } from '@/features/canvases/types'
@@ -103,9 +103,17 @@ export default function CanvasListPage() {
     <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
-        <div>
-          <h1 className="font-tech text-xl font-semibold text-zinc-100">Canvas</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">Create and manage your generative canvases</p>
+        <div className="flex items-center gap-4">
+          <Link
+            href="/apps"
+            className="flex items-center justify-center size-8 rounded-lg border border-white/10 text-zinc-500 hover:text-zinc-200 hover:border-zinc-600 transition-colors"
+          >
+            <ArrowLeft size={16} />
+          </Link>
+          <div>
+            <h1 className="font-tech text-xl font-semibold text-zinc-100">Canvas</h1>
+            <p className="text-sm text-zinc-500 mt-0.5">Create and manage your generative canvases</p>
+          </div>
         </div>
         <button
           onClick={() => setModalOpen(true)}

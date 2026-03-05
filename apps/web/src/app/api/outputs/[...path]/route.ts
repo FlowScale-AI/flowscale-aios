@@ -3,7 +3,7 @@ import { readFile } from 'fs/promises'
 import { join, normalize, resolve } from 'path'
 import { homedir } from 'os'
 
-const BASE_DIR = resolve(join(homedir(), '.flowscale', 'eios-outputs'))
+const BASE_DIR = resolve(join(homedir(), '.flowscale', 'aios-outputs'))
 
 export async function GET(
   _req: NextRequest,
