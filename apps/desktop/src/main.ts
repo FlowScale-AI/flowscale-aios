@@ -1,7 +1,7 @@
-import { app, BrowserWindow, Menu, session, shell } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, session, shell } from 'electron'
 import path from 'path'
 import { spawn, type ChildProcess } from 'child_process'
-import { writeFileSync, mkdirSync, existsSync } from 'fs'
+import { writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs'
 import { execSync } from 'child_process'
 import log from 'electron-log'
 import { registerAuthIpc, handleOAuthCallback } from './ipc/auth.js'
@@ -13,6 +13,12 @@ log.initialize()
 const isDev = !app.isPackaged
 const EIOS_PORT = 14173
 
+// Set app name — on Wayland this becomes the window's app_id, which KDE uses to match .desktop files
+app.setName('flowscale-aios')
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('class', 'flowscale-aios')
+}
+
 // Register OAuth protocol handler before single-instance lock (Windows/Linux)
 if (process.platform !== 'darwin') {
   if (isDev) {
@@ -20,13 +26,22 @@ if (process.platform !== 'darwin') {
 
     if (process.platform === 'linux') {
       try {
+        // Install app icon to hicolor theme so KDE picks it up
+        const iconsDir = path.join(app.getPath('home'), '.local/share/icons/hicolor/256x256/apps')
+        if (!existsSync(iconsDir)) mkdirSync(iconsDir, { recursive: true })
+        const iconSrc = path.join(__dirname, '..', 'assets', 'icon.png')
+        const iconDest = path.join(iconsDir, 'flowscale-aios.png')
+        if (existsSync(iconSrc)) copyFileSync(iconSrc, iconDest)
+
         const appsDir = path.join(app.getPath('home'), '.local/share/applications')
         if (!existsSync(appsDir)) mkdirSync(appsDir, { recursive: true })
-        const desktopFile = path.join(appsDir, 'flowscale-eios-dev.desktop')
+        const desktopFile = path.join(appsDir, 'flowscale-aios.desktop')
         const content = [
           '[Desktop Entry]',
-          'Name=FlowScale EIOS (dev)',
+          'Name=FlowScale AI OS',
           `Exec=${process.execPath} ${__filename} %u`,
+          'Icon=flowscale-aios',
+          'StartupWMClass=flowscale-aios',
           'StartupNotify=false',
           'Terminal=false',
           'Type=Application',
@@ -36,7 +51,7 @@ if (process.platform !== 'darwin') {
         ].join('\n')
         writeFileSync(desktopFile, content, 'utf-8')
         execSync(`update-desktop-database ${appsDir}`)
-        execSync(`xdg-mime default flowscale-eios-dev.desktop x-scheme-handler/flowscaleeios`)
+        execSync(`xdg-mime default flowscale-aios.desktop x-scheme-handler/flowscaleeios`)
       } catch (err) {
         log.warn('[protocol] Failed to register Linux protocol handler:', err)
       }
@@ -99,13 +114,16 @@ function startNextServer(): void {
     'web',
     '.next',
     'standalone',
+    'apps',
+    'web',
     'server.js',
   )
 
   log.info('[server] Starting Next.js standalone server:', serverScript)
 
+  // ELECTRON_RUN_AS_NODE=1 makes the Electron binary behave as plain Node.js
   nextServer = spawn(process.execPath, [serverScript], {
-    env: { ...process.env, PORT: String(EIOS_PORT), HOSTNAME: '127.0.0.1' },
+    env: { ...process.env, PORT: String(EIOS_PORT), HOSTNAME: '127.0.0.1', ELECTRON_RUN_AS_NODE: '1' },
     stdio: 'pipe',
   })
 
@@ -123,7 +141,8 @@ function createWindow(): BrowserWindow {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: 'FlowScale EIOS',
+    title: 'FlowScale AI OS',
+    icon: nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'icon.png')),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

@@ -43,7 +43,7 @@ jobs:
         run: pnpm install
 
       - name: Build web (Next.js standalone)
-        run: pnpm --filter @flowscale/eios-web build
+        run: pnpm --filter @flowscale/aios-web build
 
       # Next.js standalone doesn't copy static assets — do it manually
       - name: Copy static assets into standalone
@@ -67,10 +67,10 @@ jobs:
         continue-on-error: true  # non-fatal if better-sqlite3 isn't present in standalone
 
       - name: Build desktop TypeScript
-        run: pnpm --filter @flowscale/eios-desktop build
+        run: pnpm --filter @flowscale/aios-desktop build
 
       - name: Package (${{ matrix.platform }})
-        run: pnpm --filter @flowscale/eios-desktop run package:${{ matrix.platform }}
+        run: pnpm --filter @flowscale/aios-desktop run package:${{ matrix.platform }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS code signing — set these repository secrets to enable:

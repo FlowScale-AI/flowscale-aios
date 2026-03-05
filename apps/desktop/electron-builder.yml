@@ -1,5 +1,5 @@
-appId: ai.flowscale.eios
-productName: FlowScale EIOS
+appId: ai.flowscale.aios
+productName: FlowScale AI OS
 copyright: Copyright © 2024 FlowScale
 
 directories:
@@ -8,15 +8,24 @@ directories:
 
 files:
   - dist/**/*
+  - assets/**/*
 
-# The Next.js standalone server is bundled into the app's Resources directory.
-# main.ts reads it from: process.resourcesPath/apps/web/.next/standalone/server.js
 extraResources:
   - from: ../web/.next/standalone
     to: apps/web/.next/standalone
     filter:
       - "**/*"
       - "!**/*.map"
+  # Static CSS/JS chunks — monorepo server.js expects them at apps/web/.next/static
+  - from: ../web/.next/static
+    to: apps/web/.next/standalone/apps/web/.next/static
+    filter:
+      - "**/*"
+  # Public assets
+  - from: ../web/public
+    to: apps/web/.next/standalone/apps/web/public
+    filter:
+      - "**/*"
 
 mac:
   target:
@@ -31,10 +40,11 @@ dmg:
 
 linux:
   target:
-    - target: AppImage
+    - target: dir
       arch:
         - x64
   category: Development
+  executableName: flowscale-aios
 
 win:
   target:

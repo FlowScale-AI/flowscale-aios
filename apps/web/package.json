@@ -1,5 +1,5 @@
 {
-  "name": "@flowscale/eios-web",
+  "name": "@flowscale/aios-web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -13,7 +13,7 @@
     "@iconify/react": "^6.0.2",
     "@tanstack/react-query": "^5.90.20",
     "axios": "^1.13.6",
-    "better-sqlite3": "^11.9.1",
+    "better-sqlite3": "^12.6.2",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.44.1",
     "framer-motion": "^12.34.5",

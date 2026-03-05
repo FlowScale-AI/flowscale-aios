@@ -22,10 +22,9 @@ type UserRow = {
   approvedBy: string | null
 }
 
-const ROLES = ['admin', 'pipeline_td', 'dev', 'artist']
+const ROLES = ['admin', 'dev', 'artist']
 const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
-  pipeline_td: 'Pipeline TD',
   dev: 'Dev',
   artist: 'Artist',
 }
