@@ -1,7 +1,19 @@
 'use client'
 
-import { Compass } from 'phosphor-react'
+import Link from 'next/link'
+import { Compass, ArrowUpRight, Layout } from 'phosphor-react'
 import { PageTransition, FadeIn } from '@/components/ui'
+
+const INSTALLED_APPS = [
+  {
+    title: 'Canvas',
+    href: '/canvas',
+    description: 'Visual workspace for composing and running AI tools. Drag, drop, and connect outputs across workflows.',
+    category: 'Creative',
+    color: 'emerald',
+    icon: Layout,
+  },
+]
 
 const COMING_SOON_APPS = [
   {
@@ -15,12 +27,6 @@ const COMING_SOON_APPS = [
     description: 'Create and iterate on 3D models, textures, and materials using generative AI. Export to industry-standard formats.',
     category: 'Production',
     color: 'violet',
-  },
-  {
-    title: 'Texture Generator',
-    description: 'Generate seamless PBR textures from text or reference images. Create tileable materials for 3D environments.',
-    category: 'Production',
-    color: 'amber',
   },
   {
     title: 'Motion Capture Studio',
@@ -72,11 +78,40 @@ export default function ExplorePage() {
         <FadeIn from="bottom" duration={0.4}>
           <div className="mb-10">
             <h1 className="font-tech text-3xl font-bold text-white mb-2">Explore</h1>
-            <p className="text-zinc-400 text-base">Upcoming apps and experiences coming to FlowScale.</p>
+            <p className="text-zinc-400 text-base">Apps and experiences on FlowScale.</p>
           </div>
         </FadeIn>
 
         <FadeIn delay={0.1}>
+          <div className="mb-3">
+            <h2 className="font-tech text-lg font-semibold text-zinc-300 mb-1">Installed</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 mb-12">
+            {INSTALLED_APPS.map(({ title, href, description, category, color, icon: Icon }) => (
+              <Link key={title} href={href} className="group">
+                <div className="relative overflow-hidden rounded-xl border border-white/5 bg-[var(--color-background-panel)] p-6 transition-all duration-200 group-hover:border-emerald-500/30 group-hover:bg-zinc-800/50">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className={`size-9 rounded-lg border flex items-center justify-center shrink-0 ${COLOR_MAP[color]}`}>
+                      <Icon size={18} weight="duotone" />
+                    </div>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium">installed</span>
+                  </div>
+                  <h3 className="font-tech text-sm font-semibold text-zinc-200 mb-1.5 group-hover:text-white transition-colors">{title}</h3>
+                  <p className="text-xs text-zinc-500 leading-relaxed mb-3">{description}</p>
+                  <span className="text-[10px] text-zinc-600 font-medium uppercase tracking-wider">{category}</span>
+                  <div className="absolute top-5 right-5 opacity-0 -translate-x-2 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0">
+                    <ArrowUpRight size={14} className="text-zinc-400" />
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </FadeIn>
+
+        <FadeIn delay={0.15}>
+          <div className="mb-3">
+            <h2 className="font-tech text-lg font-semibold text-zinc-400 mb-1">Coming Soon</h2>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
             {COMING_SOON_APPS.map(({ title, description, category, color }) => (
               <div
@@ -100,3 +135,4 @@ export default function ExplorePage() {
     </PageTransition>
   )
 }
+
