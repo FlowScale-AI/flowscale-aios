@@ -69,7 +69,7 @@ export default function AssetsPage() {
 
   // Fetch all tools
   useEffect(() => {
-    fetch('/api/tools')
+    fetch('/api/tools?status=production')
       .then((r) => r.json())
       .then((data: ToolRow[]) => {
         setTools(data)
