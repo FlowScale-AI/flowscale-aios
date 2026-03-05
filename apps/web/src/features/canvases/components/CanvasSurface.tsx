@@ -1613,7 +1613,7 @@ export default function CanvasSurface({
           </Tooltip>
         </div>
 
-        {canvasId && (
+        {canvasId && !readOnly && (
           <Tooltip
             content={shareCopied ? "Link copied!" : "Copy share link"}
             side="bottom"

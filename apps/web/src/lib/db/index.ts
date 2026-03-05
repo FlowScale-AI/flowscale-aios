@@ -116,7 +116,11 @@ export function getDb() {
   `)
 
   // Migrations for existing DBs
-  try { sqlite.exec(`ALTER TABLE canvases ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0`) } catch { /* column already exists */ }
+  const canvasColumns = sqlite.prepare('PRAGMA table_info(canvases)').all() as { name: string }[]
+  const hasIsSharedColumn = canvasColumns.some((col) => col.name === 'is_shared')
+  if (!hasIsSharedColumn) {
+    sqlite.exec('ALTER TABLE canvases ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0')
+  }
 
   // First-run: seed admin user if no users exist
   const userCount = sqlite.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }

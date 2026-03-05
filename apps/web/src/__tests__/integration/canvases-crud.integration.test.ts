@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createTestDb, makeRequest } from './setup'
+import { createTestDb, seedAdmin, createTestSession, makeRequest } from './setup'
 import type { TestDb } from './setup'
 
 let db: TestDb
@@ -13,9 +13,20 @@ import { GET as getCanvas, PATCH as patchCanvas, DELETE as deleteCanvas } from '
 import { GET as getItems, POST as upsertItems, PATCH as replaceItems } from '../../app/api/canvases/[id]/items/route'
 
 describe('Canvases CRUD integration', () => {
+  let adminToken: string
+
   beforeEach(() => {
     db = createTestDb()
+    const admin = seedAdmin(db)
+    adminToken = createTestSession(db, admin.id)
   })
+
+  function authedReq(url: string, init?: any) {
+    return makeRequest(url, {
+      ...init,
+      cookies: { fs_session: adminToken },
+    })
+  }
 
   async function createOne(name = 'Test Canvas') {
     const req = makeRequest('/api/canvases', {
@@ -97,7 +108,7 @@ describe('Canvases CRUD integration', () => {
   it('PATCH /api/canvases/[id] toggles is_shared', async () => {
     const created = await createOne()
 
-    const req = makeRequest(`/api/canvases/${created._id}`, {
+    const req = authedReq(`/api/canvases/${created._id}`, {
       method: 'PATCH',
       body: JSON.stringify({ is_shared: true }),
       headers: { 'Content-Type': 'application/json' },
@@ -106,12 +117,25 @@ describe('Canvases CRUD integration', () => {
     expect(res.status).toBe(200)
     const canvas = await res.json()
     expect(canvas.is_shared).toBe(true)
+    expect(canvas.updated_at).not.toBe(created.updated_at)
+  })
+
+  it('PATCH /api/canvases/[id] returns 401 without auth', async () => {
+    const created = await createOne()
+
+    const req = makeRequest(`/api/canvases/${created._id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_shared: true }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const res = await patchCanvas(req, { params: Promise.resolve({ id: created._id }) })
+    expect(res.status).toBe(401)
   })
 
   it('PATCH /api/canvases/[id] returns 400 for no valid fields', async () => {
     const created = await createOne()
 
-    const req = makeRequest(`/api/canvases/${created._id}`, {
+    const req = authedReq(`/api/canvases/${created._id}`, {
       method: 'PATCH',
       body: JSON.stringify({ name: 'ignored' }), // name is not patchable via this route
       headers: { 'Content-Type': 'application/json' },

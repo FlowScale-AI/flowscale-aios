@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createTestDb, makeRequest } from './setup'
+import { createTestDb, seedAdmin, createTestSession, makeRequest } from './setup'
 import type { TestDb } from './setup'
 
 let db: TestDb
@@ -15,6 +15,7 @@ import { PATCH as patchCanvas } from '../../app/api/canvases/[id]/route'
 
 describe('Canvas item deletion and extra canvas tests', () => {
   let canvasId: string
+  let adminToken: string
 
   const sampleItem = {
     _id: 'item-del-1',
@@ -29,6 +30,8 @@ describe('Canvas item deletion and extra canvas tests', () => {
 
   beforeEach(async () => {
     db = createTestDb()
+    const admin = seedAdmin(db)
+    adminToken = createTestSession(db, admin.id)
 
     const req = makeRequest('/api/canvases', {
       method: 'POST',
@@ -78,6 +81,7 @@ describe('Canvas item deletion and extra canvas tests', () => {
       method: 'PATCH',
       body: JSON.stringify({ is_shared: true }),
       headers: { 'Content-Type': 'application/json' },
+      cookies: { fs_session: adminToken },
     })
     const res = await patchCanvas(req, { params: Promise.resolve({ id: 'missing-canvas' }) })
     expect(res.status).toBe(404)

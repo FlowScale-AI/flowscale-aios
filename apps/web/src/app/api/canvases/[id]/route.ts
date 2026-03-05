@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { canvases, canvasItems } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
+import { getRequestUser } from '@/lib/auth'
 import type { Canvas } from '@/features/canvases/types'
 
 function rowToCanvas(row: typeof canvases.$inferSelect): Canvas {
@@ -34,6 +35,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = getRequestUser(req)
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const { id } = await params
   const body = await req.json()
   const db = getDb()
@@ -46,6 +50,8 @@ export async function PATCH(
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
   }
+
+  updates.updatedAt = new Date().toISOString()
 
   const [row] = await db
     .update(canvases)
