@@ -232,7 +232,6 @@ export default function ExecutionMenu({
                   />
                 </button>
               </Tooltip>
-              <div className="w-px h-5 bg-white/10" />
             </>
           )}
 
