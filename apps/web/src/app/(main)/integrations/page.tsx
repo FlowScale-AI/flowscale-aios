@@ -13,6 +13,34 @@ const INTEGRATIONS = [
   },
 ]
 
+const COMING_SOON = [
+  {
+    logo: 'https://huggingface.co/front/assets/huggingface_logo-noborder.svg',
+    label: 'Hugging Face',
+    description: 'Browse and deploy models directly from Hugging Face Hub. Run inference pipelines locally or in the cloud.',
+  },
+  {
+    logo: 'https://cdn.simpleicons.org/openai/white',
+    label: 'OpenAI',
+    description: 'Integrate GPT and DALL·E models into your workflows for text generation, image creation, and more.',
+  },
+  {
+    logo: 'https://cdn.simpleicons.org/replicate/white',
+    label: 'Replicate',
+    description: 'Run open-source models in the cloud via Replicate. Deploy predictions with a single API call.',
+  },
+  {
+    logo: '/fal-logo.svg',
+    label: 'fal.ai',
+    description: 'Run generative AI models on fal.ai serverless infrastructure with fast cold starts and auto-scaling.',
+  },
+  {
+    logo: 'https://openrouter.ai/favicon.ico',
+    label: 'OpenRouter',
+    description: 'Access hundreds of LLMs through a single API. Route requests to the best model for cost, speed, or quality.',
+  },
+]
+
 export default function IntegrationsPage() {
   return (
     <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
@@ -47,6 +75,31 @@ export default function IntegrationsPage() {
                   </div>
                 </div>
               </Link>
+            ))}
+          </div>
+        </FadeIn>
+
+        <FadeIn delay={0.2}>
+          <div className="mt-12 mb-6">
+            <h2 className="font-tech text-lg font-semibold text-zinc-400 mb-1">Coming Soon</h2>
+            <p className="text-sm text-zinc-600">These integrations are on the roadmap.</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {COMING_SOON.map(({ logo, label, description }) => (
+              <div key={label} className="relative overflow-hidden rounded-xl border border-white/5 bg-[var(--color-background-panel)] p-6 opacity-50">
+                <div className="flex items-start gap-4">
+                  <div className="flex size-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 overflow-hidden shrink-0">
+                    <img src={logo} alt={label} className="size-7 object-contain" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <h3 className="font-tech text-base font-semibold text-zinc-100">{label}</h3>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700/50 text-zinc-500 font-medium">soon</span>
+                    </div>
+                    <p className="text-sm text-zinc-500 leading-relaxed">{description}</p>
+                  </div>
+                </div>
+              </div>
             ))}
           </div>
         </FadeIn>
