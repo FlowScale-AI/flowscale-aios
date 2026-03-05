@@ -6,7 +6,9 @@
     "dev": "next dev --port 14173 --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start --port 14173",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@flowscale/workflow": "workspace:*",
