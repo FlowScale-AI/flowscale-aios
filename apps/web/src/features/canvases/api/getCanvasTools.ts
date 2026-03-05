@@ -9,8 +9,10 @@ interface WorkflowIO {
   paramName: string;
   paramType: "string" | "number" | "boolean" | "image" | "select";
   defaultValue?: unknown;
+  label?: string;
   options?: string[];
   isInput: boolean;
+  enabled?: boolean;
 }
 
 // Tool row returned by GET /api/tools
@@ -42,10 +44,10 @@ function mapEiosTool(row: EiosToolRow): CanvasTool {
   }
 
   const inputs: CanvasToolInput[] = schema
-    .filter((s) => s.isInput)
+    .filter((s) => s.isInput && s.enabled !== false)
     .map((s) => ({
       path: `${s.nodeId}.inputs.${s.paramName}`,
-      label: s.nodeTitle || s.paramName,
+      label: s.label || s.nodeTitle || s.paramName,
       parameter_name: `${s.nodeId}::${s.paramName}`,
       demo_type: mapParamTypeToDemoType(s.paramType),
       category: s.nodeType,
@@ -55,11 +57,11 @@ function mapEiosTool(row: EiosToolRow): CanvasTool {
       options: s.options,
     }));
 
-  const outputSchema = schema.filter((s) => !s.isInput);
+  const outputSchema = schema.filter((s) => !s.isInput && s.enabled !== false);
   const outputs: CanvasToolOutput[] =
     outputSchema.length > 0
       ? outputSchema.map((s) => ({
-          label: s.nodeTitle || s.paramName,
+          label: s.label || s.nodeTitle || s.paramName,
           demo_type: mapParamTypeToDemoType(s.paramType),
           parameter_name: `${s.nodeId}::${s.paramName}`,
           category: s.nodeType,

@@ -56,11 +56,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const workflow = normalizeWorkflow(parsed, objectInfoMap) as Record<string, { inputs: Record<string, unknown> }>
   const schema = JSON.parse(tool.schemaJson) as Array<{
-    nodeId: string; paramName: string; isInput: boolean; defaultValue?: unknown
+    nodeId: string; paramName: string; isInput: boolean; defaultValue?: unknown; enabled?: boolean
   }>
 
   for (const field of schema) {
     if (!field.isInput) continue
+    if (field.enabled === false) continue
     if (!workflow[field.nodeId]) continue
     // Prefer provided input → fall back to schema default → leave workflow as-is
     let inputValue: unknown

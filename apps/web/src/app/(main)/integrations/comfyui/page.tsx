@@ -1,18 +1,24 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import Link from 'next/link'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ArrowClockwise,
+  ArrowCounterClockwise,
+  ArrowLeft,
   CheckCircle,
   Flask as FlaskConical,
   Gear,
+  MagicWand,
+  Monitor,
   Plus,
   RocketLaunch,
+  Trash,
+  UploadSimple,
   Warning,
   Wrench,
   X,
 } from 'phosphor-react'
+import { LottieSpinner, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { ToolTestPlayground } from '@/components/ToolTestPlayground'
 
@@ -170,8 +176,10 @@ interface WorkflowIOField {
   paramName: string
   paramType: string
   defaultValue?: unknown
+  label?: string
   options?: string[]
   isInput: boolean
+  enabled?: boolean  // undefined / true = visible; false = hidden
 }
 
 type ToolRow = {
@@ -200,21 +208,38 @@ function ToolsTab() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
 
   const fetchTools = useCallback(async () => {
     try {
       const r = await fetch('/api/tools')
       const data: ToolRow[] = await r.json()
       setTools(data)
-      if (!selectedId && data.length > 0) setSelectedId(data[0].id)
+      if (!selectedId && !creating && data.length > 0) setSelectedId(data[0].id)
     } catch {
       setError('Failed to load tools')
     } finally {
       setLoading(false)
     }
-  }, [selectedId])
+  }, [selectedId, creating])
 
   useEffect(() => { fetchTools() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleNewTool = () => {
+    setCreating(true)
+    setSelectedId(null)
+  }
+
+  const handleCreated = (id: string) => {
+    setCreating(false)
+    setSelectedId(id)
+    fetchTools()
+  }
+
+  const handleCancelCreate = () => {
+    setCreating(false)
+    if (!selectedId && tools?.length) setSelectedId(tools[0].id)
+  }
 
   if (loading) return <div className="flex items-center justify-center h-full"><Spinner /></div>
   if (error) return <div className="px-6 py-4"><ErrorMsg msg={error} /></div>
@@ -225,33 +250,38 @@ function ToolsTab() {
       <div className="w-56 shrink-0 border-r border-white/5 flex flex-col overflow-hidden">
         <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between shrink-0">
           <span className="text-xs text-zinc-500">{tools?.length ?? 0} tools</span>
-          <Link
-            href="/build-tool"
+          <button
+            onClick={handleNewTool}
             className="flex items-center gap-1 px-2 py-1 bg-zinc-100 hover:bg-white text-black text-xs font-semibold rounded transition-colors"
           >
             <Plus size={11} weight="bold" />
             New Tool
-          </Link>
+          </button>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {!tools?.length ? (
+          {/* Placeholder while creating */}
+          {creating && (
+            <div className="w-full text-left px-4 py-3 border-b border-white/5 bg-white/5 relative">
+              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-emerald-500" />
+              <span className="text-sm text-zinc-400 italic">Untitled</span>
+            </div>
+          )}
+          {!creating && !tools?.length ? (
             <div className="flex flex-col items-center justify-center py-12 gap-2 text-zinc-600">
               <Wrench size={24} />
               <p className="text-xs">No tools yet</p>
             </div>
           ) : (
-            tools.map((tool) => (
+            tools?.map((tool) => (
               <button
                 key={tool.id}
-                onClick={() => setSelectedId(tool.id)}
+                onClick={() => { setSelectedId(tool.id); setCreating(false) }}
                 className={[
                   'w-full text-left px-4 py-3 border-b border-white/5 transition-colors relative',
-                  selectedId === tool.id
-                    ? 'bg-white/5'
-                    : 'hover:bg-zinc-800/50',
+                  selectedId === tool.id && !creating ? 'bg-white/5' : 'hover:bg-zinc-800/50',
                 ].join(' ')}
               >
-                {selectedId === tool.id && (
+                {selectedId === tool.id && !creating && (
                   <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-emerald-500" />
                 )}
                 <div className="flex items-center gap-2">
@@ -276,12 +306,14 @@ function ToolsTab() {
 
       {/* Right panel */}
       <div className="flex-1 overflow-hidden">
-        {selectedId ? (
-          <ToolEditPanel key={selectedId} toolId={selectedId} onToolUpdated={fetchTools} />
+        {creating ? (
+          <NewToolPanel onCreated={handleCreated} onCancel={handleCancelCreate} />
+        ) : selectedId ? (
+          <ToolEditPanel key={selectedId} toolId={selectedId} onToolUpdated={fetchTools} onToolDeleted={() => { setSelectedId(null); fetchTools() }} />
         ) : (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-zinc-600">
             <Wrench size={32} />
-            <p className="text-sm">Select a tool to edit</p>
+            <p className="text-sm">Select a tool or create a new one</p>
           </div>
         )}
       </div>
@@ -289,12 +321,373 @@ function ToolsTab() {
   )
 }
 
+// ─── New Tool Panel ───────────────────────────────────────────────────────────
+
+function NewToolUploadModal({
+  onClose,
+  onNext,
+}: {
+  onClose: () => void
+  onNext: (workflowJson: string, name: string) => void
+}) {
+  const [text, setText] = useState('')
+  const [fileName, setFileName] = useState('')
+  const [error, setError] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleFile = (file: File) => {
+    const reader = new FileReader()
+    reader.onload = (e) => { setText(e.target?.result as string); setError('') }
+    reader.readAsText(file)
+    setFileName(file.name.replace(/\.json$/i, ''))
+  }
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    const file = e.dataTransfer.files[0]
+    if (file) handleFile(file)
+  }, [])
+
+  const handleNext = () => {
+    if (!text.trim()) { setError('Paste a workflow JSON or upload a file.'); return }
+    try { JSON.parse(text) } catch { setError('Invalid JSON.'); return }
+    onNext(text, fileName)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-lg bg-zinc-950 border border-white/10 rounded-xl shadow-xl flex flex-col gap-4 p-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-zinc-100">Upload Workflow</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors"><X size={16} /></button>
+        </div>
+        <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }}
+          onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]) }} />
+        <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}
+          className="flex flex-col items-center gap-3 p-6 border-2 border-dashed border-white/10 rounded-xl hover:border-emerald-500/30 transition-colors">
+          <UploadSimple size={22} weight="duotone" className="text-zinc-500" />
+          <p className="text-sm text-zinc-400">Drop a .json here, or</p>
+          <button type="button" onClick={() => fileRef.current?.click()}
+            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 text-xs font-medium rounded-md transition-colors">
+            Browse file…
+          </button>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-zinc-800" />
+          <span className="text-xs text-zinc-600">or paste JSON</span>
+          <div className="flex-1 h-px bg-zinc-800" />
+        </div>
+        <textarea value={text} onChange={(e) => { setText(e.target.value); setError('') }}
+          placeholder='{"last_node_id": 9, "nodes": [...]}'
+          rows={5}
+          className="bg-zinc-900 border border-white/5 rounded-lg px-3 py-2.5 text-xs font-mono text-zinc-300 focus:outline-none focus:border-emerald-500/50 resize-none placeholder:text-zinc-700" />
+        {error && <p className="text-xs text-red-400 flex items-center gap-1"><Warning size={12} weight="fill" />{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
+          <button onClick={handleNext}
+            className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md transition-colors">
+            Analyze Workflow
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function NewToolPanel({
+  onCreated,
+  onCancel,
+}: {
+  onCreated: (id: string) => void
+  onCancel: () => void
+}) {
+  const [step, setStep] = useState<'attach' | 'configure'>('attach')
+  const [workflowJson, setWorkflowJson] = useState('')
+  const [workflowName, setWorkflowName] = useState('')
+
+  const handleAttached = (json: string, name: string) => {
+    setWorkflowJson(json)
+    setWorkflowName(name)
+    setStep('configure')
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-white/5 shrink-0 flex items-center gap-3">
+        {step === 'configure' && (
+          <button onClick={() => setStep('attach')} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+            <ArrowLeft size={16} />
+          </button>
+        )}
+        <div className="flex-1">
+          <p className="text-sm font-medium text-zinc-100">New Tool</p>
+          <p className="text-xs text-zinc-500">{step === 'attach' ? 'Step 1 — Attach workflow' : 'Step 2 — Configure'}</p>
+        </div>
+        <button onClick={onCancel} className="text-zinc-600 hover:text-zinc-400 transition-colors"><X size={16} /></button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-6 py-5">
+        {step === 'attach'
+          ? <NewToolAttach onNext={handleAttached} />
+          : <NewToolConfigure workflowJson={workflowJson} initialName={workflowName} onCreated={onCreated} />
+        }
+      </div>
+    </div>
+  )
+}
+
+function NewToolAttach({ onNext }: { onNext: (json: string, name: string) => void }) {
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [instances, setInstances] = useState<ComfyInstance[]>([])
+  const [selectedPort, setSelectedPort] = useState<number | null>(null)
+  const [scanning, setScanning] = useState(false)
+  const [workflows, setWorkflows] = useState<string[]>([])
+  const [loadingWorkflows, setLoadingWorkflows] = useState(false)
+  const [loadingFile, setLoadingFile] = useState<string | null>(null)
+  const [error, setError] = useState('')
+
+  const scanPorts = async () => {
+    setScanning(true)
+    try {
+      const data: ComfyInstance[] = await fetch('/api/comfy/scan').then((r) => r.json())
+      setInstances(data)
+      if (data.length > 0) setSelectedPort(data[0].port)
+    } catch { /* ignore */ } finally { setScanning(false) }
+  }
+
+  const fetchWorkflows = useCallback(async (port: number) => {
+    setLoadingWorkflows(true)
+    setWorkflows([])
+    try {
+      const res = await fetch(`/api/comfy/${port}/userdata?dir=workflows&recurse=true`)
+      if (!res.ok) return
+      const data = await res.json()
+      const files: string[] = Array.isArray(data) ? data : (data.files ?? [])
+      setWorkflows(files.filter((f: string) => f.endsWith('.json')))
+    } catch { /* ignore */ } finally { setLoadingWorkflows(false) }
+  }, [])
+
+  useEffect(() => { scanPorts() }, [])
+  useEffect(() => { if (selectedPort) fetchWorkflows(selectedPort) }, [selectedPort, fetchWorkflows])
+
+  const handlePick = async (filename: string) => {
+    if (!selectedPort) return
+    setLoadingFile(filename)
+    setError('')
+    try {
+      const encoded = encodeURIComponent(`workflows/${filename}`)
+      const res = await fetch(`/api/comfy/${selectedPort}/userdata/${encoded}`)
+      if (!res.ok) throw new Error(`Failed to load workflow (${res.status})`)
+      const json = await res.text()
+      JSON.parse(json)
+      onNext(json, filename.replace(/\.json$/i, ''))
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to load workflow')
+    } finally { setLoadingFile(null) }
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-zinc-100 mb-0.5">Attach Workflow</h2>
+          <p className="text-xs text-zinc-500">Pick a saved ComfyUI workflow or upload a file.</p>
+        </div>
+        <button onClick={() => setUploadOpen(true)}
+          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-600 text-zinc-300 text-xs font-medium rounded-md transition-colors">
+          <UploadSimple size={13} /> Upload / Paste
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+          ComfyUI Instance {selectedPort ? <span className="text-zinc-600 font-mono normal-case">:{selectedPort}</span> : ''}
+        </span>
+        <button onClick={scanPorts} disabled={scanning}
+          className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50">
+          <ArrowCounterClockwise size={11} className={scanning ? 'animate-spin' : ''} />
+          {scanning ? 'Scanning…' : 'Refresh'}
+        </button>
+      </div>
+
+      {scanning && instances.length === 0 && (
+        <div className="flex items-center gap-2 text-zinc-500 text-xs"><LottieSpinner size={13} /> Scanning for ComfyUI…</div>
+      )}
+      {!scanning && instances.length === 0 && (
+        <div className="flex items-center gap-2 p-3 bg-amber-950/20 border border-amber-900/30 rounded-lg text-amber-400 text-xs">
+          <Monitor size={14} weight="duotone" /> No running ComfyUI detected. Start ComfyUI and click Refresh.
+        </div>
+      )}
+      {loadingWorkflows && (
+        <div className="flex items-center gap-2 text-zinc-500 text-xs"><LottieSpinner size={13} /> Loading workflows…</div>
+      )}
+      {!loadingWorkflows && selectedPort && workflows.length === 0 && (
+        <div className="flex flex-col items-center py-10 gap-2 text-zinc-600">
+          <MagicWand size={24} weight="duotone" />
+          <span className="text-xs">No saved workflows found</span>
+        </div>
+      )}
+      {!loadingWorkflows && workflows.length > 0 && (
+        <StaggerGrid className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          {workflows.map((path) => {
+            const name = path.replace(/\.json$/, '')
+            const isLoading = loadingFile === path
+            return (
+              <StaggerItem key={path}>
+                <button onClick={() => handlePick(path)} disabled={loadingFile !== null}
+                  className="group flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50 hover:bg-zinc-900 hover:border-emerald-500/30 hover:shadow-xl hover:shadow-emerald-900/10 hover:-translate-y-1 transition-all duration-200 disabled:opacity-50 text-left w-full">
+                  <div className="relative h-36 bg-[var(--color-background-canvas)] overflow-hidden bg-grid-pattern flex items-center justify-center">
+                    {isLoading ? <LottieSpinner size={20} /> : <MagicWand size={28} weight="duotone" className="text-zinc-700 group-hover:text-emerald-500 transition-colors" />}
+                    <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#18181b] to-transparent" />
+                  </div>
+                  <div className="px-3 py-2 bg-[#18181b]">
+                    <p className="text-xs font-medium text-zinc-100 truncate">{name}</p>
+                  </div>
+                </button>
+              </StaggerItem>
+            )
+          })}
+        </StaggerGrid>
+      )}
+      {error && <ErrorMsg msg={error} />}
+      {uploadOpen && <NewToolUploadModal onClose={() => setUploadOpen(false)} onNext={(json, name) => { setUploadOpen(false); onNext(json, name) }} />}
+    </div>
+  )
+}
+
+function NewToolConfigure({
+  workflowJson,
+  initialName,
+  onCreated,
+}: {
+  workflowJson: string
+  initialName: string
+  onCreated: (id: string) => void
+}) {
+  const [schema, setSchema] = useState<WorkflowIOField[] | null>(null)
+  const [workflowHash, setWorkflowHash] = useState('')
+  const [instances, setInstances] = useState<ComfyInstance[]>([])
+  const [selectedPort, setSelectedPort] = useState<number | null>(null)
+  const [name, setName] = useState(initialName || 'Untitled')
+  const [enabledKeys, setEnabledKeys] = useState<Set<string>>(new Set())
+  const [analyzeError, setAnalyzeError] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const fieldKey = (f: WorkflowIOField) => `${f.nodeId}__${f.paramName}`
+
+  const analyze = useCallback(async (port?: number | null) => {
+    setAnalyzeError('')
+    try {
+      const body: Record<string, unknown> = { workflowJson }
+      if (port) body.comfyPort = port
+      const res = await fetch('/api/workflow/analyze', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      if (!res.ok) { const e = await res.json(); setAnalyzeError(e.error ?? 'Analysis failed'); return }
+      const { schema: s, hash } = await res.json()
+      setSchema(s)
+      setWorkflowHash(hash)
+      setEnabledKeys((prev) => {
+        const next = new Set(prev)
+        for (const f of s as WorkflowIOField[]) next.add(fieldKey(f))
+        return next
+      })
+    } catch { setAnalyzeError('Failed to analyze workflow') }
+  }, [workflowJson]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const scanPorts = async () => {
+    try {
+      const data: ComfyInstance[] = await fetch('/api/comfy/scan').then((r) => r.json())
+      setInstances(data)
+      if (data.length > 0) setSelectedPort(data[0].port)
+    } catch { /* ignore */ }
+  }
+
+  useEffect(() => { analyze(); scanPorts() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (selectedPort) analyze(selectedPort) }, [selectedPort]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDefaultChange = useCallback((nodeId: string, paramName: string, value: unknown) => {
+    setSchema((prev) => prev?.map((f) =>
+      f.nodeId === nodeId && f.paramName === paramName ? { ...f, defaultValue: value } : f
+    ) ?? null)
+  }, [])
+
+  const handleSave = async () => {
+    if (!name.trim()) { setError('Enter a tool name.'); return }
+    if (!schema) { setError('Workflow analysis in progress.'); return }
+    const withEnabled = schema.map((f) => ({ ...f, enabled: enabledKeys.has(fieldKey(f)) }))
+    if (!withEnabled.some((f) => !f.isInput && f.enabled)) { setError('Select at least one output.'); return }
+    setSaving(true); setError('')
+    try {
+      const res = await fetch('/api/tools', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), workflowJson, workflowHash, schemaJson: JSON.stringify(withEnabled), comfyPort: selectedPort }),
+      })
+      if (!res.ok) { const e = await res.json(); setError(e.error ?? 'Failed to create tool'); return }
+      const tool = await res.json()
+      onCreated(tool.id)
+    } catch { setError('Failed to create tool') } finally { setSaving(false) }
+  }
+
+  const inputs = schema?.filter((f) => f.isInput) ?? []
+  const outputs = schema?.filter((f) => !f.isInput) ?? []
+
+  return (
+    <div className="flex flex-col gap-5 max-w-2xl">
+      <div>
+        <h2 className="text-sm font-semibold text-zinc-100 mb-0.5">Configure Tool</h2>
+        <p className="text-xs text-zinc-500">Name your tool and choose which inputs and outputs to expose.</p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label className="text-xs font-medium text-zinc-400">Name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)}
+          className="bg-zinc-950 border border-white/5 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50" />
+      </div>
+
+      {analyzeError && <ErrorMsg msg={analyzeError} />}
+
+      {!schema && !analyzeError && (
+        <div className="flex items-center gap-2 text-zinc-500 text-xs"><LottieSpinner size={13} /> Analyzing workflow…</div>
+      )}
+
+      {schema && (
+        <>
+          {inputs.length > 0 && (
+            <Section title={`Inputs (${inputs.length})`}>
+              <SchemaTable fields={inputs} enabledKeys={enabledKeys} onToggle={(k) => setEnabledKeys((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n })} onDefaultChange={handleDefaultChange} onLabelChange={() => {}} />
+            </Section>
+          )}
+          {outputs.length > 0 && (
+            <Section title={`Outputs (${outputs.length})`}>
+              <SchemaTable fields={outputs} enabledKeys={enabledKeys} onToggle={(k) => setEnabledKeys((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n })} onDefaultChange={handleDefaultChange} onLabelChange={() => {}} isOutputs />
+            </Section>
+          )}
+        </>
+      )}
+
+      {error && <ErrorMsg msg={error} />}
+
+      <button onClick={handleSave} disabled={saving || !schema}
+        className="self-start flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md disabled:opacity-50 transition-colors">
+        {saving && <ArrowClockwise size={14} className="animate-spin" />}
+        {saving ? 'Creating…' : 'Create Tool'}
+      </button>
+    </div>
+  )
+}
+
 // ─── Tool Edit Panel ──────────────────────────────────────────────────────────
 
-function ToolEditPanel({ toolId, onToolUpdated }: { toolId: string; onToolUpdated: () => void }) {
+function ToolEditPanel({ toolId, onToolUpdated, onToolDeleted }: { toolId: string; onToolUpdated: () => void; onToolDeleted: () => void }) {
   const [tool, setTool] = useState<FullToolDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<EditTab>('configure')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const loadTool = useCallback(async () => {
     setLoading(true)
@@ -307,6 +700,12 @@ function ToolEditPanel({ toolId, onToolUpdated }: { toolId: string; onToolUpdate
   }, [toolId])
 
   useEffect(() => { loadTool() }, [loadTool])
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    await fetch(`/api/tools/${toolId}`, { method: 'DELETE' })
+    onToolDeleted()
+  }
 
   if (loading) return <div className="flex items-center justify-center h-full"><Spinner /></div>
   if (!tool) return <div className="px-6 py-4"><ErrorMsg msg="Tool not found" /></div>
@@ -338,6 +737,33 @@ function ToolEditPanel({ toolId, onToolUpdated }: { toolId: string; onToolUpdate
           </div>
           {tool.description && <p className="text-xs text-zinc-500 truncate">{tool.description}</p>}
         </div>
+        {confirmDelete ? (
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-zinc-400">Delete?</span>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="flex items-center gap-1 px-2 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-medium rounded transition-colors disabled:opacity-50"
+            >
+              {deleting ? <ArrowClockwise size={11} className="animate-spin" /> : null}
+              Yes
+            </button>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="flex items-center px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-xs font-medium rounded transition-colors"
+            >
+              No
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="shrink-0 flex items-center justify-center size-7 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300 transition-colors border border-red-500/20"
+            title="Delete tool"
+          >
+            <Trash size={14} />
+          </button>
+        )}
       </div>
 
       {/* Sub-tabs */}
@@ -418,12 +844,14 @@ function SchemaTable({
   enabledKeys,
   onToggle,
   onDefaultChange,
+  onLabelChange,
   isOutputs = false,
 }: {
   fields: WorkflowIOField[]
   enabledKeys: Set<string>
   onToggle: (key: string) => void
   onDefaultChange: (nodeId: string, paramName: string, value: unknown) => void
+  onLabelChange: (nodeId: string, paramName: string, value: string) => void
   isOutputs?: boolean
 }) {
   const fieldKey = (f: WorkflowIOField) => `${f.nodeId}__${f.paramName}`
@@ -445,6 +873,7 @@ function SchemaTable({
             </th>
             <th className="py-2 px-3 text-left text-zinc-500 font-medium">Node</th>
             <th className="py-2 px-3 text-left text-zinc-500 font-medium">Field</th>
+            <th className="py-2 px-3 text-left text-zinc-500 font-medium">Label</th>
             <th className="py-2 px-3 text-left text-zinc-500 font-medium">Type</th>
             {!isOutputs && <th className="py-2 px-3 text-left text-zinc-500 font-medium">Default</th>}
           </tr>
@@ -469,6 +898,15 @@ function SchemaTable({
                 </td>
                 <td className="py-2 px-3 text-zinc-400 font-mono">{f.nodeType}</td>
                 <td className="py-2 px-3 text-zinc-300 font-mono">{f.paramName}</td>
+                <td className="py-2 px-3" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="text"
+                    value={f.label ?? ''}
+                    onChange={(e) => onLabelChange(f.nodeId, f.paramName, e.target.value)}
+                    placeholder={f.nodeTitle ? `${f.nodeTitle} — ${f.paramName}` : f.paramName}
+                    className="w-full bg-transparent border border-transparent hover:border-white/10 focus:border-emerald-500/50 rounded px-1.5 py-0.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none transition-colors min-w-[120px]"
+                  />
+                </td>
                 <td className="py-2 px-3">
                   <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">{f.paramType}</span>
                 </td>
@@ -487,16 +925,50 @@ function SchemaTable({
 }
 
 function ConfigurePanel({ tool, onSaved }: { tool: FullToolDetails; onSaved: () => void }) {
-  const parsed: WorkflowIOField[] = tool.schemaJson ? JSON.parse(tool.schemaJson) : []
-  const [fields, setFields] = useState<WorkflowIOField[]>(parsed)
-  const [enabledKeys, setEnabledKeys] = useState<Set<string>>(
-    () => new Set(parsed.map((f) => `${f.nodeId}__${f.paramName}`))
+  const fieldKey = (f: WorkflowIOField) => `${f.nodeId}__${f.paramName}`
+
+  // Seed from saved schema — determine which keys were enabled
+  const savedFields: WorkflowIOField[] = tool.schemaJson ? JSON.parse(tool.schemaJson) : []
+  const savedEnabledKeys = new Set(
+    savedFields.filter((f) => f.enabled !== false).map(fieldKey)
   )
+
+  const [fields, setFields] = useState<WorkflowIOField[]>(savedFields)
+  const [enabledKeys, setEnabledKeys] = useState<Set<string>>(savedEnabledKeys)
   const [name, setName] = useState(tool.name)
   const [description, setDescription] = useState(tool.description ?? '')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
+  const [analyzing, setAnalyzing] = useState(false)
+
+  // Re-analyze the stored workflow to recover any fields that were unchecked at creation time
+  useEffect(() => {
+    if (!tool.workflowJson) return
+    setAnalyzing(true)
+    fetch('/api/workflow/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workflowJson: tool.workflowJson,
+        ...(tool.comfyPort ? { comfyPort: tool.comfyPort } : {}),
+      }),
+    })
+      .then((r) => r.json())
+      .then((data: { schema?: WorkflowIOField[] }) => {
+        if (!data.schema?.length) return
+        // Merge: prefer saved default values; newly found fields default to disabled
+        const savedMap = new Map(savedFields.map((f) => [fieldKey(f), f]))
+        const merged = data.schema.map((f) => {
+          const saved = savedMap.get(fieldKey(f))
+          return saved ? { ...f, defaultValue: saved.defaultValue, label: saved.label } : f
+        })
+        setFields(merged)
+        // Keep enabled state: saved fields stay as-is, new fields start unchecked
+      })
+      .catch(() => {})
+      .finally(() => setAnalyzing(false))
+  }, [tool.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleToggle = useCallback((key: string) => {
     setEnabledKeys((prev) => {
@@ -512,9 +984,16 @@ function ConfigurePanel({ tool, onSaved }: { tool: FullToolDetails; onSaved: () 
     ))
   }, [])
 
+  const handleLabelChange = useCallback((nodeId: string, paramName: string, value: string) => {
+    setFields((prev) => prev.map((f) =>
+      f.nodeId === nodeId && f.paramName === paramName ? { ...f, label: value || undefined } : f
+    ))
+  }, [])
+
   const handleSave = async () => {
-    const visibleFields = fields.filter((f) => enabledKeys.has(`${f.nodeId}__${f.paramName}`))
-    if (!visibleFields.some((f) => !f.isInput)) { setError('Select at least one output.'); return }
+    const withEnabled = fields.map((f) => ({ ...f, enabled: enabledKeys.has(fieldKey(f)) }))
+    const enabledOutputs = withEnabled.filter((f) => !f.isInput && f.enabled)
+    if (!enabledOutputs.length) { setError('Select at least one output.'); return }
     setSaving(true)
     setError('')
     try {
@@ -524,7 +1003,7 @@ function ConfigurePanel({ tool, onSaved }: { tool: FullToolDetails; onSaved: () 
         body: JSON.stringify({
           name: name.trim(),
           description: description.trim() || null,
-          schemaJson: JSON.stringify(visibleFields),
+          schemaJson: JSON.stringify(withEnabled),
         }),
       })
       if (!res.ok) { const e = await res.json(); setError(e.error ?? 'Save failed'); return }
@@ -563,15 +1042,21 @@ function ConfigurePanel({ tool, onSaved }: { tool: FullToolDetails; onSaved: () 
         </div>
       </div>
 
+      {analyzing && (
+        <div className="flex items-center gap-2 text-zinc-600 text-xs">
+          <ArrowClockwise size={12} className="animate-spin" /> Loading full schema…
+        </div>
+      )}
+
       {inputs.length > 0 && (
         <Section title={`Inputs (${inputs.length})`}>
-          <SchemaTable fields={inputs} enabledKeys={enabledKeys} onToggle={handleToggle} onDefaultChange={handleDefaultChange} />
+          <SchemaTable fields={inputs} enabledKeys={enabledKeys} onToggle={handleToggle} onDefaultChange={handleDefaultChange} onLabelChange={handleLabelChange} />
         </Section>
       )}
 
       {outputs.length > 0 && (
         <Section title={`Outputs (${outputs.length})`}>
-          <SchemaTable fields={outputs} enabledKeys={enabledKeys} onToggle={handleToggle} onDefaultChange={handleDefaultChange} isOutputs />
+          <SchemaTable fields={outputs} enabledKeys={enabledKeys} onToggle={handleToggle} onDefaultChange={handleDefaultChange} onLabelChange={handleLabelChange} isOutputs />
         </Section>
       )}
 

@@ -14,8 +14,10 @@ interface WorkflowIO {
   paramName: string
   paramType: string
   defaultValue?: unknown
+  label?: string
   options?: string[]
   isInput: boolean
+  enabled?: boolean
 }
 
 export interface ToolForTest {
@@ -190,10 +192,10 @@ function ModelPreview({ src, filename }: { src: string; filename: string }) {
 export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
   const allSchema: WorkflowIO[] = tool.schemaJson ? JSON.parse(tool.schemaJson) : []
   const schema: WorkflowIO[] = allSchema
-    .filter((f) => f.isInput)
+    .filter((f) => f.isInput && f.enabled !== false)
     .filter((f) => !(f.paramName === 'label' && f.nodeType.startsWith('FS')))
   const expectedOutputKinds: Array<'image' | 'video' | 'audio' | 'model' | 'text' | 'file'> =
-    allSchema.filter((f) => !f.isInput).map((f) => inferOutputKind(f.nodeType))
+    allSchema.filter((f) => !f.isInput && f.enabled !== false).map((f) => inferOutputKind(f.nodeType))
 
   const [inputs, setInputs] = useState<Record<string, unknown>>(() => {
     const defaults: Record<string, unknown> = {}
@@ -377,7 +379,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
           <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Inputs</h3>
           {schema.map((field) => {
             const key = `${field.nodeId}__${field.paramName}`
-            const label = field.nodeTitle ? `${field.nodeTitle} — ${field.paramName}` : field.paramName
+            const label = field.label || (field.nodeTitle ? `${field.nodeTitle} — ${field.paramName}` : field.paramName)
             return (
               <div key={key} className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-zinc-400">{label}</label>

@@ -30,8 +30,10 @@ interface WorkflowIO {
   paramName: string
   paramType: 'string' | 'number' | 'boolean' | 'image' | 'select'
   defaultValue?: unknown
+  label?: string
   options?: string[]
   isInput: boolean
+  enabled?: boolean
 }
 
 interface Tool {
@@ -249,9 +251,9 @@ function InputField({
   value: unknown
   onChange: (v: unknown) => void
 }) {
-  const label = field.nodeTitle
+  const label = field.label || (field.nodeTitle
     ? `${field.nodeTitle} — ${field.paramName}`
-    : field.paramName
+    : field.paramName)
 
   if (field.paramType === 'boolean') {
     return (
@@ -479,13 +481,13 @@ function BottomTabs({
   execLoading: boolean
   onRestore: (inputs: Record<string, unknown>) => void
 }) {
-  const [tab, setTab] = useState<'history' | 'logs'>('history')
+  const [tab, setTab] = useState<'history' | 'logs'>('logs')
 
   return (
     <div className="h-64 flex flex-col border-t border-white/5">
       {/* Tab bar */}
       <div className="flex items-center gap-1 px-4 pt-2 shrink-0">
-        {(['history', 'logs'] as const).map((t) => (
+        {(['logs', 'history'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -558,10 +560,10 @@ export default function ToolPage() {
 
   const allSchema: WorkflowIO[] = tool?.schemaJson ? JSON.parse(tool.schemaJson) : []
   const schema: WorkflowIO[] = allSchema
-    .filter((f) => f.isInput)
+    .filter((f) => f.isInput && f.enabled !== false)
     .filter((f) => !(f.paramName === 'label' && f.nodeType.startsWith('FS')))
   const expectedOutputKinds: Array<'image' | 'video' | 'audio' | 'model' | 'text' | 'file'> =
-    allSchema.filter((f) => !f.isInput).map((f) => inferOutputKind(f.nodeType))
+    allSchema.filter((f) => !f.isInput && f.enabled !== false).map((f) => inferOutputKind(f.nodeType))
 
   // Input state — keyed by nodeId__paramName
   const [inputs, setInputs] = useState<Record<string, unknown>>({})
