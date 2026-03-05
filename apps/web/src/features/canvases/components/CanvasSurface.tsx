@@ -270,7 +270,16 @@ export default function CanvasSurface({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_shared: true }),
     });
-    const url = new URL(window.location.origin + `/canvas/${canvasId}`);
+    // Use LAN IP so the link works on other machines in the network
+    let origin = window.location.origin;
+    try {
+      const res = await fetch("/api/network-ip");
+      if (res.ok) {
+        const { ip } = await res.json();
+        if (ip) origin = `http://${ip}:${window.location.port}`;
+      }
+    } catch { /* fallback to window.location.origin */ }
+    const url = new URL(origin + `/canvas/${canvasId}`);
     url.searchParams.set("shared", "true");
     navigator.clipboard.writeText(url.toString()).then(() => {
       setShareCopied(true);
@@ -1581,7 +1590,7 @@ export default function CanvasSurface({
         })()}
 
       {/* Scale Indicator & Zoom Controls */}
-      <div className="absolute top-4 right-4 z-20 flex flex-col items-end gap-2">
+      <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
         <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md border border-white/5 rounded-full p-1 shadow-lg">
           <Tooltip content="Zoom Out" side="bottom" delay={600}>
             <button
@@ -1607,7 +1616,7 @@ export default function CanvasSurface({
         {canvasId && (
           <Tooltip
             content={shareCopied ? "Link copied!" : "Copy share link"}
-            side="left"
+            side="bottom"
           >
             <button
               onClick={handleShare}
