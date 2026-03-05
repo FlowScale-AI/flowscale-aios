@@ -7,7 +7,7 @@ import crypto from 'crypto'
 import * as schema from './schema'
 
 const DB_DIR = join(homedir(), '.flowscale')
-const DB_PATH = join(DB_DIR, 'eios.db')
+const DB_PATH = join(DB_DIR, 'aios.db')
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null
 

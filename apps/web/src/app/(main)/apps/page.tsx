@@ -169,11 +169,6 @@ export default function AppsPage() {
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                     />
-                    <div className="hidden md:flex items-center gap-1">
-                      <kbd className="hidden sm:inline-flex h-5 items-center gap-1 rounded border border-white/10 bg-white/5 px-1.5 font-mono-custom text-[10px] font-medium text-zinc-500">
-                        <span className="text-xs">&#8984;</span>K
-                      </kbd>
-                    </div>
                   </div>
                 </div>
               </div>
