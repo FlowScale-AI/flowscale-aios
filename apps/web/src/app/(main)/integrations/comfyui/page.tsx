@@ -205,7 +205,7 @@ type FullToolDetails = {
   workflowHash: string
 }
 
-type EditTab = 'configure' | 'test' | 'deploy'
+type EditTab = 'configure' | 'test'
 
 function ToolsTab() {
   const [tools, setTools] = useState<ToolRow[] | null>(null)
@@ -234,9 +234,12 @@ function ToolsTab() {
     setSelectedId(null)
   }
 
+  const [freshlyCreatedId, setFreshlyCreatedId] = useState<string | null>(null)
+
   const handleCreated = (id: string) => {
     setCreating(false)
     setSelectedId(id)
+    setFreshlyCreatedId(id)
     fetchTools()
   }
 
@@ -313,7 +316,7 @@ function ToolsTab() {
         {creating ? (
           <NewToolPanel onCreated={handleCreated} onCancel={handleCancelCreate} />
         ) : selectedId ? (
-          <ToolEditPanel key={selectedId} toolId={selectedId} onToolUpdated={fetchTools} onToolDeleted={() => { setSelectedId(null); fetchTools() }} />
+          <ToolEditPanel key={selectedId} toolId={selectedId} initialTab={freshlyCreatedId === selectedId ? 'test' : 'configure'} onToolUpdated={fetchTools} onToolDeleted={() => { setSelectedId(null); fetchTools() }} />
         ) : (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-zinc-600">
             <Wrench size={32} />
@@ -686,12 +689,14 @@ function NewToolConfigure({
 
 // ─── Tool Edit Panel ──────────────────────────────────────────────────────────
 
-function ToolEditPanel({ toolId, onToolUpdated, onToolDeleted }: { toolId: string; onToolUpdated: () => void; onToolDeleted: () => void }) {
+function ToolEditPanel({ toolId, initialTab = 'configure', onToolUpdated, onToolDeleted }: { toolId: string; initialTab?: EditTab; onToolUpdated: () => void; onToolDeleted: () => void }) {
   const [tool, setTool] = useState<FullToolDetails | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<EditTab>('configure')
+  const [activeTab, setActiveTab] = useState<EditTab>(initialTab)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [deployStatus, setDeployStatus] = useState<'idle' | 'deploying' | 'done' | 'error'>('idle')
+  const [deployError, setDeployError] = useState('')
 
   const loadTool = useCallback(async () => {
     setLoading(true)
@@ -711,13 +716,31 @@ function ToolEditPanel({ toolId, onToolUpdated, onToolDeleted }: { toolId: strin
     onToolDeleted()
   }
 
+  const handleDeploy = async () => {
+    setDeployStatus('deploying')
+    setDeployError('')
+    try {
+      const res = await fetch(`/api/tools/${toolId}/deploy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (!res.ok) { const e = await res.json(); setDeployError(e.error ?? 'Deploy failed'); setDeployStatus('error'); return }
+      setDeployStatus('done')
+      loadTool()
+      onToolUpdated()
+    } catch {
+      setDeployError('Deploy failed')
+      setDeployStatus('error')
+    }
+  }
+
   if (loading) return <div className="flex items-center justify-center h-full"><Spinner /></div>
   if (!tool) return <div className="px-6 py-4"><ErrorMsg msg="Tool not found" /></div>
 
   const EDIT_TABS: { id: EditTab; label: string; icon: React.ElementType }[] = [
     { id: 'configure', label: 'Configure', icon: Gear },
     { id: 'test', label: 'Test', icon: FlaskConical },
-    { id: 'deploy', label: 'Deploy', icon: RocketLaunch },
   ]
 
   return (
@@ -741,6 +764,25 @@ function ToolEditPanel({ toolId, onToolUpdated, onToolDeleted }: { toolId: strin
           </div>
           {tool.description && <p className="text-xs text-zinc-500 truncate">{tool.description}</p>}
         </div>
+        {/* Deploy button */}
+        {deployStatus === 'done' ? (
+          <div className="flex items-center gap-1.5 text-emerald-400 text-xs font-medium shrink-0">
+            <CheckCircle size={13} weight="fill" /> Deployed
+          </div>
+        ) : (
+          <button
+            onClick={handleDeploy}
+            disabled={deployStatus === 'deploying'}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-white text-black text-xs font-semibold rounded-md disabled:opacity-50 transition-colors"
+            title={deployError || undefined}
+          >
+            {deployStatus === 'deploying'
+              ? <ArrowClockwise size={12} className="animate-spin" />
+              : <RocketLaunch size={12} weight="fill" />}
+            {deployStatus === 'deploying' ? 'Deploying…' : tool.status === 'production' ? 'Redeploy' : 'Deploy'}
+          </button>
+        )}
+        {/* Delete button */}
         {confirmDelete ? (
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs text-zinc-400">Delete?</span>
@@ -792,12 +834,9 @@ function ToolEditPanel({ toolId, onToolUpdated, onToolDeleted }: { toolId: strin
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto px-6 py-5">
         {activeTab === 'configure' && (
-          <ConfigurePanel tool={tool} onSaved={() => { loadTool(); onToolUpdated() }} />
+          <ConfigurePanel tool={tool} onSaved={() => { loadTool(); onToolUpdated(); setActiveTab('test') }} />
         )}
         {activeTab === 'test' && <TestPanel tool={tool} />}
-        {activeTab === 'deploy' && (
-          <DeployPanel tool={tool} onDeployed={() => { loadTool(); onToolUpdated() }} />
-        )}
       </div>
     </div>
   )
@@ -1086,70 +1125,6 @@ function TestPanel({ tool }: { tool: FullToolDetails }) {
     <ToolTestPlayground
       tool={{ id: tool.id, name: tool.name, comfyPort: tool.comfyPort, schemaJson: tool.schemaJson }}
     />
-  )
-}
-
-// ─── Deploy Panel ─────────────────────────────────────────────────────────────
-
-function DeployPanel({ tool, onDeployed }: { tool: FullToolDetails; onDeployed: () => void }) {
-  const [status, setStatus] = useState<'idle' | 'deploying' | 'done' | 'error'>('idle')
-  const [error, setError] = useState('')
-
-  const handleDeploy = async () => {
-    setStatus('deploying')
-    setError('')
-    try {
-      const res = await fetch(`/api/tools/${tool.id}/deploy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      if (!res.ok) { const e = await res.json(); setError(e.error ?? 'Deploy failed'); setStatus('error'); return }
-      setStatus('done')
-      onDeployed()
-    } catch {
-      setError('Deploy failed')
-      setStatus('error')
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-4 max-w-md">
-      <div className="p-4 bg-zinc-900/50 border border-white/5 rounded-xl flex flex-col gap-2 text-sm">
-        <div className="flex justify-between">
-          <span className="text-zinc-500">Status</span>
-          <span className={tool.status === 'production' ? 'text-emerald-400' : 'text-zinc-400'}>
-            {tool.status}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-zinc-500">Tool ID</span>
-          <span className="text-zinc-400 font-mono text-xs truncate max-w-[180px]">{tool.id}</span>
-        </div>
-      </div>
-
-      {tool.status === 'production' && (
-        <p className="text-xs text-zinc-500">This tool is already in production. Redeploying will pin the latest configuration.</p>
-      )}
-
-      {error && <ErrorMsg msg={error} />}
-
-      {status === 'done' ? (
-        <div className="flex items-center gap-2 text-emerald-400 text-sm">
-          <CheckCircle size={16} weight="fill" /> Deployed successfully
-        </div>
-      ) : (
-        <button
-          onClick={handleDeploy}
-          disabled={status === 'deploying'}
-          className="self-start flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md disabled:opacity-50 transition-colors"
-        >
-          {status === 'deploying' && <ArrowClockwise size={14} className="animate-spin" />}
-          <RocketLaunch size={14} weight="fill" />
-          {status === 'deploying' ? 'Deploying…' : tool.status === 'production' ? 'Redeploy' : 'Deploy to Production'}
-        </button>
-      )}
-    </div>
   )
 }
 
