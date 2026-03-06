@@ -11,7 +11,21 @@ import type { FlowscaleTokens } from './config/store.js'
 log.initialize()
 
 const isDev = !app.isPackaged
-const AIOS_PORT = 14173
+const AIOS_PORT_START = 14173
+
+/** Try ports starting at `start` until one is free, then return it. */
+function findAvailablePort(start: number): Promise<number> {
+  return new Promise((resolve) => {
+    const net = require('net') as typeof import('net')
+    const tryPort = (port: number): void => {
+      const server = net.createServer()
+      server.once('error', () => tryPort(port + 1))
+      server.once('listening', () => server.close(() => resolve(port)))
+      server.listen(port, '127.0.0.1')
+    }
+    tryPort(start)
+  })
+}
 
 // Set app name and desktop file name so KDE Wayland matches the window to flowscale-aios.desktop
 app.setName('flowscale-aios')
@@ -115,7 +129,7 @@ function waitForServer(url: string, timeoutMs = 30_000): Promise<void> {
   })
 }
 
-function startNextServer(): void {
+function startNextServer(port: number): void {
   // In production: spawn the standalone Next.js server built into the app
   const serverScript = path.join(
     process.resourcesPath,
@@ -128,11 +142,11 @@ function startNextServer(): void {
     'server.js',
   )
 
-  log.info('[server] Starting Next.js standalone server:', serverScript)
+  log.info('[server] Starting Next.js standalone server:', serverScript, 'on port', port)
 
   // ELECTRON_RUN_AS_NODE=1 makes the Electron binary behave as plain Node.js
   nextServer = spawn(process.execPath, [serverScript], {
-    env: { ...process.env, PORT: String(AIOS_PORT), HOSTNAME: '127.0.0.1', ELECTRON_RUN_AS_NODE: '1' },
+    env: { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', ELECTRON_RUN_AS_NODE: '1' },
     stdio: 'pipe',
   })
 
@@ -144,7 +158,7 @@ function startNextServer(): void {
   })
 }
 
-function createWindow(): BrowserWindow {
+function createWindow(port: number): BrowserWindow {
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -160,7 +174,7 @@ function createWindow(): BrowserWindow {
     },
   })
 
-  const url = `http://127.0.0.1:${AIOS_PORT}`
+  const url = `http://127.0.0.1:${port}`
 
   if (isDev) {
     waitForServer(url)
@@ -209,15 +223,17 @@ app.whenReady().then(async () => {
     },
   )
 
+  const port = isDev ? AIOS_PORT_START : await findAvailablePort(AIOS_PORT_START)
+
   if (!isDev) {
-    startNextServer()
+    startNextServer(port)
   }
 
-  mainWindow = createWindow()
+  mainWindow = createWindow(port)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createWindow()
+      mainWindow = createWindow(port)
     }
   })
 })

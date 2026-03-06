@@ -42,6 +42,38 @@ pnpm --filter @flowscale/aios-desktop build
 apps/desktop/node_modules/.bin/electron apps/desktop/dist/main.js
 ```
 
+### Linux AppImage
+
+Download the latest `FlowScale AI OS-x.x.x.AppImage` from the [Releases](https://github.com/FlowScale-AI/flowscale-aios/releases) page.
+
+```bash
+# Make it executable
+chmod +x "FlowScale AI OS-*.AppImage"
+
+# Run
+./"FlowScale AI OS-*.AppImage"
+```
+
+**Requirements:**
+- Linux x86_64
+- glibc >= 2.34 (Ubuntu 22.04+, Fedora 36+, Debian 12+)
+- FUSE2 — install if missing:
+  ```bash
+  # Ubuntu / Debian
+  sudo apt install libfuse2
+
+  # Fedora
+  sudo dnf install fuse
+  ```
+
+**If FUSE is unavailable** (e.g. restricted environment), extract and run directly:
+```bash
+./"FlowScale AI OS-*.AppImage" --appimage-extract
+./squashfs-root/AppRun
+```
+
+**ComfyUI** must be running on any port between 6188–16188 before launching the app. The app will auto-discover it.
+
 ## Project Structure
 
 ```

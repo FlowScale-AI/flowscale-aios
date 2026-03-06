@@ -1,6 +1,6 @@
 appId: ai.flowscale.aios
 productName: FlowScale AI OS
-copyright: Copyright © 2024 FlowScale
+copyright: Copyright © 2025 FlowScale
 
 directories:
   output: release
@@ -8,49 +8,38 @@ directories:
 
 files:
   - dist/**/*
-  - assets/**/*
+  - package.json
 
 extraResources:
   - from: ../web/.next/standalone
     to: apps/web/.next/standalone
     filter:
-      - "**/*"
-      - "!**/*.map"
-  # Static CSS/JS chunks — monorepo server.js expects them at apps/web/.next/static
+      - '**/*'
   - from: ../web/.next/static
     to: apps/web/.next/standalone/apps/web/.next/static
     filter:
-      - "**/*"
-  # Public assets
+      - '**/*'
   - from: ../web/public
     to: apps/web/.next/standalone/apps/web/public
     filter:
-      - "**/*"
-
-mac:
-  target:
-    - target: dmg
-      arch:
-        - x64
-        - arm64
-  category: public.app-category.developer-tools
-
-dmg:
-  writeUpdateInfo: false
+      - '**/*'
 
 linux:
   target:
-    - target: dir
-      arch:
-        - x64
+    - AppImage
+  icon: build/icon.png
   category: Development
-  executableName: flowscale-aios
+
+mac:
+  target:
+    - dmg
+  icon: build/icon.png
+  category: public.app-category.developer-tools
 
 win:
   target:
-    - target: nsis
-      arch:
-        - x64
+    - nsis
+  icon: build/icon.png
 
 nsis:
   oneClick: false
