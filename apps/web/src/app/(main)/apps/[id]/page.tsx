@@ -331,8 +331,8 @@ function ExecutionHistoryItem({
     ? `${((exec.completedAt - exec.createdAt) / 1000).toFixed(1)}s`
     : null
 
-  const outputs: { filename: string; path: string }[] = exec.outputsJson
-    ? JSON.parse(exec.outputsJson)
+  const outputs = exec.outputsJson
+    ? (JSON.parse(exec.outputsJson) as { kind: string; filename?: string; path?: string }[]).filter((o): o is { kind: string; filename: string; path: string } => !!o.filename)
     : []
 
   const inputs: Record<string, unknown> = exec.inputsJson ? JSON.parse(exec.inputsJson) : {}
@@ -642,13 +642,12 @@ export default function ToolPage() {
               }
             }
             setLatestOutputs(items)
-            const fileItems = items.filter((i): i is Extract<OutputItem, { filename: string }> => 'filename' in i)
             await fetch(`/api/executions/${result.executionId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 status: entry?.status?.status_str === 'error' ? 'error' : 'completed',
-                outputsJson: JSON.stringify(fileItems),
+                outputsJson: JSON.stringify(items),
                 completedAt: Date.now(),
               }),
             })

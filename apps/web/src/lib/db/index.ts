@@ -122,6 +122,11 @@ export function getDb() {
     sqlite.exec('ALTER TABLE canvases ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0')
   }
 
+  const execColumns = sqlite.prepare('PRAGMA table_info(executions)').all() as { name: string }[]
+  if (!execColumns.some((col) => col.name === 'user_id')) {
+    sqlite.exec('ALTER TABLE executions ADD COLUMN user_id TEXT')
+  }
+
   // First-run: seed admin user if no users exist
   const userCount = sqlite.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }
   if (userCount.count === 0) {

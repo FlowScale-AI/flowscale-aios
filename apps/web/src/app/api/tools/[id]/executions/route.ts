@@ -1,22 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
-import { executions, tools } from '@/lib/db/schema'
+import { executions, tools, users } from '@/lib/db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@flowscale/workflow'
+import { getRequestUser } from '@/lib/auth'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const db = getDb()
   const { id } = await params
 
   const rows = await db
-    .select()
+    .select({ execution: executions, username: users.username })
     .from(executions)
+    .leftJoin(users, eq(executions.userId, users.id))
     .where(eq(executions.toolId, id))
     .orderBy(desc(executions.createdAt))
     .limit(100)
 
-  return NextResponse.json(rows)
+  return NextResponse.json(rows.map(({ execution, username }) => ({ ...execution, createdBy: username ?? null })))
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -79,10 +81,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
+  const currentUser = getRequestUser(req)
+
   // Insert execution row
   await db.insert(executions).values({
     id: executionId,
     toolId,
+    userId: currentUser?.id ?? null,
     inputsJson: JSON.stringify({ ...inputs, seed }),
     workflowHash: tool.workflowHash,
     seed,
