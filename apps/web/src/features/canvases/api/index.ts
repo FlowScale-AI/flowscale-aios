@@ -7,5 +7,4 @@ export * from "./deleteCanvas";
 export * from "./saveCanvasItems";
 export * from "./updateCanvasItems";
 export * from "./deleteCanvasItem";
-export * from "./getDeployedClusters";
 export * from "./getAllRunsList";

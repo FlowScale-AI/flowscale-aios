@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Start web app (Next.js, port 14173)
-pnpm --filter @flowscale/eios-web dev
+pnpm --filter @flowscale/aios-web dev
 
 # Typecheck all workspaces
 pnpm typecheck
@@ -16,10 +16,10 @@ pnpm build
 
 # Build a single package
 pnpm --filter @flowscale/workflow build
-pnpm --filter @flowscale/eios-web build
+pnpm --filter @flowscale/aios-web build
 
 # Start Electron desktop (must build first, and web must be running on 14173)
-pnpm --filter @flowscale/eios-desktop build
+pnpm --filter @flowscale/aios-desktop build
 apps/desktop/node_modules/.bin/electron apps/desktop/dist/main.js
 ```
 
@@ -29,8 +29,8 @@ There is no test runner configured. Typecheck is the primary correctness tool �
 
 Turborepo + pnpm workspaces with three packages:
 
-- **`apps/web`** (`@flowscale/eios-web`) — Next.js 15 App Router, the entire UI and API surface
-- **`apps/desktop`** (`@flowscale/eios-desktop`) — Electron 39 shell that loads `apps/web` on port 14173
+- **`apps/web`** (`@flowscale/aios-web`) — Next.js 15 App Router, the entire UI and API surface
+- **`apps/desktop`** (`@flowscale/aios-desktop`) — Electron 39 shell that loads `apps/web` on port 14173
 - **`packages/workflow`** (`@flowscale/workflow`) — zero-dependency library for ComfyUI workflow analysis; used by `apps/web`
 
 ## Architecture
@@ -41,7 +41,7 @@ All ComfyUI communication goes through Next.js API routes (CORS-free):
 - `GET /api/comfy/scan` — TCP-probes ports **6188–16188** to find running ComfyUI instances
 - `GET|POST /api/comfy/[port]/[...path]` — transparent proxy to `http://127.0.0.1:[port]/[path]`; uses `url.pathname` (not decoded route params) to preserve `%2F` encoding needed for ComfyUI's `/userdata` routes
 
-Persistence is local SQLite at `~/.flowscale/eios.db` via Drizzle ORM + better-sqlite3. Schema is in `apps/web/src/lib/db/schema.ts`; the DB is initialised in `apps/web/src/lib/db/index.ts`.
+Persistence is local SQLite at `~/.flowscale/aios.db` via Drizzle ORM + better-sqlite3. Schema is in `apps/web/src/lib/db/schema.ts`; the DB is initialised in `apps/web/src/lib/db/index.ts`.
 
 ### Database schema
 

@@ -19,7 +19,7 @@ const emptyTokens: FlowscaleTokens = {
 }
 
 function getStorePath(): string {
-  return join(app.getPath('userData'), 'flowscale-eios-auth.json')
+  return join(app.getPath('userData'), 'flowscale-aios-auth.json')
 }
 
 export function getFlowscaleTokens(): FlowscaleTokens {

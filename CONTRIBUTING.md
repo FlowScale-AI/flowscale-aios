@@ -18,7 +18,7 @@ Thank you for your interest in contributing! This document covers how to get sta
 
 1. Fork the repository and clone your fork.
 2. Install dependencies with `pnpm install` (requires Node >= 20 and pnpm >= 9).
-3. Start the web app: `pnpm --filter @flowscale/eios-web dev` (runs on port 14173).
+3. Start the web app: `pnpm --filter @flowscale/aios-web dev` (runs on port 14173).
 
 > ComfyUI must be running locally for most features to work. The app auto-scans ports 6188–16188.
 
@@ -31,7 +31,7 @@ Thank you for your interest in contributing! This document covers how to get sta
 pnpm install
 
 # Start web dev server (port 14173)
-pnpm --filter @flowscale/eios-web dev
+pnpm --filter @flowscale/aios-web dev
 
 # Typecheck all packages
 pnpm typecheck
@@ -46,7 +46,7 @@ pnpm build
 For the Electron desktop app, build the web app first, then:
 
 ```bash
-pnpm --filter @flowscale/eios-desktop build
+pnpm --filter @flowscale/aios-desktop build
 apps/desktop/node_modules/.bin/electron apps/desktop/dist/main.js
 ```
 

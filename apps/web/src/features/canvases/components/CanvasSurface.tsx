@@ -19,27 +19,12 @@ import { useCanvasState } from "./CanvasStateContext";
 import { Tooltip } from "@flowscale/ui";
 import ExportModal from "@/features/canvases/components/ExportModal";
 import { useToolExecution } from "@/features/canvases/hooks/useToolExecution";
-import { useComfyUIExecution } from "@/features/canvases/hooks/useComfyUIExecution";
-import { usePodsExecution } from "@/features/canvases/hooks/usePodsExecution";
-import { isDesktop } from "@/lib/platform";
-import { usePodsStore } from "@/store/podsStore";
 import ExecutionMenu from "./ExecutionMenu";
 import { Minus, Plus } from "phosphor-react";
 import { useCanvasTools } from "@/features/canvases/api/getCanvasTools";
 import type { ToolConfig } from "@/features/canvases/types";
 import type { ToolInputConfig } from "@/features/canvases/types";
 import { Icon } from "@iconify/react";
-
-/** Rewrites a stored operator proxy URL to use the current operator host:port. */
-function rewriteOperatorUrl(
-  url: string,
-  currentOperatorUrl: string | null,
-): string {
-  if (!url || !currentOperatorUrl) return url;
-  const match = url.match(/(\/api\/pods\/.+)$/);
-  if (match) return `${currentOperatorUrl}${match[1]}`;
-  return url;
-}
 
 interface ViewState {
   x: number;
@@ -164,9 +149,6 @@ interface CanvasSurfaceProps {
   activeToolId?: string;
   toolInputs?: Record<string, any>;
   onExecutionStateChange?: (isExecuting: boolean) => void;
-  projectApiKey?: string;
-  executionApiUrl?: string;
-  projectId?: string;
   onToolInputChange?: (parameterName: string, value: any) => void;
   readOnly?: boolean;
 }
@@ -175,9 +157,6 @@ export default function CanvasSurface({
   activeToolId,
   toolInputs,
   onExecutionStateChange,
-  projectApiKey,
-  executionApiUrl,
-  projectId,
   onToolInputChange,
   readOnly = false,
 }: CanvasSurfaceProps) {
@@ -213,25 +192,7 @@ export default function CanvasSurface({
   } | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
 
-  // Operator URL for rewriting stored localhost URLs to current operator
-  const storeOperatorUrl = usePodsStore((s) => s.operatorUrl);
-  const currentOperatorUrl =
-    storeOperatorUrl ?? (isDesktop() ? "http://localhost:30000" : null);
-
-  // Tool Execution State – use pods execution in desktop mode
-  const selectedPodId = usePodsStore((s) => s.selectedPodId);
-  const cloudExecution = useToolExecution({
-    apiUrl: executionApiUrl || "",
-    apiKey: projectApiKey || "",
-  });
-  const comfyExecution = useComfyUIExecution();
-  const podsExecution = usePodsExecution(selectedPodId);
-  // In desktop mode: use pods execution if a pod is selected, else fall back to legacy ComfyUI execution
-  const desktopExecution = selectedPodId ? podsExecution : comfyExecution;
-  // EIOS tools (eios: prefix) always go through the API server regardless of desktop mode
-  const isEiosTool = activeToolId?.startsWith("eios:");
-  const { executionState, executeWorkflow, cancelWorkflow, reset } =
-    isDesktop() && !isEiosTool ? desktopExecution : cloudExecution;
+  const { executionState, executeWorkflow, cancelWorkflow, reset } = useToolExecution({});
 
   // Tool config for "Send To" feature
   const { data: toolsData } = useCanvasTools();
@@ -989,7 +950,7 @@ export default function CanvasSurface({
       if (!obj?.content) return;
 
       try {
-        const contentUrl = rewriteOperatorUrl(obj.content, currentOperatorUrl);
+        const contentUrl = obj.content;
         const response = await fetch(contentUrl);
         const blob = await response.blob();
 
@@ -1680,7 +1641,7 @@ export default function CanvasSurface({
             <DraggableObject
               key={obj.id}
               {...obj}
-              content={rewriteOperatorUrl(obj.content, currentOperatorUrl)}
+              content={obj.content}
               scale={view.scale}
               isSelected={selectedObjectIds.has(obj.id)}
               onSelect={(id) => {
@@ -1739,7 +1700,6 @@ export default function CanvasSurface({
       <ExecutionMenu
         executionState={executionState}
         activeToolId={activeToolId}
-        projectId={projectId}
         onRunGeneration={handleRunGeneration}
         onStopGeneration={handleStopGeneration}
         onResultDragStart={handleResultDragStart}

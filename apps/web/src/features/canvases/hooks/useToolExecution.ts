@@ -1,6 +1,6 @@
 "use client";
 
-// EIOS: Canvas execution uses the same POST→poll pattern as the apps and
+// AIOS: Canvas execution uses the same POST→poll pattern as the apps and
 // build-tool pages. All work happens server-side via /api/tools/[id]/executions,
 // then we poll /api/comfy/[port]/history/[promptId] (through the CORS-free proxy)
 // until the job completes.
@@ -38,7 +38,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
       abortRef.current = false;
       clearPoll();
 
-      if (!workflowId.startsWith("eios:")) {
+      if (!workflowId.startsWith("aios:")) {
         setExecutionState({
           status: "error",
           progress: 0,
@@ -49,7 +49,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
         return;
       }
 
-      const toolId = workflowId.slice("eios:".length);
+      const toolId = workflowId.slice("aios:".length);
 
       // Canvas passes inputs as "nodeId::paramName" — convert to "nodeId__paramName".
       // Skip zero/empty values: unconfigured number fields default to 0 in the canvas

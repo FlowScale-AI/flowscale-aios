@@ -6,7 +6,7 @@ set -e
 
 APP_NAME="FlowScale AI OS"
 APP_ID="flowscale-aios"
-ICON_URL="https://raw.githubusercontent.com/flowscale/flowscale-eios/main/apps/desktop/assets/icon.png"
+ICON_URL="https://raw.githubusercontent.com/flowscale/flowscale-aios/main/apps/desktop/assets/icon.png"
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -172,11 +172,11 @@ StartupNotify=false
 Terminal=false
 Type=Application
 Categories=Development;
-MimeType=x-scheme-handler/flowscaleeios;
+MimeType=x-scheme-handler/flowscaleaios;
 DESKTOP
 
   command -v update-desktop-database &>/dev/null && update-desktop-database "$APPS_DIR" 2>/dev/null || true
-  command -v xdg-mime &>/dev/null && xdg-mime default "$APP_ID.desktop" x-scheme-handler/flowscaleeios 2>/dev/null || true
+  command -v xdg-mime &>/dev/null && xdg-mime default "$APP_ID.desktop" x-scheme-handler/flowscaleaios 2>/dev/null || true
 
   success "Installed to $INSTALL_DIR"
   success "Desktop entry created — $APP_NAME will appear in your app launcher"

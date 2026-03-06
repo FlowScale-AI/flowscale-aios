@@ -11,7 +11,7 @@ import type { FlowscaleTokens } from './config/store.js'
 log.initialize()
 
 const isDev = !app.isPackaged
-const EIOS_PORT = 14173
+const AIOS_PORT = 14173
 
 // Set app name and desktop file name so KDE Wayland matches the window to flowscale-aios.desktop
 app.setName('flowscale-aios')
@@ -24,9 +24,9 @@ if (process.platform === 'linux') {
 // Register OAuth protocol handler before single-instance lock (Windows/Linux)
 if (process.platform !== 'darwin') {
   if (isDev) {
-    app.setAsDefaultProtocolClient('flowscaleeios', process.execPath, [__filename])
+    app.setAsDefaultProtocolClient('flowscaleaios', process.execPath, [__filename])
   } else {
-    app.setAsDefaultProtocolClient('flowscaleeios')
+    app.setAsDefaultProtocolClient('flowscaleaios')
   }
 
   if (process.platform === 'linux') {
@@ -58,12 +58,12 @@ if (process.platform !== 'darwin') {
         'Terminal=false',
         'Type=Application',
         'Categories=Development;',
-        'MimeType=x-scheme-handler/flowscaleeios;',
+        'MimeType=x-scheme-handler/flowscaleaios;',
         '',
       ].join('\n')
       writeFileSync(desktopFile, content, 'utf-8')
       execSync(`update-desktop-database ${appsDir}`)
-      execSync(`xdg-mime default flowscale-aios.desktop x-scheme-handler/flowscaleeios`)
+      execSync(`xdg-mime default flowscale-aios.desktop x-scheme-handler/flowscaleaios`)
     } catch (err) {
       log.warn('[linux] Failed to register icon/.desktop:', err)
     }
@@ -87,7 +87,7 @@ function notifyOAuthComplete(tokens: FlowscaleTokens): void {
 // macOS: protocol URL arrives here when app is already running
 app.on('open-url', (event, url) => {
   event.preventDefault()
-  if (url.startsWith('flowscaleeios://oauth/cb')) {
+  if (url.startsWith('flowscaleaios://oauth/cb')) {
     handleOAuthCallback(url, notifyOAuthComplete)
   }
 })
@@ -132,7 +132,7 @@ function startNextServer(): void {
 
   // ELECTRON_RUN_AS_NODE=1 makes the Electron binary behave as plain Node.js
   nextServer = spawn(process.execPath, [serverScript], {
-    env: { ...process.env, PORT: String(EIOS_PORT), HOSTNAME: '127.0.0.1', ELECTRON_RUN_AS_NODE: '1' },
+    env: { ...process.env, PORT: String(AIOS_PORT), HOSTNAME: '127.0.0.1', ELECTRON_RUN_AS_NODE: '1' },
     stdio: 'pipe',
   })
 
@@ -160,7 +160,7 @@ function createWindow(): BrowserWindow {
     },
   })
 
-  const url = `http://127.0.0.1:${EIOS_PORT}`
+  const url = `http://127.0.0.1:${AIOS_PORT}`
 
   if (isDev) {
     waitForServer(url)
@@ -194,7 +194,7 @@ app.whenReady().then(async () => {
 
   // macOS: register protocol after ready
   if (process.platform === 'darwin') {
-    app.setAsDefaultProtocolClient('flowscaleeios')
+    app.setAsDefaultProtocolClient('flowscaleaios')
   }
 
   // Inject CORS headers for localhost so the renderer can talk to ComfyUI directly if ever needed
@@ -223,7 +223,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('second-instance', (_event, argv) => {
-  const protocolUrl = argv.find((arg) => arg.startsWith('flowscaleeios://'))
+  const protocolUrl = argv.find((arg) => arg.startsWith('flowscaleaios://'))
   if (protocolUrl) {
     handleOAuthCallback(protocolUrl, notifyOAuthComplete)
   }

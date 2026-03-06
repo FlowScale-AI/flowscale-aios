@@ -832,7 +832,7 @@ function ToolEditPanel({ toolId, initialTab = 'configure', onToolUpdated, onTool
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto px-6 py-5">
+      <div className={['flex-1', activeTab === 'test' ? 'overflow-hidden' : 'overflow-y-auto px-6 py-5'].join(' ')}>
         {activeTab === 'configure' && (
           <ConfigurePanel tool={tool} onSaved={() => { loadTool(); onToolUpdated(); setActiveTab('test') }} />
         )}

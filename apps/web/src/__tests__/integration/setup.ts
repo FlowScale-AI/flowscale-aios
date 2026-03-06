@@ -30,6 +30,7 @@ const DDL = `
   CREATE TABLE IF NOT EXISTS executions (
     id TEXT PRIMARY KEY,
     tool_id TEXT NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
     inputs_json TEXT NOT NULL,
     outputs_json TEXT,
     seed INTEGER,

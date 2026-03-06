@@ -375,6 +375,7 @@ describe('analyzeWorkflow', () => {
       ['PreviewImage', 'image'],
       ['FSHunyuan3DGenerate', 'string'],
       ['VHS_VideoCombine', 'string'],
+      ['SaveVideo', 'string'],
       ['SaveAudio', 'string'],
       ['PreviewAudio', 'string'],
     ]
@@ -461,6 +462,16 @@ describe('analyzeWorkflow', () => {
       expect(ios[0].isInput).toBe(false)
       expect(ios[0].paramType).toBe('image')
     }
+  })
+
+  it('detects SaveVideo as an output node with string paramType', () => {
+    const workflow: ComfyUIWorkflow = {
+      '1': { class_type: 'SaveVideo', inputs: {} },
+    }
+    const ios = analyzeWorkflow(workflow)
+    expect(ios.length).toBe(1)
+    expect(ios[0].isInput).toBe(false)
+    expect(ios[0].paramType).toBe('string')
   })
 
   it('handles FSSaveInteger as output with string paramType', () => {

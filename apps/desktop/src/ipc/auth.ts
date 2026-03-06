@@ -8,9 +8,9 @@ import {
 } from '../config/store.js'
 
 const FLOWSCALE_API_URL = 'https://dev-api.flowscale.ai'
-// TODO: Register a new OAuth app for FlowScale EIOS at dev-api.flowscale.ai and update this client_id
-const FLOWSCALE_CLIENT_ID = 'REPLACE_WITH_EIOS_CLIENT_ID'
-const REDIRECT_URI = 'flowscaleeios://oauth/cb'
+// TODO: Register a new OAuth app for FlowScale AIOS at dev-api.flowscale.ai and update this client_id
+const FLOWSCALE_CLIENT_ID = 'REPLACE_WITH_AIOS_CLIENT_ID'
+const REDIRECT_URI = 'flowscaleaios://oauth/cb'
 
 let pendingCodeVerifier: string | null = null
 

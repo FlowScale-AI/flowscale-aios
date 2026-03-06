@@ -22,7 +22,6 @@ interface ResultItem {
 interface ExecutionMenuProps {
   executionState: ExecutionState;
   activeToolId?: string;
-  projectId?: string;
   onRunGeneration: () => void;
   onStopGeneration: () => void;
   onResultDragStart: (filename: string, result: any) => void;
@@ -33,7 +32,6 @@ interface ExecutionMenuProps {
 export default function ExecutionMenu({
   executionState,
   activeToolId,
-  projectId,
   onRunGeneration,
   onStopGeneration,
   onResultDragStart,
@@ -263,7 +261,6 @@ export default function ExecutionMenu({
       <RunsHistoryPanel
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
-        projectId={projectId}
         onOutputDragStart={onResultDragStart}
       />
 
