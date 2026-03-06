@@ -1,7 +1,8 @@
 {
   "name": "@flowscale/aios-desktop",
   "version": "0.1.0",
-  "description": "FlowScale AI OS desktop application",
+  "license": "AGPL-3.0-only",
+  "description": "FlowScale AIOS desktop application",
   "author": {
     "name": "FlowScale",
     "email": "hello@flowscale.ai"

@@ -1,4 +1,4 @@
-# Contributing to Flowscale EIOS
+# Contributing to FlowScale AIOS
 
 Thank you for your interest in contributing! This document covers how to get started, submit changes, and work within the project conventions.
 
