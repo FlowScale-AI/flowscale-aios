@@ -31,7 +31,8 @@ export type ObjectInfoMap = Record<string, ObjectInfoNodeDef>
  *  than a node connection link. */
 function isWidgetInputSpec(spec: ObjInfoInputSpec): boolean {
   const type = spec[0]
-  if (Array.isArray(type)) return true // COMBO dropdown
+  if (Array.isArray(type)) return true // COMBO dropdown (old format: options array)
+  if (type === 'COMBO') return true    // COMBO dropdown (new format: "COMBO" string + options in spec[1])
   return type === 'INT' || type === 'FLOAT' || type === 'STRING' || type === 'BOOLEAN'
 }
 
@@ -101,6 +102,7 @@ const OUTPUT_NODE_TYPES = new Set([
   'SaveAnimatedPNG',
   // ComfyUI built-ins — Video
   'VHS_VideoCombine',
+  'SaveVideo',
   // ComfyUI built-ins — Audio
   'SaveAudio',
   'PreviewAudio',
@@ -331,7 +333,7 @@ function inferOutputParamType(classType: string): 'image' | 'string' | 'select' 
   if (['FSSaveText', 'FSSaveInteger'].includes(classType)) return 'string'
   if (['FSSaveAudio', 'SaveAudio', 'PreviewAudio'].includes(classType)) return 'string'
   if (['FSSave3D', 'FSHunyuan3DGenerate', 'Save3D', 'TripoSGSave', 'MeshSave'].includes(classType) || /Save.*3[Dd]|3[Dd].*Save/i.test(classType)) return 'string'
-  if (['FSSaveVideo', 'VHS_VideoCombine'].includes(classType)) return 'string'
+  if (['FSSaveVideo', 'VHS_VideoCombine', 'SaveVideo'].includes(classType)) return 'string'
   return 'image'
 }
 

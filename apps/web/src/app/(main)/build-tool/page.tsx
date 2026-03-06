@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   UploadSimple,
@@ -20,6 +20,7 @@ import {
 } from 'phosphor-react'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
+import { getComfyOrgApiKey } from '@/lib/platform'
 
 interface WorkflowIO {
   nodeId: string
@@ -42,6 +43,16 @@ interface Tool {
   name: string
   comfyPort: number | null
   schemaJson: string
+}
+
+interface FullToolData {
+  id: string
+  name: string
+  description: string | null
+  workflowJson: string
+  schemaJson: string
+  comfyPort: number | null
+  status: string
 }
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
@@ -448,24 +459,34 @@ function StepConfigure({
   initialName,
   onBack,
   onNext,
+  toolId,
+  initialSchema,
+  initialDescription,
 }: {
   workflowJson: string
   initialName: string
   onBack: () => void
   onNext: (tool: Tool) => void
+  toolId?: string
+  initialSchema?: WorkflowIO[]
+  initialDescription?: string
 }) {
-  const [schema, setSchema] = useState<WorkflowIO[] | null>(null)
+  const [schema, setSchema] = useState<WorkflowIO[] | null>(initialSchema ?? null)
   const [workflowHash, setWorkflowHash] = useState('')
   const [instances, setInstances] = useState<ComfyInstance[]>([])
   const [scanning, setScanning] = useState(false)
   const [selectedPort, setSelectedPort] = useState<number | null>(null)
   const [name, setName] = useState(initialName)
-  const [description, setDescription] = useState('')
+  const [description, setDescription] = useState(initialDescription ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [analyzeError, setAnalyzeError] = useState('')
   // Keys of enabled (visible) fields — format: "nodeId__paramName"
-  const [enabledKeys, setEnabledKeys] = useState<Set<string>>(new Set())
+  const [enabledKeys, setEnabledKeys] = useState<Set<string>>(() =>
+    initialSchema
+      ? new Set(initialSchema.map((f) => `${f.nodeId}__${f.paramName}`))
+      : new Set()
+  )
 
   const fieldKey = (f: WorkflowIO) => `${f.nodeId}__${f.paramName}`
 
@@ -498,12 +519,12 @@ function StepConfigure({
     }
   }, [workflowJson])
 
-  // Analyze on mount (no port yet — uses static widget-param table)
-  useEffect(() => { runAnalyze() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  // Analyze on mount — skip if editing (schema already loaded from existing tool)
+  useEffect(() => { if (!initialSchema) runAnalyze() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-analyze when a port is selected so /object_info can resolve custom nodes
+  // Re-analyze when a port is selected — skip in edit mode to preserve existing schema choices
   useEffect(() => {
-    if (selectedPort) runAnalyze(selectedPort)
+    if (selectedPort && !toolId) runAnalyze(selectedPort)
   }, [selectedPort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDefaultChange = useCallback((nodeId: string, paramName: string, value: unknown) => {
@@ -541,27 +562,47 @@ function StepConfigure({
     setSaving(true)
     setError('')
     try {
-      const res = await fetch('/api/tools', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim() || null,
-          workflowJson,
-          workflowHash,
-          schemaJson: JSON.stringify(visibleSchema),
-          comfyPort: selectedPort,
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        setError(err.error ?? 'Failed to save tool')
-        return
+      let tool: Tool
+      if (toolId) {
+        const res = await fetch(`/api/tools/${toolId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.trim(),
+            description: description.trim() || null,
+            schemaJson: JSON.stringify(visibleSchema),
+            comfyPort: selectedPort,
+          }),
+        })
+        if (!res.ok) {
+          const err = await res.json()
+          setError(err.error ?? 'Failed to update tool')
+          return
+        }
+        tool = await res.json()
+      } else {
+        const res = await fetch('/api/tools', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.trim(),
+            description: description.trim() || null,
+            workflowJson,
+            workflowHash,
+            schemaJson: JSON.stringify(visibleSchema),
+            comfyPort: selectedPort,
+          }),
+        })
+        if (!res.ok) {
+          const err = await res.json()
+          setError(err.error ?? 'Failed to save tool')
+          return
+        }
+        tool = await res.json()
       }
-      const tool: Tool = await res.json()
       onNext(tool)
     } catch {
-      setError('Failed to save tool')
+      setError(toolId ? 'Failed to update tool' : 'Failed to save tool')
     } finally {
       setSaving(false)
     }
@@ -831,7 +872,9 @@ function StepConfigure({
           className="flex items-center gap-2 px-5 py-2.5 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {saving ? <LottieSpinner size={14} /> : null}
-          {selectedPort ? 'Save & Test' : 'Save (test later)'}
+          {toolId
+            ? (selectedPort ? 'Update & Test' : 'Update (test later)')
+            : (selectedPort ? 'Save & Test' : 'Save (test later)')}
           <ArrowRight size={14} />
         </button>
       </div>
@@ -1047,7 +1090,7 @@ function StepTest({
       const res = await fetch(`/api/tools/${tool.id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs }),
+        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -1493,19 +1536,53 @@ const stepVariants = {
   exit: { opacity: 0, y: -12 },
 }
 
-export default function BuildToolPage() {
-  const [step, setStep] = useState(0)
+function BuildToolPageInner() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const editId = searchParams.get('id')
+
+  const [step, setStep] = useState(editId ? 1 : 0)
   const [workflowJson, setWorkflowJson] = useState('')
   const [workflowName, setWorkflowName] = useState('')
   const [tool, setTool] = useState<Tool | null>(null)
+  const [editToolData, setEditToolData] = useState<FullToolData | null>(null)
+  const [loadingEditTool, setLoadingEditTool] = useState(!!editId)
+
+  useEffect(() => {
+    if (!editId) return
+    fetch(`/api/tools/${editId}`)
+      .then((r) => r.json())
+      .then((t: FullToolData) => {
+        setEditToolData(t)
+        setWorkflowJson(t.workflowJson)
+        setWorkflowName(t.name)
+        setTool({ id: t.id, name: t.name, comfyPort: t.comfyPort, schemaJson: t.schemaJson })
+      })
+      .catch(() => {})
+      .finally(() => setLoadingEditTool(false))
+  }, [editId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loadingEditTool) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <LottieSpinner size={32} />
+      </div>
+    )
+  }
 
   return (
     <div className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
         <div>
-          <h1 className="font-tech text-xl font-semibold text-zinc-100">Build Tool</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">Turn a ComfyUI workflow into a production-ready tool</p>
+          <h1 className="font-tech text-xl font-semibold text-zinc-100">
+            {editId ? 'Edit Tool' : 'Build Tool'}
+          </h1>
+          <p className="text-sm text-zinc-500 mt-0.5">
+            {editId
+              ? 'Update configuration, test, and redeploy your tool'
+              : 'Turn a ComfyUI workflow into a production-ready tool'}
+          </p>
         </div>
       </div>
 
@@ -1542,8 +1619,11 @@ export default function BuildToolPage() {
               <StepConfigure
                 workflowJson={workflowJson}
                 initialName={workflowName}
-                onBack={() => setStep(0)}
+                onBack={() => editId ? router.push('/integrations/comfyui') : setStep(0)}
                 onNext={(t) => { setTool(t); setStep(2) }}
+                toolId={editId ?? undefined}
+                initialSchema={editToolData ? JSON.parse(editToolData.schemaJson) : undefined}
+                initialDescription={editToolData?.description ?? undefined}
               />
             </motion.div>
           )}
@@ -1582,5 +1662,13 @@ export default function BuildToolPage() {
         </AnimatePresence>
       </div>
     </div>
+  )
+}
+
+export default function BuildToolPage() {
+  return (
+    <Suspense>
+      <BuildToolPageInner />
+    </Suspense>
   )
 }

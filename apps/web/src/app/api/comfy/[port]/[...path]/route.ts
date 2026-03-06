@@ -13,6 +13,8 @@ async function proxyRequest(req: NextRequest, port: string): Promise<NextRespons
 
   const headers = new Headers(req.headers)
   headers.delete('host')
+  headers.delete('origin')
+  headers.delete('referer')
 
   const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.arrayBuffer()
 

@@ -1,7 +1,7 @@
-import { app, BrowserWindow, Menu, session, shell } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, session, shell } from 'electron'
 import path from 'path'
 import { spawn, type ChildProcess } from 'child_process'
-import { writeFileSync, mkdirSync, existsSync } from 'fs'
+import { writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs'
 import { execSync } from 'child_process'
 import log from 'electron-log'
 import { registerAuthIpc, handleOAuthCallback } from './ipc/auth.js'
@@ -11,38 +11,76 @@ import type { FlowscaleTokens } from './config/store.js'
 log.initialize()
 
 const isDev = !app.isPackaged
-const EIOS_PORT = 14173
+const AIOS_PORT_START = 14173
+
+/** Try ports starting at `start` until one is free, then return it. */
+function findAvailablePort(start: number): Promise<number> {
+  return new Promise((resolve) => {
+    const net = require('net') as typeof import('net')
+    const tryPort = (port: number): void => {
+      const server = net.createServer()
+      server.once('error', () => tryPort(port + 1))
+      server.once('listening', () => server.close(() => resolve(port)))
+      server.listen(port, '127.0.0.1')
+    }
+    tryPort(start)
+  })
+}
+
+// Set app name and desktop file name so KDE Wayland matches the window to flowscale-aios.desktop
+app.setName('flowscale-aios')
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('class', 'flowscale-aios')
+  // Tells Wayland compositors (KDE/GNOME) which .desktop file owns this window → correct icon
+  ;(app as any).setDesktopName('flowscale-aios.desktop')
+}
 
 // Register OAuth protocol handler before single-instance lock (Windows/Linux)
 if (process.platform !== 'darwin') {
   if (isDev) {
-    app.setAsDefaultProtocolClient('flowscaleeios', process.execPath, [__filename])
-
-    if (process.platform === 'linux') {
-      try {
-        const appsDir = path.join(app.getPath('home'), '.local/share/applications')
-        if (!existsSync(appsDir)) mkdirSync(appsDir, { recursive: true })
-        const desktopFile = path.join(appsDir, 'flowscale-eios-dev.desktop')
-        const content = [
-          '[Desktop Entry]',
-          'Name=FlowScale EIOS (dev)',
-          `Exec=${process.execPath} ${__filename} %u`,
-          'StartupNotify=false',
-          'Terminal=false',
-          'Type=Application',
-          'Categories=Development;',
-          'MimeType=x-scheme-handler/flowscaleeios;',
-          '',
-        ].join('\n')
-        writeFileSync(desktopFile, content, 'utf-8')
-        execSync(`update-desktop-database ${appsDir}`)
-        execSync(`xdg-mime default flowscale-eios-dev.desktop x-scheme-handler/flowscaleeios`)
-      } catch (err) {
-        log.warn('[protocol] Failed to register Linux protocol handler:', err)
-      }
-    }
+    app.setAsDefaultProtocolClient('flowscaleaios', process.execPath, [__filename])
   } else {
-    app.setAsDefaultProtocolClient('flowscaleeios')
+    app.setAsDefaultProtocolClient('flowscaleaios')
+  }
+
+  if (process.platform === 'linux') {
+    // Install icon + .desktop file on every launch (dev and production) so the
+    // taskbar icon is always up to date regardless of how the app was launched.
+    try {
+      // Write icon — use nativeImage so this works whether assets are on disk or in an asar
+      const iconsDir = path.join(app.getPath('home'), '.local/share/icons/hicolor/256x256/apps')
+      if (!existsSync(iconsDir)) mkdirSync(iconsDir, { recursive: true })
+      const iconSrc = path.join(__dirname, '..', 'assets', 'icon.png')
+      const iconDest = path.join(iconsDir, 'flowscale-aios.png')
+      const img = nativeImage.createFromPath(iconSrc)
+      if (!img.isEmpty()) writeFileSync(iconDest, img.toPNG())
+
+      // Write .desktop file pointing to this binary
+      const appsDir = path.join(app.getPath('home'), '.local/share/applications')
+      if (!existsSync(appsDir)) mkdirSync(appsDir, { recursive: true })
+      const desktopFile = path.join(appsDir, 'flowscale-aios.desktop')
+      const execLine = isDev
+        ? `Exec=${process.execPath} ${__filename} %u`
+        : `Exec=${process.execPath} %u`
+      const content = [
+        '[Desktop Entry]',
+        'Name=FlowScale AI OS',
+        execLine,
+        'Icon=flowscale-aios',
+        'StartupWMClass=flowscale-aios',
+        'StartupNotify=false',
+        'Terminal=false',
+        'Type=Application',
+        'Categories=Development;',
+        'MimeType=x-scheme-handler/flowscaleaios;',
+        '',
+      ].join('\n')
+      writeFileSync(desktopFile, content, 'utf-8')
+      execSync(`update-desktop-database ${appsDir}`)
+      execSync(`xdg-mime default flowscale-aios.desktop x-scheme-handler/flowscaleaios`)
+    } catch (err) {
+      log.warn('[linux] Failed to register icon/.desktop:', err)
+    }
   }
 }
 
@@ -63,7 +101,7 @@ function notifyOAuthComplete(tokens: FlowscaleTokens): void {
 // macOS: protocol URL arrives here when app is already running
 app.on('open-url', (event, url) => {
   event.preventDefault()
-  if (url.startsWith('flowscaleeios://oauth/cb')) {
+  if (url.startsWith('flowscaleaios://oauth/cb')) {
     handleOAuthCallback(url, notifyOAuthComplete)
   }
 })
@@ -91,7 +129,7 @@ function waitForServer(url: string, timeoutMs = 30_000): Promise<void> {
   })
 }
 
-function startNextServer(): void {
+function startNextServer(port: number): void {
   // In production: spawn the standalone Next.js server built into the app
   const serverScript = path.join(
     process.resourcesPath,
@@ -99,13 +137,16 @@ function startNextServer(): void {
     'web',
     '.next',
     'standalone',
+    'apps',
+    'web',
     'server.js',
   )
 
-  log.info('[server] Starting Next.js standalone server:', serverScript)
+  log.info('[server] Starting Next.js standalone server:', serverScript, 'on port', port)
 
+  // ELECTRON_RUN_AS_NODE=1 makes the Electron binary behave as plain Node.js
   nextServer = spawn(process.execPath, [serverScript], {
-    env: { ...process.env, PORT: String(EIOS_PORT), HOSTNAME: '127.0.0.1' },
+    env: { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', ELECTRON_RUN_AS_NODE: '1' },
     stdio: 'pipe',
   })
 
@@ -117,13 +158,14 @@ function startNextServer(): void {
   })
 }
 
-function createWindow(): BrowserWindow {
+function createWindow(port: number): BrowserWindow {
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: 'FlowScale EIOS',
+    title: 'FlowScale AI OS',
+    icon: nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'icon.png')),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -132,7 +174,7 @@ function createWindow(): BrowserWindow {
     },
   })
 
-  const url = `http://127.0.0.1:${EIOS_PORT}`
+  const url = `http://127.0.0.1:${port}`
 
   if (isDev) {
     waitForServer(url)
@@ -166,7 +208,7 @@ app.whenReady().then(async () => {
 
   // macOS: register protocol after ready
   if (process.platform === 'darwin') {
-    app.setAsDefaultProtocolClient('flowscaleeios')
+    app.setAsDefaultProtocolClient('flowscaleaios')
   }
 
   // Inject CORS headers for localhost so the renderer can talk to ComfyUI directly if ever needed
@@ -181,21 +223,23 @@ app.whenReady().then(async () => {
     },
   )
 
+  const port = isDev ? AIOS_PORT_START : await findAvailablePort(AIOS_PORT_START)
+
   if (!isDev) {
-    startNextServer()
+    startNextServer(port)
   }
 
-  mainWindow = createWindow()
+  mainWindow = createWindow(port)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createWindow()
+      mainWindow = createWindow(port)
     }
   })
 })
 
 app.on('second-instance', (_event, argv) => {
-  const protocolUrl = argv.find((arg) => arg.startsWith('flowscaleeios://'))
+  const protocolUrl = argv.find((arg) => arg.startsWith('flowscaleaios://'))
   if (protocolUrl) {
     handleOAuthCallback(protocolUrl, notifyOAuthComplete)
   }

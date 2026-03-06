@@ -1,22 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
-import { executions, tools } from '@/lib/db/schema'
+import { executions, tools, users } from '@/lib/db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@flowscale/workflow'
+import { getRequestUser } from '@/lib/auth'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const db = getDb()
   const { id } = await params
 
   const rows = await db
-    .select()
+    .select({ execution: executions, username: users.username })
     .from(executions)
+    .leftJoin(users, eq(executions.userId, users.id))
     .where(eq(executions.toolId, id))
     .orderBy(desc(executions.createdAt))
     .limit(100)
 
-  return NextResponse.json(rows)
+  return NextResponse.json(rows.map(({ execution, username }) => ({ ...execution, createdBy: username ?? null })))
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -28,7 +30,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!tool.comfyPort) return NextResponse.json({ error: 'No ComfyUI port configured for this tool' }, { status: 400 })
 
   const body = await req.json()
-  const { inputs } = body
+  const { inputs, comfyOrgApiKey } = body
 
   // Generate a random seed if not provided in inputs
   const seed = inputs?.seed ?? Math.floor(Math.random() * 2 ** 32)
@@ -56,11 +58,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const workflow = normalizeWorkflow(parsed, objectInfoMap) as Record<string, { inputs: Record<string, unknown> }>
   const schema = JSON.parse(tool.schemaJson) as Array<{
-    nodeId: string; paramName: string; isInput: boolean; defaultValue?: unknown
+    nodeId: string; paramName: string; isInput: boolean; defaultValue?: unknown; enabled?: boolean
   }>
 
   for (const field of schema) {
     if (!field.isInput) continue
+    if (field.enabled === false) continue
     if (!workflow[field.nodeId]) continue
     // Prefer provided input → fall back to schema default → leave workflow as-is
     let inputValue: unknown
@@ -78,10 +81,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
+  const currentUser = getRequestUser(req)
+
   // Insert execution row
   await db.insert(executions).values({
     id: executionId,
     toolId,
+    userId: currentUser?.id ?? null,
     inputsJson: JSON.stringify({ ...inputs, seed }),
     workflowHash: tool.workflowHash,
     seed,
@@ -90,10 +96,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   })
 
   // Queue the prompt via embedded ComfyUI proxy (non-blocking)
+  const promptPayload: Record<string, unknown> = { prompt: workflow, client_id: clientId }
+  if (comfyOrgApiKey) {
+    promptPayload.extra_data = { api_key_comfy_org: comfyOrgApiKey }
+  }
   const queueRes = await fetch(`http://localhost:${tool.comfyPort}/prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: workflow, client_id: clientId }),
+    body: JSON.stringify(promptPayload),
   })
 
   if (!queueRes.ok) {

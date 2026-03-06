@@ -44,29 +44,11 @@ mac:
   gatekeeperAssess: false
 
 dmg:
-  artifactName: "${productName}-${version}-${arch}.dmg"
+  writeUpdateInfo: false
 
 linux:
   target:
     - target: AppImage
       arch:
         - x64
-    - target: rpm
-      arch:
-        - x64
   category: Development
-  icon: build/icons
-  mimeTypes:
-    - x-scheme-handler/flowscaleeios
-
-appImage:
-  artifactName: "${productName}-${version}-${arch}.AppImage"
-
-rpm:
-  artifactName: "${productName}-${version}-${arch}.rpm"
-
-# Protocol handler for OAuth callback
-protocols:
-  - name: FlowScale EIOS
-    schemes:
-      - flowscaleeios

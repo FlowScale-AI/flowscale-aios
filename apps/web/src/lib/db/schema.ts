@@ -21,6 +21,7 @@ export const tools = sqliteTable('tools', {
 export const executions = sqliteTable('executions', {
   id: text('id').primaryKey(),
   toolId: text('tool_id').notNull().references(() => tools.id, { onDelete: 'cascade' }),
+  userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
   inputsJson: text('inputs_json').notNull(),
   outputsJson: text('outputs_json'), // null until complete
   seed: integer('seed'),

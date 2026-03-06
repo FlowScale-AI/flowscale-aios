@@ -9,12 +9,14 @@ interface WorkflowIO {
   paramName: string;
   paramType: "string" | "number" | "boolean" | "image" | "select";
   defaultValue?: unknown;
+  label?: string;
   options?: string[];
   isInput: boolean;
+  enabled?: boolean;
 }
 
 // Tool row returned by GET /api/tools
-interface EiosToolRow {
+interface AiosToolRow {
   id: string;
   name: string;
   description?: string | null;
@@ -33,7 +35,7 @@ function mapParamTypeToDemoType(paramType: WorkflowIO["paramType"]): string {
   }
 }
 
-function mapEiosTool(row: EiosToolRow): CanvasTool {
+function mapAiosTool(row: AiosToolRow): CanvasTool {
   let schema: WorkflowIO[] = [];
   try {
     schema = JSON.parse(row.schemaJson || "[]") as WorkflowIO[];
@@ -42,10 +44,10 @@ function mapEiosTool(row: EiosToolRow): CanvasTool {
   }
 
   const inputs: CanvasToolInput[] = schema
-    .filter((s) => s.isInput)
+    .filter((s) => s.isInput && s.enabled !== false)
     .map((s) => ({
       path: `${s.nodeId}.inputs.${s.paramName}`,
-      label: s.nodeTitle || s.paramName,
+      label: s.label || s.nodeTitle || s.paramName,
       parameter_name: `${s.nodeId}::${s.paramName}`,
       demo_type: mapParamTypeToDemoType(s.paramType),
       category: s.nodeType,
@@ -55,11 +57,11 @@ function mapEiosTool(row: EiosToolRow): CanvasTool {
       options: s.options,
     }));
 
-  const outputSchema = schema.filter((s) => !s.isInput);
+  const outputSchema = schema.filter((s) => !s.isInput && s.enabled !== false);
   const outputs: CanvasToolOutput[] =
     outputSchema.length > 0
       ? outputSchema.map((s) => ({
-          label: s.nodeTitle || s.paramName,
+          label: s.label || s.nodeTitle || s.paramName,
           demo_type: mapParamTypeToDemoType(s.paramType),
           parameter_name: `${s.nodeId}::${s.paramName}`,
           category: s.nodeType,
@@ -68,8 +70,8 @@ function mapEiosTool(row: EiosToolRow): CanvasTool {
 
   return {
     project_id: "local",
-    project_name: "EIOS",
-    workflow_id: `eios:${row.id}`,
+    project_name: "AIOS",
+    workflow_id: `aios:${row.id}`,
     name: row.name,
     description: row.description ?? "",
     inputs,
@@ -83,8 +85,8 @@ export const getCanvasTools = async (): Promise<CanvasToolsResponse> => {
   try {
     const res = await fetch("/api/tools?status=production");
     if (!res.ok) return { status: "success", tools: [], total: 0 };
-    const rows = (await res.json()) as EiosToolRow[];
-    const tools: CanvasTool[] = rows.map(mapEiosTool);
+    const rows = (await res.json()) as AiosToolRow[];
+    const tools: CanvasTool[] = rows.map(mapAiosTool);
     return { status: "success", tools, total: tools.length };
   } catch {
     return { status: "success", tools: [], total: 0 };

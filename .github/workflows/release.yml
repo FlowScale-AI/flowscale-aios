@@ -43,34 +43,56 @@ jobs:
         run: pnpm install
 
       - name: Build web (Next.js standalone)
-        run: pnpm --filter @flowscale/eios-web build
+        run: pnpm --filter @flowscale/aios-web build
 
-      # Next.js standalone doesn't copy static assets — do it manually
-      - name: Copy static assets into standalone
-        shell: bash
-        run: |
-          cp -r apps/web/.next/static apps/web/.next/standalone/.next/static
-          [ -d apps/web/public ] && cp -r apps/web/public apps/web/.next/standalone/public || true
-
-      # better-sqlite3 is a native module; rebuild it against Electron's Node.js ABI
-      # so it loads correctly when the standalone server runs inside Electron.
+      # Rebuild better-sqlite3 for Electron's Node ABI so it loads correctly
+      # when the standalone server runs inside Electron (system Node ABI != Electron ABI).
+      # Uses prebuild-install to download the prebuilt binary for the exact Electron version.
       - name: Rebuild better-sqlite3 for Electron
-        working-directory: apps/desktop
         shell: bash
         run: |
-          ELECTRON_VER=$(node -p "require('./node_modules/electron/package.json').version")
-          node_modules/.bin/electron-rebuild \
-            --version="$ELECTRON_VER" \
-            --module-dir=../web/.next/standalone \
-            --which-module=better-sqlite3 \
-            --force
-        continue-on-error: true  # non-fatal if better-sqlite3 isn't present in standalone
+          node - <<'NODESCRIPT'
+          const { execSync } = require('child_process')
+          const path = require('path')
+          const fs = require('fs')
+
+          function findDir(base, name) {
+            try {
+              for (const e of fs.readdirSync(base, { withFileTypes: true })) {
+                if (!e.isDirectory()) continue
+                const full = path.join(base, e.name)
+                if (e.name === name) return full
+                const found = findDir(full, name)
+                if (found) return found
+              }
+            } catch {}
+            return null
+          }
+
+          const sqliteDir = findDir('apps/web/.next/standalone/node_modules', 'better-sqlite3')
+          if (!sqliteDir) { console.log('better-sqlite3 not found in standalone, skipping'); process.exit(0) }
+
+          const electronVer = require('./apps/desktop/node_modules/electron/package.json').version
+          const prebuildDir = findDir('node_modules', 'prebuild-install')
+          if (!prebuildDir) { console.log('prebuild-install not found, skipping'); process.exit(0) }
+
+          console.log(`Rebuilding better-sqlite3 at ${sqliteDir} for Electron ${electronVer}`)
+          try {
+            execSync(`node "${path.join(prebuildDir, 'bin.js')}" --runtime electron --target ${electronVer}`, {
+              cwd: sqliteDir, stdio: 'inherit'
+            })
+            console.log('Rebuild complete')
+          } catch (e) {
+            console.warn('prebuild-install failed (will rely on electron-builder rebuild):', e.message)
+          }
+          NODESCRIPT
+        continue-on-error: true
 
       - name: Build desktop TypeScript
-        run: pnpm --filter @flowscale/eios-desktop build
+        run: pnpm --filter @flowscale/aios-desktop build
 
       - name: Package (${{ matrix.platform }})
-        run: pnpm --filter @flowscale/eios-desktop run package:${{ matrix.platform }}
+        run: pnpm --filter @flowscale/aios-desktop run package:${{ matrix.platform }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS code signing — set these repository secrets to enable:

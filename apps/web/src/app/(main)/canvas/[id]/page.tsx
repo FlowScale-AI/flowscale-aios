@@ -27,7 +27,7 @@ export default async function CanvasPage({
   }
 
   return (
-    <Suspense>
+    <Suspense fallback={<div className="flex h-screen items-center justify-center text-zinc-400">Loading...</div>}>
       <CanvasClientPage isSharedRequest={isSharedRequest} />
     </Suspense>
   );

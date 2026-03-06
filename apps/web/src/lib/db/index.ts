@@ -7,7 +7,7 @@ import crypto from 'crypto'
 import * as schema from './schema'
 
 const DB_DIR = join(homedir(), '.flowscale')
-const DB_PATH = join(DB_DIR, 'eios.db')
+const DB_PATH = join(DB_DIR, 'aios.db')
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null
 
@@ -116,7 +116,16 @@ export function getDb() {
   `)
 
   // Migrations for existing DBs
-  try { sqlite.exec(`ALTER TABLE canvases ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0`) } catch { /* column already exists */ }
+  const canvasColumns = sqlite.prepare('PRAGMA table_info(canvases)').all() as { name: string }[]
+  const hasIsSharedColumn = canvasColumns.some((col) => col.name === 'is_shared')
+  if (!hasIsSharedColumn) {
+    sqlite.exec('ALTER TABLE canvases ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0')
+  }
+
+  const execColumns = sqlite.prepare('PRAGMA table_info(executions)').all() as { name: string }[]
+  if (!execColumns.some((col) => col.name === 'user_id')) {
+    sqlite.exec('ALTER TABLE executions ADD COLUMN user_id TEXT')
+  }
 
   // First-run: seed admin user if no users exist
   const userCount = sqlite.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }

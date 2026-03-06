@@ -50,11 +50,16 @@ export async function queuePrompt(
   workflow: Record<string, any>,
   clientId: string,
   baseUrl?: string,
+  apiKey?: string,
 ): Promise<string> {
+  const payload: Record<string, any> = { prompt: workflow, client_id: clientId };
+  if (apiKey) {
+    payload.extra_data = { api_key_comfy_org: apiKey };
+  }
   const res = await comfyFetch("/prompt", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt: workflow, client_id: clientId }),
+    body: JSON.stringify(payload),
   }, baseUrl);
   const data = await res.json();
   return data.prompt_id;

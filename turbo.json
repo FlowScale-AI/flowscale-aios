@@ -16,6 +16,12 @@
     },
     "lint": {
       "dependsOn": ["^lint"]
+    },
+    "test": {
+      "cache": false
+    },
+    "test:coverage": {
+      "cache": false
     }
   }
 }

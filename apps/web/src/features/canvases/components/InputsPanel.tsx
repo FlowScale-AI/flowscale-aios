@@ -165,7 +165,7 @@ export default function InputsPanel({
   const handleFileChange = async (parameterName: string, file: File) => {
     handleInputChange(parameterName, file);
     const fileType = file.type.split("/")[0];
-    if (fileType === "image" || fileType === "video") {
+    if (fileType === "image" || fileType === "video" || fileType === "audio") {
       const previewUrl = URL.createObjectURL(file);
       setFilePreviews((prev) => ({ ...prev, [parameterName]: previewUrl }));
     }
@@ -178,7 +178,7 @@ export default function InputsPanel({
       if (value instanceof File && value !== inputValues[key]) {
         setInputValues((prev) => ({ ...prev, [key]: value }));
         const fileType = value.type.split("/")[0];
-        if (fileType === "image" || fileType === "video") {
+        if (fileType === "image" || fileType === "video" || fileType === "audio") {
           const previewUrl = URL.createObjectURL(value);
           setFilePreviews((prev) => {
             // Revoke old preview if it exists
@@ -536,7 +536,12 @@ export default function InputsPanel({
       <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-6">
         {/* Dynamic Inputs — only visible ones */}
         {visibleInputs.map((input, index) => {
-          const effectiveType = getEffectiveType(input.parameter_name, input.demo_type);
+          const effectiveType = inferInputType(
+            input.parameter_name,
+            input.label,
+            input.category ?? "",
+            getEffectiveType(input.parameter_name, input.demo_type),
+          );
 
           return (
             <div key={input.parameter_name} className="space-y-3">
@@ -682,7 +687,7 @@ export default function InputsPanel({
                   </div>
 
                   {/* File Preview */}
-                  {inputValues[input.parameter_name] && (
+                  {inputValues[input.parameter_name] instanceof File && (
                     <div className="rounded-lg border border-white/10 overflow-hidden bg-zinc-900">
                       {effectiveType === "image" &&
                         filePreviews[input.parameter_name] && (
@@ -700,20 +705,16 @@ export default function InputsPanel({
                             className="w-full h-48"
                           />
                         )}
-                      {effectiveType === "audio" && (
-                        <div className="p-4">
-                          <audio
-                            src={
-                              filePreviews[input.parameter_name] ||
-                              URL.createObjectURL(
-                                inputValues[input.parameter_name],
-                              )
-                            }
-                            controls
-                            className="w-full"
-                          />
-                        </div>
-                      )}
+                      {effectiveType === "audio" &&
+                        filePreviews[input.parameter_name] && (
+                          <div className="p-4">
+                            <audio
+                              src={filePreviews[input.parameter_name]}
+                              controls
+                              className="w-full"
+                            />
+                          </div>
+                        )}
                       {effectiveType === "3d" && (
                         <Model3dPreview file={inputValues[input.parameter_name]} />
                       )}

@@ -26,8 +26,10 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Also allow canvas API routes when the Referer indicates a shared canvas page
-  if (SHARED_CANVAS_API.test(pathname)) {
+  // Also allow canvas API routes when the Referer indicates a shared canvas page,
+  // but only for safe read-only methods (Referer is spoofable, so never trust it for writes)
+  const method = request.method.toUpperCase();
+  if ((method === "GET" || method === "HEAD") && SHARED_CANVAS_API.test(pathname)) {
     const referer = request.headers.get("referer") || "";
     try {
       const refUrl = new URL(referer);

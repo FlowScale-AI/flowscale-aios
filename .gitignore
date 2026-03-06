@@ -62,3 +62,5 @@ apps/web/.next/
 node_modules/
 apps/web/node_modules/
 packages/workflow/node_modules/
+apps/desktop/release/
+TODO.md

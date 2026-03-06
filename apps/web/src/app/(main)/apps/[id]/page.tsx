@@ -22,6 +22,8 @@ import {
 import Link from 'next/link'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
+import { getComfyOrgApiKey } from '@/lib/platform'
+import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
 
 interface WorkflowIO {
   nodeId: string
@@ -30,8 +32,10 @@ interface WorkflowIO {
   paramName: string
   paramType: 'string' | 'number' | 'boolean' | 'image' | 'select'
   defaultValue?: unknown
+  label?: string
   options?: string[]
   isInput: boolean
+  enabled?: boolean
 }
 
 interface Tool {
@@ -65,31 +69,9 @@ interface ExecResult {
 
 // ─── Output renderers ─────────────────────────────────────────────────────────
 
-function BlurRevealImage({ src, alt }: { src: string; alt: string }) {
-  const [sharp, setSharp] = useState(false)
-  useEffect(() => {
-    const id = requestAnimationFrame(() => requestAnimationFrame(() => setSharp(true)))
-    return () => cancelAnimationFrame(id)
-  }, [])
-  return (
-    <div className="overflow-hidden rounded-lg border border-zinc-800">
-      <img
-        src={src}
-        alt={alt}
-        className="w-full block"
-        style={{
-          filter: sharp ? 'blur(0px) brightness(1)' : 'blur(28px) brightness(0.7)',
-          transform: sharp ? 'scale(1)' : 'scale(1.1)',
-          transition: 'filter 2s ease-out, transform 2s ease-out',
-        }}
-      />
-    </div>
-  )
-}
-
 function inferOutputKind(nodeType: string): 'image' | 'video' | 'audio' | 'model' | 'text' | 'file' {
   if (['FSSaveImage', 'SaveImage', 'PreviewImage', 'SaveAnimatedWEBP', 'SaveAnimatedPNG'].includes(nodeType)) return 'image'
-  if (['FSSaveVideo', 'VHS_VideoCombine'].includes(nodeType)) return 'video'
+  if (['FSSaveVideo', 'VHS_VideoCombine', 'SaveVideo'].includes(nodeType)) return 'video'
   if (['FSSaveAudio', 'SaveAudio', 'PreviewAudio'].includes(nodeType)) return 'audio'
   if (['FSSave3D', 'FSHunyuan3DGenerate', 'Save3D', 'TripoSGSave', 'MeshSave'].includes(nodeType) || /Save.*3[Dd]|3[Dd].*Save|GLB|GLTF|Mesh/i.test(nodeType)) return 'model'
   if (['FSSaveText', 'FSSaveInteger'].includes(nodeType)) return 'text'
@@ -97,60 +79,44 @@ function inferOutputKind(nodeType: string): 'image' | 'video' | 'audio' | 'model
 }
 
 function OutputLoadingPlaceholder({ kind }: { kind: 'image' | 'video' | 'audio' | 'model' | 'text' | 'file' }) {
-  if (kind === 'image') {
-    return (
-      <div className="aspect-square rounded-xl border border-white/5 bg-zinc-950 flex items-center justify-center overflow-hidden relative">
-        <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 to-zinc-950 animate-pulse" />
-        <LottieSpinner size={36} />
-      </div>
-    )
-  }
-  if (kind === 'video') {
-    return (
-      <div className="col-span-2 aspect-video rounded-xl border border-white/5 bg-zinc-950 flex flex-col items-center justify-center gap-2">
-        <Play size={32} weight="fill" className="text-zinc-700" />
-        <LottieSpinner size={24} />
-      </div>
-    )
-  }
-  if (kind === 'audio') {
-    return (
-      <div className="col-span-2 h-16 rounded-xl border border-white/5 bg-zinc-950 flex items-center justify-center gap-1 px-4">
-        {Array.from({ length: 20 }).map((_, i) => (
-          <div
-            key={i}
-            className="w-1 rounded-full bg-zinc-700 animate-pulse"
-            style={{ height: `${8 + Math.sin(i * 0.8) * 8}px`, animationDelay: `${i * 60}ms` }}
-          />
-        ))}
-      </div>
-    )
-  }
-  if (kind === 'model') {
-    return (
-      <div className="col-span-2 aspect-square rounded-xl border border-white/5 bg-zinc-950 flex flex-col items-center justify-center gap-3">
-        <div className="text-4xl opacity-30 animate-spin" style={{ animationDuration: '3s' }}>⬡</div>
-        <LottieSpinner size={24} />
-      </div>
-    )
-  }
   if (kind === 'text') {
     return (
-      <div className="col-span-2 rounded-xl border border-white/5 bg-zinc-950 px-4 py-4 flex flex-col gap-2">
+      <div className="col-span-2 sm:col-span-3 rounded-xl border border-white/5 bg-zinc-900/50 px-4 py-3 flex flex-col gap-2">
         {Array.from({ length: 3 }).map((_, i) => (
-          <div
-            key={i}
-            className="h-3 rounded bg-zinc-800 animate-pulse"
-            style={{ width: `${70 - i * 15}%`, animationDelay: `${i * 120}ms` }}
-          />
+          <div key={i} className="h-3 rounded bg-zinc-800 animate-pulse" style={{ width: `${70 - i * 15}%`, animationDelay: `${i * 120}ms` }} />
         ))}
       </div>
     )
   }
   return (
-    <div className="col-span-2 h-16 rounded-xl border border-white/5 bg-zinc-950 flex items-center justify-center">
-      <LottieSpinner size={28} />
+    <div className="flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50">
+      <div className="h-36 bg-zinc-950 flex items-center justify-center relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 to-zinc-950 animate-pulse" />
+        <LottieSpinner size={28} />
+      </div>
+      <div className="h-9 border-t border-white/5 animate-pulse bg-zinc-950" />
     </div>
+  )
+}
+
+// ─── Output item renderers ────────────────────────────────────────────────────
+
+function BlurRevealImage({ src, alt }: { src: string; alt: string }) {
+  const [sharp, setSharp] = useState(false)
+  useEffect(() => {
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => setSharp(true)))
+    return () => cancelAnimationFrame(id)
+  }, [])
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+      style={{
+        filter: sharp ? 'blur(0px) brightness(1)' : 'blur(28px) brightness(0.7)',
+        transition: 'filter 2s ease-out',
+      }}
+    />
   )
 }
 
@@ -177,18 +143,14 @@ function ModelPreview({ src, filename }: { src: string; filename: string }) {
   useEffect(() => { if (viewable) loadMV().then(() => setReady(true)) }, [viewable])
   if (viewable && ready) {
     return (
-      <div className="col-span-2 w-full aspect-square rounded-lg overflow-hidden border border-zinc-800">
-        {/* @ts-ignore */}
-        <model-viewer src={src} alt={filename} auto-rotate camera-controls style={{ width: '100%', height: '100%', background: '#18181b' }} />
-      </div>
+      // @ts-ignore
+      <model-viewer src={src} alt={filename} auto-rotate camera-controls style={{ width: '100%', height: '100%', background: '#18181b' }} />
     )
   }
   return (
-    <a href={src} download={filename} className="col-span-2 flex items-center gap-3 px-4 py-3 rounded-lg border border-white/5 bg-zinc-900 hover:bg-zinc-800 transition-colors">
-      <Spinner size={16} className="text-violet-400" />
-      <span className="text-sm text-zinc-300 flex-1 truncate">{filename}</span>
-      <span className="text-xs text-zinc-600">Download 3D</span>
-    </a>
+    <div className="flex items-center justify-center h-full">
+      <span className="text-3xl text-zinc-700">⬡</span>
+    </div>
   )
 }
 
@@ -206,32 +168,57 @@ function inferKind(filename: string): 'image' | 'video' | 'audio' | 'model' | 'f
 }
 
 function OutputGrid({ outputs, comfyPort }: { outputs: OutputItem[]; comfyPort: number }) {
+  const cardClass = "group flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50 hover:border-emerald-500/30 transition-all duration-200"
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
       {outputs.map((out, i) => {
         if (out.kind === 'text') {
           return (
-            <div key={i} className="col-span-2 bg-zinc-900 border border-white/5 rounded-lg px-4 py-3">
+            <div key={i} className="col-span-2 sm:col-span-3 rounded-xl border border-white/5 bg-zinc-900/50 px-4 py-3">
               <p className="text-sm text-zinc-300 whitespace-pre-wrap font-mono-custom">{out.text}</p>
             </div>
           )
         }
-        const url = `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}&type=output`
-        if (out.kind === 'image') return <BlurRevealImage key={out.filename} src={url} alt={out.filename} />
-        if (out.kind === 'video') return <video key={out.filename} src={url} controls loop className="w-full rounded-lg border border-zinc-800 bg-black" />
-        if (out.kind === 'audio') return (
-          <div key={out.filename} className="col-span-2 flex flex-col gap-1">
-            <span className="text-xs text-zinc-500 truncate">{out.filename}</span>
-            <audio controls src={url} className="w-full" />
+        const subfolder = out.path.includes('/') ? out.path.substring(0, out.path.lastIndexOf('/')) : ''
+        const url = `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}${subfolder ? `&subfolder=${encodeURIComponent(subfolder)}` : ''}&type=output`
+        if (out.kind === 'image') return (
+          <div key={i} className={cardClass}>
+            <div className="h-36 bg-zinc-950 overflow-hidden">
+              <BlurRevealImage src={url} alt={out.filename} />
+            </div>
+            <div className="px-3 py-2 border-t border-white/5">
+              <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
+            </div>
           </div>
         )
-        if (out.kind === 'model') return <ModelPreview key={out.filename} src={url} filename={out.filename} />
+        if (out.kind === 'video') return (
+          <div key={i} className={cardClass}>
+            <video src={url} controls className="w-full aspect-video bg-zinc-950" />
+            <div className="px-3 py-2 border-t border-white/5">
+              <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
+            </div>
+          </div>
+        )
+        if (out.kind === 'audio') return (
+          <div key={i} className={cardClass}>
+            <div className="px-4 py-4 bg-zinc-950">
+              <audio controls src={url} className="w-full" />
+            </div>
+            <div className="px-3 py-2 border-t border-white/5">
+              <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
+            </div>
+          </div>
+        )
+        // model / file fallback
         return (
-          <a key={out.filename} href={url} download={out.filename} className="col-span-2 flex items-center gap-2 px-4 py-3 rounded-lg border border-white/5 bg-zinc-900 hover:bg-zinc-800 transition-colors text-sm text-zinc-300">
-            <DownloadSimple size={14} />
-            <span className="flex-1 truncate">{out.filename}</span>
-            <span className="text-xs text-zinc-600">Download</span>
-          </a>
+          <div key={i} className={cardClass}>
+            <div className="h-36 bg-zinc-950 overflow-hidden">
+              <ModelPreview src={url} filename={out.filename} />
+            </div>
+            <div className="px-3 py-2 border-t border-white/5">
+              <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
+            </div>
+          </div>
         )
       })}
     </div>
@@ -244,14 +231,16 @@ function InputField({
   field,
   value,
   onChange,
+  comfyPort,
 }: {
   field: WorkflowIO
   value: unknown
   onChange: (v: unknown) => void
+  comfyPort: number | null
 }) {
-  const label = field.nodeTitle
+  const label = field.label || (field.nodeTitle
     ? `${field.nodeTitle} — ${field.paramName}`
-    : field.paramName
+    : field.paramName)
 
   if (field.paramType === 'boolean') {
     return (
@@ -301,6 +290,21 @@ function InputField({
     )
   }
 
+  const uploadKind = inferInputUploadKind(field.nodeType)
+  if (uploadKind) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <label className="text-xs font-medium text-zinc-400">{label}</label>
+        <FileUploadInput
+          kind={uploadKind}
+          value={String(value ?? '')}
+          comfyPort={comfyPort}
+          onChange={(filename) => onChange(filename)}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-1.5">
       <label className="text-xs font-medium text-zinc-400">{label}</label>
@@ -328,8 +332,8 @@ function ExecutionHistoryItem({
     ? `${((exec.completedAt - exec.createdAt) / 1000).toFixed(1)}s`
     : null
 
-  const outputs: { filename: string; path: string }[] = exec.outputsJson
-    ? JSON.parse(exec.outputsJson)
+  const outputs = exec.outputsJson
+    ? (JSON.parse(exec.outputsJson) as { kind: string; filename?: string; path?: string }[]).filter((o): o is { kind: string; filename: string; path: string } => !!o.filename)
     : []
 
   const inputs: Record<string, unknown> = exec.inputsJson ? JSON.parse(exec.inputsJson) : {}
@@ -479,13 +483,13 @@ function BottomTabs({
   execLoading: boolean
   onRestore: (inputs: Record<string, unknown>) => void
 }) {
-  const [tab, setTab] = useState<'history' | 'logs'>('history')
+  const [tab, setTab] = useState<'history' | 'logs'>('logs')
 
   return (
     <div className="h-64 flex flex-col border-t border-white/5">
       {/* Tab bar */}
       <div className="flex items-center gap-1 px-4 pt-2 shrink-0">
-        {(['history', 'logs'] as const).map((t) => (
+        {(['logs', 'history'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -558,10 +562,10 @@ export default function ToolPage() {
 
   const allSchema: WorkflowIO[] = tool?.schemaJson ? JSON.parse(tool.schemaJson) : []
   const schema: WorkflowIO[] = allSchema
-    .filter((f) => f.isInput)
+    .filter((f) => f.isInput && f.enabled !== false)
     .filter((f) => !(f.paramName === 'label' && f.nodeType.startsWith('FS')))
   const expectedOutputKinds: Array<'image' | 'video' | 'audio' | 'model' | 'text' | 'file'> =
-    allSchema.filter((f) => !f.isInput).map((f) => inferOutputKind(f.nodeType))
+    allSchema.filter((f) => !f.isInput && f.enabled !== false).map((f) => inferOutputKind(f.nodeType))
 
   // Input state — keyed by nodeId__paramName
   const [inputs, setInputs] = useState<Record<string, unknown>>({})
@@ -590,7 +594,7 @@ export default function ToolPage() {
       const res = await fetch(`/api/tools/${id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs }),
+        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -619,6 +623,7 @@ export default function ToolPage() {
               outputs?: Record<string, {
                 images?: { filename: string; subfolder: string }[]
                 gifs?: { filename: string; subfolder: string }[]
+                videos?: { filename: string; subfolder: string }[]
                 audio?: { filename: string; subfolder: string }[]
                 text?: string[]
                 string?: string[]
@@ -629,6 +634,7 @@ export default function ToolPage() {
             for (const nodeOut of Object.values(entry?.outputs ?? {})) {
               for (const f of nodeOut.images ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
               for (const f of nodeOut.gifs ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+              for (const f of nodeOut.videos ?? []) items.push({ kind: 'video', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
               for (const f of nodeOut.audio ?? []) items.push({ kind: 'audio', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
               for (const t of [...(nodeOut.text ?? []), ...(nodeOut.string ?? [])]) {
                 if (typeof t === 'string' && t.trim()) {
@@ -639,13 +645,12 @@ export default function ToolPage() {
               }
             }
             setLatestOutputs(items)
-            const fileItems = items.filter((i): i is Extract<OutputItem, { filename: string }> => 'filename' in i)
             await fetch(`/api/executions/${result.executionId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 status: entry?.status?.status_str === 'error' ? 'error' : 'completed',
-                outputsJson: JSON.stringify(fileItems),
+                outputsJson: JSON.stringify(items),
                 completedAt: Date.now(),
               }),
             })
@@ -790,6 +795,7 @@ export default function ToolPage() {
                       key={`${field.nodeId}__${field.paramName}`}
                       field={field}
                       value={inputs[`${field.nodeId}__${field.paramName}`]}
+                      comfyPort={tool.comfyPort}
                       onChange={(v) =>
                         setInputs((prev) => ({
                           ...prev,
@@ -815,7 +821,7 @@ export default function ToolPage() {
                 </h2>
 
                 {isRunning && latestOutputs.length === 0 && (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {(expectedOutputKinds.length > 0 ? expectedOutputKinds : ['image' as const]).map((kind, i) => (
                       <OutputLoadingPlaceholder key={i} kind={kind} />
                     ))}

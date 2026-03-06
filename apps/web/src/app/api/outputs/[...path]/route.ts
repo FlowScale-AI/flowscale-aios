@@ -3,7 +3,7 @@ import { readFile } from 'fs/promises'
 import { join, normalize, resolve } from 'path'
 import { homedir } from 'os'
 
-const BASE_DIR = resolve(join(homedir(), '.flowscale', 'eios-outputs'))
+const BASE_DIR = resolve(join(homedir(), '.flowscale', 'aios-outputs'))
 
 export async function GET(
   _req: NextRequest,
@@ -27,6 +27,16 @@ export async function GET(
       ext === 'gif' ? 'image/gif' :
       ext === 'mp4' ? 'video/mp4' :
       ext === 'webm' ? 'video/webm' :
+      ext === 'mov' ? 'video/quicktime' :
+      ext === 'mp3' ? 'audio/mpeg' :
+      ext === 'wav' ? 'audio/wav' :
+      ext === 'flac' ? 'audio/flac' :
+      ext === 'ogg' ? 'audio/ogg' :
+      ext === 'opus' ? 'audio/ogg; codecs=opus' :
+      ext === 'm4a' ? 'audio/mp4' :
+      ext === 'glb' ? 'model/gltf-binary' :
+      ext === 'gltf' ? 'model/gltf+json' :
+      ext === 'obj' ? 'model/obj' :
       'application/octet-stream'
 
     return new NextResponse(buffer, {
