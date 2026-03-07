@@ -1,6 +1,6 @@
 {
   "name": "@flowscale/aios-desktop",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "license": "AGPL-3.0-only",
   "description": "FlowScale AIOS desktop application",
   "author": {
@@ -13,7 +13,8 @@
     "clean": "node -e \"const fs=require('fs');['dist','release'].forEach(d=>{if(fs.existsSync(d)){fs.rmSync(d,{recursive:true,force:true})}})\"",
     "dev": "electron dist/main.js",
     "build": "tsc",
-    "package": "electron-builder --config electron-builder.yml --publish never",
+    "prepare-standalone": "node scripts/prepare-standalone.js",
+    "package": "node scripts/prepare-standalone.js && electron-builder --config electron-builder.yml --publish never",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {

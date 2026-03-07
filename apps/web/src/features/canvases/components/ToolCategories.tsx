@@ -1,7 +1,8 @@
 "use client";
 import { CanvasTool } from "@/features/canvases/types";
-import { ArrowsClockwise, Wrench } from "phosphor-react";
+import { ArrowsClockwise, Wrench, ArrowLeft } from "phosphor-react";
 import { useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { LottieSpinner } from "@/components/ui";
 
 interface ToolCategoriesProps {
@@ -23,6 +24,8 @@ export default function ToolCategories({
   onSync,
   isSyncing = false,
 }: ToolCategoriesProps) {
+  const router = useRouter();
+
   // Group tools by project_name
   const groupedTools = useMemo(() => {
     if (!toolsData?.tools) return {};
@@ -53,6 +56,15 @@ export default function ToolCategories({
 
   return (
     <div className="flex flex-col h-full bg-background-panel border-r border-white/5 w-64 shrink-0">
+      {/* Back to canvases */}
+      <button
+        onClick={() => router.push("/canvas")}
+        className="flex items-center gap-2 px-4 py-2.5 text-zinc-400 hover:text-white hover:bg-white/5 transition-colors text-xs border-b border-white/5"
+      >
+        <ArrowLeft className="w-3.5 h-3.5" />
+        <span>Back to Canvases</span>
+      </button>
+
       <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
         <h3 className="text-xs font-semibold text-zinc-500 tracking-wider">
           TOOLS

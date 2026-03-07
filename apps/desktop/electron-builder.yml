@@ -1,5 +1,5 @@
 appId: ai.flowscale.eios
-productName: FlowScale EIOS
+productName: FlowScale AIOS
 copyright: Copyright © 2024-2026 FlowScale
 
 directories:
@@ -9,10 +9,22 @@ directories:
 files:
   - dist/**
   - package.json
-  - "!node_modules/**"
 
 # Include the compiled JS output and package.json only
 asar: true
+
+# Bundle the Next.js standalone server (dereferenced copy)
+extraResources:
+  - from: "standalone-build/server.js"
+    to: "apps/web/.next/standalone/server.js"
+  - from: "standalone-build/package.json"
+    to: "apps/web/.next/standalone/package.json"
+  - from: "standalone-build/node_modules"
+    to: "apps/web/.next/standalone/node_modules"
+  - from: "standalone-build/.next"
+    to: "apps/web/.next/standalone/.next"
+  - from: "standalone-build/public"
+    to: "apps/web/.next/standalone/public"
 
 win:
   target:
@@ -20,7 +32,7 @@ win:
       arch:
         - x64
   signAndEditExecutable: false
-  icon: build/icon.ico
+  icon: assets/icon.png
 
 nsis:
   oneClick: false
@@ -39,7 +51,7 @@ mac:
         - x64
         - arm64
   category: public.app-category.developer-tools
-  icon: build/icon.icns
+  icon: assets/icon.png
   hardenedRuntime: true
   gatekeeperAssess: false
 
