@@ -14,10 +14,8 @@ import {
   DownloadSimple,
   Spinner,
   ArrowCounterClockwise,
-  Terminal,
   Copy,
   Check,
-  X,
   Stop,
 } from 'phosphor-react'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
@@ -400,84 +398,59 @@ function ExecutionHistoryItem({
 }
 
 // ---------------------------------------------------------------------------
-// cURL modal — uses live input values from the form
+// Node.js tab — install + fetch snippet using live input values
 // ---------------------------------------------------------------------------
 
-function buildCurlCommand(toolId: string, inputs: Record<string, unknown>): string {
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:14173'
-  const body = JSON.stringify({ inputs }, null, 2)
-  return `curl -X POST ${origin}/api/tools/${toolId}/executions \\\n  -H "Content-Type: application/json" \\\n  -d '${body}'`
-}
-
-function CurlModal({
-  toolId,
-  toolName,
-  inputs,
-  onClose,
-}: {
-  toolId: string
-  toolName: string
-  inputs: Record<string, unknown>
-  onClose: () => void
-}) {
+function CopyBlock({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
-  const curl = buildCurlCommand(toolId, inputs)
-
   const handleCopy = () => {
-    navigator.clipboard.writeText(curl).then(() => {
+    navigator.clipboard.writeText(code).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
   }
+  return (
+    <div className="relative">
+      <pre className="bg-zinc-950 border border-white/5 rounded-lg p-3 text-xs text-zinc-300 font-mono-custom overflow-x-auto whitespace-pre leading-relaxed">
+        {code}
+      </pre>
+      <button
+        onClick={handleCopy}
+        className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-[11px] font-medium transition-colors"
+      >
+        {copied ? (
+          <><Check size={11} className="text-emerald-400" /><span className="text-emerald-400">Copied!</span></>
+        ) : (
+          <><Copy size={11} />Copy</>
+        )}
+      </button>
+    </div>
+  )
+}
+
+function NodeJsTab({ toolId, inputs }: { toolId: string; inputs: Record<string, unknown> }) {
+  const inputsStr = Object.keys(inputs).length === 0
+    ? '{}'
+    : '{\n' + Object.entries(inputs).map(([k, v]) => `  "${k}": ${JSON.stringify(v)}`).join(',\n') + '\n}'
+
+  const installSnippet = `npm install @flowscale/sdk`
+
+  const snippet =
+`import FlowScale from '@flowscale/sdk'
+
+const result = await FlowScale.tools.run('${toolId}', ${inputsStr})
+
+console.log(result.outputs)`
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-      <div
-        className="relative z-10 w-full max-w-2xl bg-zinc-950 border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-          <div className="flex items-center gap-2.5">
-            <Terminal size={16} className="text-zinc-400" />
-            <span className="text-sm font-medium text-zinc-100">cURL — {toolName}</span>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* Note */}
-        <p className="px-5 pt-4 text-xs text-zinc-500">
-          Reflects the current input values in the form. Paste directly into a terminal or import into Postman.
-        </p>
-
-        {/* Code block */}
-        <div className="relative mx-5 mt-3 mb-5">
-          <pre className="bg-zinc-900 border border-white/5 rounded-xl p-4 text-xs text-zinc-300 font-mono-custom overflow-x-auto whitespace-pre leading-relaxed">
-            {curl}
-          </pre>
-          <button
-            onClick={handleCopy}
-            className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors"
-          >
-            {copied ? (
-              <>
-                <Check size={12} className="text-emerald-400" />
-                <span className="text-emerald-400">Copied!</span>
-              </>
-            ) : (
-              <>
-                <Copy size={12} />
-                Copy
-              </>
-            )}
-          </button>
-        </div>
+    <div className="flex flex-col gap-5">
+      <div>
+        <p className="text-xs text-zinc-500 mb-2">Install</p>
+        <CopyBlock code={installSnippet} />
+      </div>
+      <div>
+        <p className="text-xs text-zinc-500 mb-2">Run — values reflect the current form inputs</p>
+        <CopyBlock code={snippet} />
       </div>
     </div>
   )
@@ -648,7 +621,7 @@ export default function ToolPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool?.schemaJson])
 
-  const [showCurl, setShowCurl] = useState(false)
+  const [leftTab, setLeftTab] = useState<'form' | 'nodejs'>('form')
   const [runningId, setRunningId] = useState<string | null>(null)
   const [latestOutputs, setLatestOutputs] = useState<OutputItem[]>([])
   const sseRef = useRef<EventSource | null>(null)
@@ -823,13 +796,6 @@ export default function ToolPage() {
             <p className="text-xs text-zinc-500 mt-0.5">{tool.description}</p>
           )}
         </div>
-        <button
-          onClick={() => setShowCurl(true)}
-          className="flex items-center gap-2 px-3 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white text-sm font-medium rounded-md transition-colors border border-zinc-800 hover:border-zinc-600"
-        >
-          <Terminal size={14} />
-          cURL
-        </button>
         {isRunning && tool.engine === 'api' && (
           <button
             onClick={handleStopInference}
@@ -877,45 +843,58 @@ export default function ToolPage() {
       {/* Local inference setup (API tools) */}
       {tool.engine === 'api' && <LocalInferenceSetup />}
 
-      {/* cURL modal */}
-      {showCurl && (
-        <CurlModal
-          toolId={tool.id}
-          toolName={tool.name}
-          inputs={inputs}
-          onClose={() => setShowCurl(false)}
-        />
-      )}
-
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         <PanelGroup orientation="horizontal">
-          {/* Left: Inputs */}
+          {/* Left: Form / Node.js tabs */}
           <Panel defaultSize={40} minSize={25}>
-            <div className="h-full overflow-y-auto px-6 py-5">
-              <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
-                Inputs
-              </h2>
-              {schema.length === 0 ? (
-                <p className="text-sm text-zinc-600">No configurable inputs detected.</p>
-              ) : (
-                <div className="flex flex-col gap-4">
-                  {schema.map((field) => (
-                    <InputField
-                      key={`${field.nodeId}__${field.paramName}`}
-                      field={field}
-                      value={inputs[`${field.nodeId}__${field.paramName}`]}
-                      comfyPort={tool.comfyPort}
-                      onChange={(v) =>
-                        setInputs((prev) => ({
-                          ...prev,
-                          [`${field.nodeId}__${field.paramName}`]: v,
-                        }))
-                      }
-                    />
-                  ))}
-                </div>
-              )}
+            <div className="h-full flex flex-col">
+              {/* Tab bar */}
+              <div className="flex items-center gap-1 px-4 pt-3 pb-0 shrink-0 border-b border-white/5">
+                {(['form', 'nodejs'] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setLeftTab(t)}
+                    className={[
+                      'px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors',
+                      leftTab === t
+                        ? 'border-emerald-500 text-emerald-400'
+                        : 'border-transparent text-zinc-500 hover:text-zinc-300',
+                    ].join(' ')}
+                  >
+                    {t === 'form' ? 'Form' : 'Node.js'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              <div className="flex-1 overflow-y-auto px-6 py-5">
+                {leftTab === 'form' && (
+                  schema.length === 0 ? (
+                    <p className="text-sm text-zinc-600">No configurable inputs detected.</p>
+                  ) : (
+                    <div className="flex flex-col gap-4">
+                      {schema.map((field) => (
+                        <InputField
+                          key={`${field.nodeId}__${field.paramName}`}
+                          field={field}
+                          value={inputs[`${field.nodeId}__${field.paramName}`]}
+                          comfyPort={tool.comfyPort}
+                          onChange={(v) =>
+                            setInputs((prev) => ({
+                              ...prev,
+                              [`${field.nodeId}__${field.paramName}`]: v,
+                            }))
+                          }
+                        />
+                      ))}
+                    </div>
+                  )
+                )}
+                {leftTab === 'nodejs' && (
+                  <NodeJsTab toolId={tool.id} inputs={inputs} />
+                )}
+              </div>
             </div>
           </Panel>
 
