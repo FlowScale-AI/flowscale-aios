@@ -38,8 +38,13 @@ function CustomToolCard({
               <Wrench size={16} weight="duotone" className="text-violet-400" />
             )}
           </div>
-          <span className="text-[10px] font-semibold text-violet-400 px-1.5 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/20">
-            Custom
+          <span className={[
+            'text-[10px] font-semibold px-1.5 py-0.5 rounded-full border',
+            tool.status === 'dev'
+              ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+              : 'text-violet-400 bg-violet-500/10 border-violet-500/20',
+          ].join(' ')}>
+            {tool.status === 'dev' ? 'Dev' : 'Custom'}
           </span>
         </div>
         <h3 className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors mb-1">
@@ -69,7 +74,7 @@ export default function ToolsPage() {
   const { data: customTools = [], refetch: refetchCustom } = useQuery<CustomTool[]>({
     queryKey: ['custom-tools'],
     queryFn: async () => {
-      const res = await fetch('/api/tools?status=production')
+      const res = await fetch('/api/tools')
       if (!res.ok) return []
       return res.json()
     },
@@ -93,7 +98,7 @@ export default function ToolsPage() {
         <div>
           <h1 className="font-tech text-xl font-semibold text-zinc-100">Tools</h1>
           <p className="text-sm text-zinc-500 mt-0.5">
-            {customTools.length} custom tools
+            {customTools.length} {customTools.length === 1 ? 'tool' : 'tools'}
           </p>
         </div>
         <Link

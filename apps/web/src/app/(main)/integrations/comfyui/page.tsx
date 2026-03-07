@@ -191,6 +191,7 @@ type ToolRow = {
   name: string
   description: string | null
   status: string
+  engine: string
   createdAt: number
 }
 
@@ -218,8 +219,10 @@ function ToolsTab() {
     try {
       const r = await fetch('/api/tools')
       const data: ToolRow[] = await r.json()
-      setTools(data)
-      if (!selectedId && !creating && data.length > 0) setSelectedId(data[0].id)
+      const filtered = data.filter((t) => t.engine === 'comfyui')
+      setTools(filtered)
+      if (selectedId && !filtered.find((t) => t.id === selectedId)) setSelectedId(null)
+      else if (!selectedId && !creating && filtered.length > 0) setSelectedId(filtered[0].id)
     } catch {
       setError('Failed to load tools')
     } finally {
