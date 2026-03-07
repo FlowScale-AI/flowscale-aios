@@ -18,12 +18,13 @@ import {
   Copy,
   Check,
   X,
+  Stop,
 } from 'phosphor-react'
-import Link from 'next/link'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
 import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
+import { LocalInferenceSetup, useInferenceStatus } from '@/components/LocalInferenceSetup'
 
 interface WorkflowIO {
   nodeId: string
@@ -42,6 +43,7 @@ interface Tool {
   id: string
   name: string
   description: string | null
+  engine: string
   schemaJson: string
   comfyPort: number | null
   status: string
@@ -61,10 +63,14 @@ interface Execution {
 
 interface ExecResult {
   executionId: string
-  promptId: string
-  clientId: string
-  comfyPort: number
+  type?: 'api' | 'comfyui'
+  status?: 'running' | 'completed' | 'error'
+  outputs?: OutputItem[]
   seed: number
+  // ComfyUI only:
+  promptId?: string
+  clientId?: string
+  comfyPort?: number
 }
 
 // ─── Output renderers ─────────────────────────────────────────────────────────
@@ -167,7 +173,7 @@ function inferKind(filename: string): 'image' | 'video' | 'audio' | 'model' | 'f
   return 'file'
 }
 
-function OutputGrid({ outputs, comfyPort }: { outputs: OutputItem[]; comfyPort: number }) {
+function OutputGrid({ outputs, comfyPort }: { outputs: OutputItem[]; comfyPort?: number | null }) {
   const cardClass = "group flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50 hover:border-emerald-500/30 transition-all duration-200"
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -179,8 +185,13 @@ function OutputGrid({ outputs, comfyPort }: { outputs: OutputItem[]; comfyPort: 
             </div>
           )
         }
-        const subfolder = out.path.includes('/') ? out.path.substring(0, out.path.lastIndexOf('/')) : ''
-        const url = `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}${subfolder ? `&subfolder=${encodeURIComponent(subfolder)}` : ''}&type=output`
+        // API tools store an absolute path; ComfyUI tools use the proxy
+        const url = out.path.startsWith('/')
+          ? out.path
+          : (() => {
+              const subfolder = out.path.includes('/') ? out.path.substring(0, out.path.lastIndexOf('/')) : ''
+              return `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}${subfolder ? `&subfolder=${encodeURIComponent(subfolder)}` : ''}&type=output`
+            })()
         if (out.kind === 'image') return (
           <div key={i} className={cardClass}>
             <div className="h-36 bg-zinc-950 overflow-hidden">
@@ -370,7 +381,7 @@ function ExecutionHistoryItem({
           {outputs.map((out) => (
             <a
               key={out.filename}
-              href={`/api/comfy/output?path=${encodeURIComponent(out.path)}`}
+              href={out.path.startsWith('/') ? out.path : `/api/comfy/output?path=${encodeURIComponent(out.path)}`}
               download={out.filename}
               className="flex items-center gap-1 px-2 py-1 bg-zinc-800 rounded text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
             >
@@ -472,6 +483,48 @@ function CurlModal({
   )
 }
 
+function ServerLogsPanel() {
+  const [logs, setLogs] = useState<string[]>([])
+  const containerRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const userScrolledUp = useRef(false)
+
+  useEffect(() => {
+    async function poll() {
+      try {
+        const res = await fetch('/api/local-inference/logs')
+        const { logs: l } = await res.json() as { logs: string[] }
+        setLogs(l)
+      } catch { /* ignore */ }
+    }
+    poll()
+    const t = setInterval(poll, 2000)
+    return () => clearInterval(t)
+  }, [])
+
+  useEffect(() => {
+    if (!userScrolledUp.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [logs])
+
+  function handleScroll() {
+    const el = containerRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    userScrolledUp.current = !atBottom
+  }
+
+  if (logs.length === 0) return <p className="text-xs text-zinc-600 pt-2">No server logs yet.</p>
+
+  return (
+    <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-y-auto font-mono text-[11px] text-zinc-400 leading-relaxed">
+      {logs.map((line, i) => <div key={i} className="whitespace-pre-wrap">{line}</div>)}
+      <div ref={bottomRef} />
+    </div>
+  )
+}
+
 function BottomTabs({
   tool,
   executions,
@@ -483,13 +536,23 @@ function BottomTabs({
   execLoading: boolean
   onRestore: (inputs: Record<string, unknown>) => void
 }) {
-  const [tab, setTab] = useState<'history' | 'logs'>('logs')
+  const inferenceStatus = useInferenceStatus()
+  const availableTabs = (['logs', 'history'] as const)
+  const defaultTab = tool.engine === 'api' ? 'logs' : 'logs'
+  const [tab, setTab] = useState<'history' | 'logs'>(defaultTab)
+
+  // Auto-switch to logs when server is starting
+  useEffect(() => {
+    if (tool.engine === 'api' && (inferenceStatus === 'starting' || inferenceStatus === 'running')) {
+      setTab('logs')
+    }
+  }, [inferenceStatus, tool.engine])
 
   return (
     <div className="h-64 flex flex-col border-t border-white/5">
       {/* Tab bar */}
       <div className="flex items-center gap-1 px-4 pt-2 shrink-0">
-        {(['logs', 'history'] as const).map((t) => (
+        {availableTabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -526,10 +589,11 @@ function BottomTabs({
           </div>
         )}
 
-        {tab === 'logs' && tool.comfyPort && (
+        {tab === 'logs' && tool.engine === 'api' && <ServerLogsPanel />}
+        {tab === 'logs' && tool.engine !== 'api' && tool.comfyPort && (
           <ComfyLogsPanel port={tool.comfyPort} />
         )}
-        {tab === 'logs' && !tool.comfyPort && (
+        {tab === 'logs' && tool.engine !== 'api' && !tool.comfyPort && (
           <p className="text-xs text-zinc-600 pt-2">No ComfyUI instance configured.</p>
         )}
       </div>
@@ -606,6 +670,13 @@ export default function ToolPage() {
       setRunningId(result.executionId)
       setLatestOutputs([])
 
+      // API tools run in background — keep runningId set; the executions poll will
+      // detect completion and the useEffect below will surface outputs + clear state
+      if (result.type === 'api') {
+        qc.invalidateQueries({ queryKey: ['executions', id] })
+        return
+      }
+
       let done = false
 
       const finish = async () => {
@@ -616,7 +687,7 @@ export default function ToolPage() {
         clearInterval(pollInterval)
 
         try {
-          const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
+          const histRes = await fetch(`/api/comfy/${result.comfyPort!}/history/${result.promptId!}`)
           if (histRes.ok) {
             const hist = await histRes.json() as Record<string, {
               status?: { status_str?: string }
@@ -629,7 +700,7 @@ export default function ToolPage() {
                 string?: string[]
               }>
             }>
-            const entry = hist[result.promptId]
+            const entry = hist[result.promptId!]
             const items: OutputItem[] = []
             for (const nodeOut of Object.values(entry?.outputs ?? {})) {
               for (const f of nodeOut.images ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
@@ -662,12 +733,12 @@ export default function ToolPage() {
       }
 
       // SSE proxy for completion detection (avoids CORS on direct WS)
-      const sse = new EventSource(`/api/comfy/${result.comfyPort}/ws`)
+      const sse = new EventSource(`/api/comfy/${result.comfyPort!}/ws`)
       sseRef.current = sse
       sse.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data) as { type: string; data?: Record<string, unknown> }
-          if (msg.data?.prompt_id !== result.promptId) return
+          if (msg.data?.prompt_id !== result.promptId!) return
           if (msg.type === 'executing' && msg.data?.node === null) { sse.close(); finish() }
           else if (msg.type === 'execution_error') { sse.close(); finish() }
         } catch { /* ignore */ }
@@ -678,10 +749,10 @@ export default function ToolPage() {
       const pollInterval = setInterval(async () => {
         if (done) { clearInterval(pollInterval); return }
         try {
-          const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
+          const histRes = await fetch(`/api/comfy/${result.comfyPort!}/history/${result.promptId!}`)
           if (!histRes.ok) return
           const hist = await histRes.json() as Record<string, { status?: { completed?: boolean } }>
-          if (hist[result.promptId]?.status?.completed) finish()
+          if (hist[result.promptId!]?.status?.completed) finish()
         } catch { /* ignore */ }
       }, 3000)
 
@@ -690,6 +761,32 @@ export default function ToolPage() {
       }, 300_000)
     },
   })
+
+  // When an API tool execution is in-flight, watch the executions poll for completion
+  useEffect(() => {
+    if (!runningId || !tool || tool.engine !== 'api') return
+    const exec = executions.find((e) => e.id === runningId)
+    if (!exec) return
+    if (exec.status === 'completed' && exec.outputsJson) {
+      const items = JSON.parse(exec.outputsJson) as OutputItem[]
+      setLatestOutputs(items)
+      setRunningId(null)
+    } else if (exec.status === 'error') {
+      setRunningId(null)
+    }
+  }, [executions, runningId, tool])
+
+  const [stopping, setStopping] = useState(false)
+
+  async function handleStopInference() {
+    if (!runningId) return
+    setStopping(true)
+    try {
+      await fetch(`/api/executions/${runningId}/cancel`, { method: 'POST' })
+    } finally {
+      setStopping(false)
+    }
+  }
 
   const handleRestore = useCallback((restored: Record<string, unknown>) => {
     setInputs(restored)
@@ -717,9 +814,9 @@ export default function ToolPage() {
     <FadeIn from="none" duration={0.3} className="h-full flex flex-col">
       {/* Topbar */}
       <div className="flex items-center gap-4 px-6 py-4 border-b border-white/5 shrink-0">
-        <Link href="/apps" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+        <button onClick={() => window.history.back()} className="text-zinc-500 hover:text-zinc-300 transition-colors">
           <ArrowLeft size={18} />
-        </Link>
+        </button>
         <div className="flex-1">
           <h1 className="text-sm font-semibold text-zinc-100">{tool.name}</h1>
           {tool.description && (
@@ -733,9 +830,19 @@ export default function ToolPage() {
           <Terminal size={14} />
           cURL
         </button>
+        {isRunning && tool.engine === 'api' && (
+          <button
+            onClick={handleStopInference}
+            disabled={stopping}
+            className="flex items-center gap-2 px-3 py-2 text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 disabled:opacity-50 text-sm font-medium rounded-md transition-colors"
+          >
+            <Stop size={14} weight="fill" />
+            {stopping ? 'Stopping…' : 'Stop'}
+          </button>
+        )}
         <button
           onClick={() => runMutation.mutate()}
-          disabled={isRunning || !tool.comfyPort}
+          disabled={isRunning || (tool.engine === 'comfyui' && !tool.comfyPort)}
           className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
         >
           {isRunning ? (
@@ -761,11 +868,14 @@ export default function ToolPage() {
       )}
 
       {/* No ComfyUI warning */}
-      {!tool.comfyPort && (
+      {tool.engine === 'comfyui' && !tool.comfyPort && (
         <div className="px-6 py-2.5 bg-amber-950/30 border-b border-amber-900/50 text-amber-400 text-sm">
           No ComfyUI instance configured for this tool. Re-deploy via Build Tool to assign one.
         </div>
       )}
+
+      {/* Local inference setup (API tools) */}
+      {tool.engine === 'api' && <LocalInferenceSetup />}
 
       {/* cURL modal */}
       {showCurl && (
@@ -828,7 +938,7 @@ export default function ToolPage() {
                   </div>
                 )}
 
-                {latestOutputs.length > 0 && tool.comfyPort && (
+                {latestOutputs.length > 0 && (
                   <OutputGrid outputs={latestOutputs} comfyPort={tool.comfyPort} />
                 )}
 

@@ -6,9 +6,21 @@ contextBridge.exposeInMainWorld('desktop', {
   isDesktop: true,
   dialog: {
     openFile: (): Promise<string | null> => ipcRenderer.invoke('dialog:openFile'),
+    openDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:openDirectory'),
   },
   shell: {
     openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
+  },
+  watch: {
+    start: (watchPath: string, cb: () => void): void => {
+      ipcRenderer.invoke('watch:start', watchPath)
+      ipcRenderer.on('app-dir-changed', (_event, changedPath: string) => {
+        if (changedPath === watchPath) cb()
+      })
+    },
+    stop: (watchPath: string): void => {
+      ipcRenderer.invoke('watch:stop', watchPath)
+    },
   },
   auth: {
     startFlowscaleOAuth: (): Promise<void> =>

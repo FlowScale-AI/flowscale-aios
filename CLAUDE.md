@@ -94,3 +94,8 @@ In browser mode `window.desktop` is `undefined`; feature-gate with `if (window.d
 ### `@flowscale/ui` barrel
 
 `apps/web/src/components/ui/index.ts` re-exports `Tooltip`, `cn`, `Modal`, `useNotificationStore`. Import UI primitives from there rather than directly from shadcn paths.
+
+## Product concepts
+
+- **Tools** — single-model/workflow endpoints (e.g. Z-Image-Turbo). Built via the Build Tool wizard, stored in the `tools` table, run via `/api/tools/[id]/executions`.
+- **Apps** — full-fledged Next.js/React applications that orchestrate multiple tools underneath via `@flowscale/sdk`. Apps are not tools; they are standalone products composed on top of tools.

@@ -1,0 +1,16 @@
+{
+  "name": "create-flowscale-eios-app",
+  "version": "1.0.0",
+  "description": "Scaffold a new FlowScale EIOS app",
+  "license": "AGPL-3.0-only",
+  "bin": {
+    "create-flowscale-eios-app": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "template"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

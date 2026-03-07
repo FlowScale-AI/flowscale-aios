@@ -113,9 +113,50 @@ export function getDb() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+
+    CREATE TABLE IF NOT EXISTS installed_apps (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      bundle_path TEXT NOT NULL,
+      entry_path TEXT NOT NULL,
+      manifest_json TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'sideloaded',
+      status TEXT NOT NULL DEFAULT 'active',
+      installed_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE TABLE IF NOT EXISTS app_storage (
+      app_id TEXT NOT NULL REFERENCES installed_apps(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      PRIMARY KEY (app_id, key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_installed_apps_status ON installed_apps(status);
+    CREATE INDEX IF NOT EXISTS idx_app_storage_app_id ON app_storage(app_id);
+
+    CREATE TABLE IF NOT EXISTS models (
+      id TEXT PRIMARY KEY,
+      filename TEXT NOT NULL,
+      path TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL DEFAULT 'other',
+      size_bytes INTEGER,
+      comfy_port INTEGER NOT NULL,
+      scanned_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_models_type ON models(type);
+    CREATE INDEX IF NOT EXISTS idx_models_comfy_port ON models(comfy_port);
   `)
 
   // Migrations for existing DBs
+  const toolColumns = sqlite.prepare('PRAGMA table_info(tools)').all() as { name: string }[]
+  if (!toolColumns.some((col) => col.name === 'engine')) {
+    sqlite.exec("ALTER TABLE tools ADD COLUMN engine TEXT NOT NULL DEFAULT 'comfyui'")
+  }
+
   const canvasColumns = sqlite.prepare('PRAGMA table_info(canvases)').all() as { name: string }[]
   const hasIsSharedColumn = canvasColumns.some((col) => col.name === 'is_shared')
   if (!hasIsSharedColumn) {
@@ -125,6 +166,30 @@ export function getDb() {
   const execColumns = sqlite.prepare('PRAGMA table_info(executions)').all() as { name: string }[]
   if (!execColumns.some((col) => col.name === 'user_id')) {
     sqlite.exec('ALTER TABLE executions ADD COLUMN user_id TEXT')
+  }
+
+  // Seed built-in API tools (idempotent)
+  const Z_IMAGE_ID = 'z-image-turbo-builtin'
+  const Z_IMAGE_DESC = 'Generate high-quality images locally using Z-Image Turbo. Runs on your GPU — no API key needed.'
+  const zImageExists = sqlite.prepare('SELECT id FROM tools WHERE id = ?').get(Z_IMAGE_ID)
+  if (zImageExists) {
+    // Keep description up to date
+    sqlite.prepare('UPDATE tools SET description = ? WHERE id = ?').run(Z_IMAGE_DESC, Z_IMAGE_ID)
+  } else {
+    const zImageSchema = JSON.stringify([
+      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'prompt', paramType: 'string', defaultValue: 'a beautiful landscape', label: 'Prompt', isInput: true, enabled: true },
+      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'negative_prompt', paramType: 'string', defaultValue: '', label: 'Negative Prompt', isInput: true, enabled: true },
+      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'width', paramType: 'number', defaultValue: 1024, label: 'Width', isInput: true, enabled: true },
+      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'height', paramType: 'number', defaultValue: 1024, label: 'Height', isInput: true, enabled: true },
+      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'num_inference_steps', paramType: 'number', defaultValue: 4, label: 'Steps', isInput: true, enabled: true },
+      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'guidance_scale', paramType: 'number', defaultValue: 0, label: 'Guidance Scale', isInput: true, enabled: true },
+      { nodeId: 'api_output', nodeType: 'APIImageOutput', nodeTitle: 'Output', paramName: 'image', paramType: 'image', isInput: false, enabled: true },
+    ])
+    const zImageWorkflow = JSON.stringify({ engine: 'api', model: 'Tongyi-MAI/Z-Image-Turbo' })
+    const zImageHash = crypto.createHash('sha256').update(zImageWorkflow).digest('hex')
+    sqlite.prepare(
+      'INSERT INTO tools (id, name, description, engine, workflow_json, workflow_hash, schema_json, layout, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(Z_IMAGE_ID, 'Z-Image Turbo', Z_IMAGE_DESC, 'api', zImageWorkflow, zImageHash, zImageSchema, 'left-right', 'production', Date.now())
   }
 
   // First-run: seed admin user if no users exist

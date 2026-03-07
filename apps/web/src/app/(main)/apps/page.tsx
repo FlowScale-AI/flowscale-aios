@@ -1,20 +1,17 @@
 'use client'
 
 import Link from 'next/link'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { ArrowUpRight, Warning, MagnifyingGlass, Trash, Palette } from 'phosphor-react'
-import { PageTransition, FadeIn, StaggerGrid, StaggerItem, SkeletonCard, Modal } from '@/components/ui'
+import { ArrowUpRight, Warning, MagnifyingGlass, Palette, Cube } from 'phosphor-react'
+import { PageTransition, FadeIn, StaggerGrid, StaggerItem, SkeletonCard } from '@/components/ui'
+import type { AppManifest } from '@/lib/appManifest'
 
-interface Tool {
+interface InstalledApp {
   id: string
-  name: string
-  description: string | null
-  status: string
-  schemaJson: string | null
-  version: number | null
-  deployedAt: number | null
-  createdAt: number
+  displayName: string
+  source: string
+  manifest: AppManifest | null
 }
 
 // ---------------------------------------------------------------------------
@@ -44,47 +41,32 @@ function CanvasCard() {
   )
 }
 
-function ToolCard({ tool, onDelete }: { tool: Tool; onDelete: (tool: Tool) => void }) {
+function AppCard({ app }: { app: InstalledApp }) {
   return (
     <div className="group relative h-full">
-      <Link
-        href={`/apps/${tool.id}`}
-        className="block h-full"
-      >
+      <Link href={`/installed-apps/${app.id}`} className="block h-full">
         <div className="relative h-full overflow-hidden rounded-lg border border-white/5 bg-[var(--color-background-panel)] p-5 transition-all duration-200 group-hover:border-zinc-700 group-hover:bg-zinc-800/50">
-          {/* Content */}
           <div className="relative z-10 flex flex-col gap-3">
-            {/* Icon */}
-            <div className="flex size-10 items-center justify-center rounded-md border border-white/10 bg-white/5 overflow-hidden">
-              <img src="/comfyui-logo.png" alt="ComfyUI" className="size-7 object-contain" />
+            <div className="flex size-10 items-center justify-center rounded-md border border-white/10 bg-white/5 transition-colors duration-200 group-hover:bg-emerald-500/10 group-hover:border-emerald-500/20 group-hover:text-emerald-400 text-zinc-400">
+              <Cube size={20} weight="duotone" />
             </div>
-
-            {/* Text */}
             <div className="space-y-1.5">
               <h3 className="font-tech text-base font-medium text-zinc-100 group-hover:text-white transition-colors">
-                {tool.name}
+                {app.displayName}
               </h3>
               <p className="text-sm text-zinc-500 line-clamp-2 leading-relaxed">
-                {tool.description || 'No description'}
+                {app.manifest?.description || 'No description'}
               </p>
             </div>
           </div>
-
-          {/* Arrow (subtle on hover) */}
+          {app.source === 'sideloaded' && (
+            <span className="absolute top-3 right-3 text-[9px] font-semibold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">dev</span>
+          )}
           <div className="absolute top-5 right-5 opacity-0 -translate-x-2 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0">
             <ArrowUpRight size={16} className="text-zinc-400" />
           </div>
         </div>
       </Link>
-
-      {/* Delete button (hover) */}
-      <button
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(tool) }}
-        className="absolute top-3 right-3 z-20 p-1.5 rounded-md bg-zinc-900/80 border border-white/5 text-zinc-500 hover:text-red-400 hover:border-red-500/30 hover:bg-red-950/50 opacity-0 group-hover:opacity-100 transition-all duration-200"
-        title="Delete app"
-      >
-        <Trash size={14} />
-      </button>
     </div>
   )
 }
@@ -95,35 +77,19 @@ function ToolCard({ tool, onDelete }: { tool: Tool; onDelete: (tool: Tool) => vo
 
 export default function AppsPage() {
   const [searchQuery, setSearchQuery] = useState('')
-  const [deleteTarget, setDeleteTarget] = useState<Tool | null>(null)
-  const [deleting, setDeleting] = useState(false)
-  const queryClient = useQueryClient()
 
-  const { data: tools, isLoading, error } = useQuery<Tool[]>({
-    queryKey: ['tools', 'production'],
+  const { data: apps, isLoading, error } = useQuery<InstalledApp[]>({
+    queryKey: ['installed-apps'],
     queryFn: async () => {
-      const res = await fetch('/api/tools?status=production')
-      if (!res.ok) throw new Error('Failed to fetch tools')
+      const res = await fetch('/api/apps')
+      if (!res.ok) throw new Error('Failed to fetch apps')
       return res.json()
     },
+    staleTime: 30_000,
   })
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return
-    setDeleting(true)
-    try {
-      await fetch(`/api/tools/${deleteTarget.id}`, { method: 'DELETE' })
-      queryClient.invalidateQueries({ queryKey: ['tools'] })
-    } catch { /* ignore */ } finally {
-      setDeleting(false)
-      setDeleteTarget(null)
-    }
-  }
-
-  const filteredTools = (tools ?? []).filter(
-    (tool) =>
-      tool.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (tool.description ?? '').toLowerCase().includes(searchQuery.toLowerCase()),
+  const filteredApps = (apps ?? []).filter(
+    (app) => app.displayName.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
   return (
@@ -184,7 +150,7 @@ export default function AppsPage() {
                 </h2>
                 {!isLoading && !error && (
                   <div className="text-sm text-zinc-500">
-                    {filteredTools.length} {filteredTools.length === 1 ? 'app' : 'apps'} available
+                    {filteredApps.length + 1} {filteredApps.length + 1 === 1 ? 'app' : 'apps'} available
                   </div>
                 )}
               </div>
@@ -209,10 +175,10 @@ export default function AppsPage() {
 
 
             {/* Search no results */}
-            {!isLoading && !error && tools && tools.length > 0 && filteredTools.length === 0 && (
+            {!isLoading && !error && apps && apps.length > 0 && filteredApps.length === 0 && (
               <FadeIn>
                 <div className="text-center py-12 text-zinc-500">
-                  No tools found matching &lsquo;{searchQuery}&rsquo;
+                  No apps found matching &lsquo;{searchQuery}&rsquo;
                 </div>
               </FadeIn>
             )}
@@ -223,9 +189,9 @@ export default function AppsPage() {
                 <StaggerItem key="canvas">
                   <CanvasCard />
                 </StaggerItem>
-                {filteredTools.map((tool) => (
-                  <StaggerItem key={tool.id}>
-                    <ToolCard tool={tool} onDelete={setDeleteTarget} />
+                {filteredApps.map((app) => (
+                  <StaggerItem key={app.id}>
+                    <AppCard app={app} />
                   </StaggerItem>
                 ))}
               </StaggerGrid>
@@ -235,30 +201,6 @@ export default function AppsPage() {
         </div>
       </div>
 
-      {/* Delete confirmation modal */}
-      <Modal isOpen={!!deleteTarget} onClose={() => !deleting && setDeleteTarget(null)} title="Delete App">
-        <div className="space-y-4">
-          <p className="text-sm text-zinc-400">
-            Are you sure you want to delete <span className="text-zinc-200 font-medium">{deleteTarget?.name}</span>? This will remove the tool and all its execution history. This action cannot be undone.
-          </p>
-          <div className="flex justify-end gap-3">
-            <button
-              onClick={() => setDeleteTarget(null)}
-              disabled={deleting}
-              className="px-4 py-2 text-sm text-zinc-400 hover:text-white transition-colors disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleDelete}
-              disabled={deleting}
-              className="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-500 text-white rounded-md transition-colors disabled:opacity-50"
-            >
-              {deleting ? 'Deleting…' : 'Delete'}
-            </button>
-          </div>
-        </div>
-      </Modal>
     </PageTransition>
   )
 }

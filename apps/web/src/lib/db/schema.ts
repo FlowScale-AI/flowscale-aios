@@ -5,6 +5,7 @@ export const tools = sqliteTable('tools', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   description: text('description'),
+  engine: text('engine').notNull().default('comfyui'), // 'comfyui' | future types
   workflowJson: text('workflow_json').notNull(),
   workflowHash: text('workflow_hash').notNull(),
   schemaJson: text('schema_json').notNull(), // WorkflowIO[] serialized
@@ -84,6 +85,41 @@ export const setup = sqliteTable('setup', {
   id: integer('id').primaryKey(),
   initialPassword: text('initial_password').notNull(),
 })
+
+export const installedApps = sqliteTable('installed_apps', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  displayName: text('display_name').notNull(),
+  bundlePath: text('bundle_path').notNull(),
+  entryPath: text('entry_path').notNull(),
+  manifestJson: text('manifest_json').notNull(),
+  source: text('source').notNull().default('sideloaded'), // 'registry' | 'sideloaded'
+  status: text('status').notNull().default('active'),      // 'active' | 'disabled'
+  installedAt: integer('installed_at').notNull().default(sql`(unixepoch() * 1000)`),
+})
+
+export const appStorage = sqliteTable('app_storage', {
+  appId: text('app_id').notNull().references(() => installedApps.id, { onDelete: 'cascade' }),
+  key: text('key').notNull(),
+  value: text('value').notNull(),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch() * 1000)`),
+}, (t) => [primaryKey({ columns: [t.appId, t.key] })])
+
+export const models = sqliteTable('models', {
+  id: text('id').primaryKey(),          // sha256 of '{port}:{filename}'
+  filename: text('filename').notNull(),
+  path: text('path').notNull().unique(),
+  type: text('type').notNull(),         // 'checkpoint'|'lora'|'vae'|'controlnet'|'upscaler'|'other'
+  sizeBytes: integer('size_bytes'),
+  comfyPort: integer('comfy_port').notNull(),
+  scannedAt: integer('scanned_at').notNull().default(sql`(unixepoch() * 1000)`),
+})
+
+export type ModelRow = typeof models.$inferSelect
+
+export type InstalledApp = typeof installedApps.$inferSelect
+export type NewInstalledApp = typeof installedApps.$inferInsert
+export type AppStorageRow = typeof appStorage.$inferSelect
 
 export type Tool = typeof tools.$inferSelect
 export type NewTool = typeof tools.$inferInsert

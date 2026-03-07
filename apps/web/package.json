@@ -14,6 +14,7 @@
     "cy:run": "cypress run"
   },
   "dependencies": {
+    "@flowscale/sdk": "^1.0.0",
     "@flowscale/workflow": "workspace:*",
     "@iconify/react": "^6.0.2",
     "@tanstack/react-query": "^5.90.20",

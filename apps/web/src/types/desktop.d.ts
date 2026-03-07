@@ -13,9 +13,14 @@ interface DesktopBridge {
   platform: string
   dialog: {
     openFile(): Promise<string | null>
+    openDirectory?(): Promise<string | null>
   }
   shell: {
     openExternal(url: string): Promise<void>
+  }
+  watch?: {
+    start(path: string, cb: () => void): void
+    stop(path: string): void
   }
   auth: {
     startFlowscaleOAuth(): Promise<void>

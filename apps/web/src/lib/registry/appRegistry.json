@@ -1,0 +1,57 @@
+[
+  {
+    "id": "image-generator",
+    "name": "image-generator",
+    "displayName": "Image Generator",
+    "description": "Generate stunning images from text prompts using SDXL. Adjust style, dimensions, and sampling parameters directly in the app.",
+    "category": "creative",
+    "author": "FlowScale",
+    "repository": "https://github.com/FlowScale-AI/app-image-generator",
+    "latestRelease": "0.1.0",
+    "releaseAssetUrl": "/tmp/flowscale-apps/image-generator",
+    "tools_used": ["sdxl-txt2img"],
+    "permissions": ["tools", "storage:readwrite"],
+    "capabilities": {
+      "slots": ["main-app"]
+    }
+  },
+  {
+    "id": "face-enhancer",
+    "name": "face-enhancer",
+    "displayName": "Face Enhancer",
+    "description": "Restore and enhance faces in photos using CodeFormer. Upload any image and get back a crisp, detailed result.",
+    "category": "utility",
+    "author": "FlowScale",
+    "repository": "https://github.com/FlowScale-AI/app-face-enhancer",
+    "latestRelease": "0.1.0",
+    "releaseAssetUrl": "/tmp/flowscale-apps/face-enhancer",
+    "tools_used": ["face-restore"],
+    "customNodes": [
+      {
+        "name": "facerestore_cf",
+        "repo": "https://github.com/mav-rik/facerestore_cf",
+        "requirementsFile": "requirements.txt"
+      }
+    ],
+    "permissions": ["tools", "storage:readwrite"],
+    "capabilities": {
+      "slots": ["main-app"]
+    }
+  },
+  {
+    "id": "upscale-studio",
+    "name": "upscale-studio",
+    "displayName": "Upscale Studio",
+    "description": "Upscale images up to 4x with Real-ESRGAN. Batch process multiple files and export at any resolution.",
+    "category": "production",
+    "author": "FlowScale",
+    "repository": "https://github.com/FlowScale-AI/app-upscale-studio",
+    "latestRelease": "0.1.0",
+    "releaseAssetUrl": "/tmp/flowscale-apps/upscale-studio",
+    "tools_used": ["upscale-esrgan"],
+    "permissions": ["tools", "storage:readwrite"],
+    "capabilities": {
+      "slots": ["main-app"]
+    }
+  }
+]

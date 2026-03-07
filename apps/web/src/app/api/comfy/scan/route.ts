@@ -48,5 +48,14 @@ export async function GET() {
     instances.push(...results.filter((r): r is ComfyInstance => r !== null))
   }
 
+  // Fire-and-forget model scan for each discovered instance
+  for (const instance of instances) {
+    fetch('http://localhost:14173/api/models/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comfyPort: instance.port }),
+    }).catch(() => { /* background — ignore errors */ })
+  }
+
   return NextResponse.json(instances)
 }
