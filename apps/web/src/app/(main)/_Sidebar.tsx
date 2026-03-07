@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  House,
   Wrench,
   Plugs,
   Storefront,
@@ -90,11 +89,12 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
       {/* Nav */}
       <div className="flex flex-col gap-0.5 p-2 flex-1 overflow-y-auto overflow-x-hidden">
 
-        {/* Home */}
-        <NavItem href="/home" icon={House} label="Home" active={pathname === '/home'} />
-
-        {/* APPS */}
-        <SectionLabel label="Apps" />
+        <NavItem
+          href="/explore"
+          icon={Storefront}
+          label="Discover"
+          active={pathname === '/explore' || pathname.startsWith('/explore/')}
+        />
 
         <NavItem
           href="/apps"
@@ -103,8 +103,6 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
           active={pathname === '/apps' || pathname.startsWith('/apps/') || pathname.startsWith('/installed-apps/')}
         />
 
-        {/* TOOLS */}
-        <SectionLabel label="Tools" />
         <NavItem
           href="/tools"
           icon={Wrench}
@@ -112,22 +110,11 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
           active={pathname === '/tools' || pathname.startsWith('/tools/')}
         />
 
-        {/* INFRASTRUCTURE */}
-        <SectionLabel label="Infrastructure" />
         <NavItem
           href="/providers"
           icon={Plugs}
           label="Providers"
           active={pathname === '/providers' || pathname.startsWith('/providers/')}
-        />
-
-        {/* DISCOVER */}
-        <SectionLabel label="Discover" />
-        <NavItem
-          href="/explore"
-          icon={Storefront}
-          label="App Store"
-          active={pathname === '/explore' || pathname.startsWith('/explore/')}
         />
 
       </div>
