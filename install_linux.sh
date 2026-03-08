@@ -15,7 +15,6 @@ die()     { echo -e "${RED}${BOLD}[x] ERROR:${RESET} $*" >&2; exit 1; }
 # ─── config ───────────────────────────────────────────────────────────────────
 REPO_URL="https://github.com/FlowScale-AI/flowscale-aios.git"
 REPO_DIR="${FLOWSCALE_DIR:-flowscale-aios}"
-WEB_PORT=14173
 NODE_MIN=20
 PNPM_REQ="9.15.0"
 
@@ -34,35 +33,6 @@ version_gte() {
   return 0
 }
 
-kill_port() {
-  # macOS uses lsof; Linux uses fuser
-  local port=$1
-  if command -v fuser &>/dev/null; then
-    fuser -k "${port}/tcp" 2>/dev/null || true
-  elif command -v lsof &>/dev/null; then
-    lsof -ti ":${port}" 2>/dev/null | xargs kill -9 2>/dev/null || true
-  fi
-}
-
-port_in_use() {
-  if command -v lsof &>/dev/null; then
-    lsof -ti ":$1" &>/dev/null 2>&1
-  elif command -v fuser &>/dev/null; then
-    fuser "${1}/tcp" &>/dev/null 2>&1
-  else
-    return 1
-  fi
-}
-
-wait_for_port() {
-  local port=$1 timeout=${2:-90} elapsed=0
-  info "Waiting for web server on port ${port}..."
-  while ! nc -z 127.0.0.1 "$port" 2>/dev/null; do
-    sleep 1; elapsed=$((elapsed + 1))
-    [[ $elapsed -ge $timeout ]] && die "Web server did not come up within ${timeout}s."
-  done
-  success "Web server is ready on port ${port}."
-}
 
 # --- header -------------------------------------------------------------------
 echo ""
@@ -75,7 +45,6 @@ info "Checking system requirements..."
 
 require_cmd git  "Install git: https://git-scm.com/downloads"
 require_cmd node "Install Node.js >= ${NODE_MIN}: https://nodejs.org/"
-require_cmd nc   "Linux: sudo apt install netcat-openbsd  |  macOS: built-in."
 
 NODE_VER=$(node -e 'process.stdout.write(process.versions.node)')
 version_gte "$NODE_VER" "$NODE_MIN" \
@@ -142,33 +111,56 @@ pnpm install --frozen-lockfile --reporter=append-only
 info "Building all packages..."
 pnpm build
 
-# --- 7. start web server in background ----------------------------------------
-if port_in_use "$WEB_PORT"; then
-  warn "Port ${WEB_PORT} is in use -- stopping existing process..."
-  kill_port "$WEB_PORT"
-  sleep 1
+# --- 7. package AppImage ------------------------------------------------------
+APP_NAME="FlowScale AI OS"
+APP_ID="flowscale-aios"
+INSTALL_DIR="$HOME/.local/share/${APP_ID}"
+APPIMAGE_DEST="${INSTALL_DIR}/${APP_NAME}.AppImage"
+
+if [[ ! -f "$APPIMAGE_DEST" ]]; then
+  info "Packaging Linux AppImage..."
+  pnpm --filter @flowscale/aios-desktop package:linux
+
+  APPIMAGE=$(ls apps/desktop/release/*.AppImage 2>/dev/null | head -1)
+  [[ -n "$APPIMAGE" ]] \
+    || die "AppImage not found after packaging. Check electron-builder output."
+
+  mkdir -p "$INSTALL_DIR"
+  cp "$APPIMAGE" "$APPIMAGE_DEST"
+  chmod +x "$APPIMAGE_DEST"
+  success "Installed AppImage to ${APPIMAGE_DEST}."
+else
+  info "AppImage already installed at ${APPIMAGE_DEST} -- skipping packaging."
 fi
 
-info "Starting Next.js server on port ${WEB_PORT}..."
-pnpm --filter @flowscale/aios-web start &
-WEB_PID=$!
+# --- 8. icon ------------------------------------------------------------------
+ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+mkdir -p "$ICON_DIR"
+ICON_SRC="apps/desktop/build/icon.png"
+if [[ -f "$ICON_SRC" ]]; then
+  cp "$ICON_SRC" "${ICON_DIR}/${APP_ID}.png"
+fi
 
-# Kill the web server when this script exits for any reason
-cleanup() {
-  if kill -0 "$WEB_PID" 2>/dev/null; then
-    info "Stopping web server (pid ${WEB_PID})..."
-    kill "$WEB_PID"
-  fi
-}
-trap cleanup EXIT INT TERM
+# --- 9. .desktop entry --------------------------------------------------------
+APPS_DIR="$HOME/.local/share/applications"
+mkdir -p "$APPS_DIR"
+cat > "${APPS_DIR}/${APP_ID}.desktop" <<DESKTOP
+[Desktop Entry]
+Name=${APP_NAME}
+Exec=${APPIMAGE_DEST} %u
+Icon=${APP_ID}
+StartupWMClass=${APP_ID}
+StartupNotify=false
+Terminal=false
+Type=Application
+Categories=Development;
+DESKTOP
 
-wait_for_port "$WEB_PORT" 90
+command -v update-desktop-database &>/dev/null \
+  && update-desktop-database "$APPS_DIR" 2>/dev/null || true
+success "App registered in launcher -- ${APP_NAME} will appear in your app menu."
 
-# --- 8. launch Electron -------------------------------------------------------
-ELECTRON_BIN="apps/desktop/node_modules/.bin/electron"
-[[ -x "$ELECTRON_BIN" ]] \
-  || die "Electron binary not found at ${ELECTRON_BIN} -- did pnpm install succeed?"
-
+# --- 10. launch ---------------------------------------------------------------
 # WSL display check
 if grep -qiE "microsoft|wsl" /proc/version 2>/dev/null; then
   if [[ -z "${DISPLAY:-}" ]] && [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
@@ -179,7 +171,5 @@ fi
 echo ""
 success "All set. Launching FlowScale AI OS..."
 echo ""
-
-"$ELECTRON_BIN" apps/desktop/dist/main.js
-
-# Electron has exited -- trap will clean up the web server
+nohup "$APPIMAGE_DEST" &>/dev/null &
+disown
