@@ -207,13 +207,15 @@ export function getDb() {
     const zImageWorkflow = JSON.stringify({ engine: 'api', model: 'Tongyi-MAI/Z-Image-Turbo' })
     const zImageHash = crypto.createHash('sha256').update(zImageWorkflow).digest('hex')
     sqlite.prepare(
-      'INSERT INTO tools (id, name, description, engine, workflow_json, workflow_hash, schema_json, layout, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT OR IGNORE INTO tools (id, name, description, engine, workflow_json, workflow_hash, schema_json, layout, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(Z_IMAGE_ID, 'Z-Image Turbo', Z_IMAGE_DESC, 'api', zImageWorkflow, zImageHash, zImageSchema, 'left-right', 'production', Date.now())
   }
 
-  // First-run: seed admin user if no users exist
-  const userCount = sqlite.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }
-  if (userCount.count === 0) {
+  // First-run: seed admin user if no users exist.
+  // Uses a transaction with INSERT OR IGNORE to be fully idempotent — safe
+  // even if next build prerenders the login page across multiple workers.
+  const adminExists = sqlite.prepare("SELECT 1 FROM users WHERE username = 'admin'").get()
+  if (!adminExists) {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
     const bytes = crypto.randomBytes(12)
     let password = ''
@@ -227,7 +229,7 @@ export function getDb() {
     const now = Date.now()
     sqlite
       .prepare(
-        'INSERT INTO users (id, username, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT OR IGNORE INTO users (id, username, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       )
       .run(id, 'admin', passwordHash, 'admin', 'active', now)
     sqlite.prepare('INSERT OR REPLACE INTO setup (id, initial_password) VALUES (1, ?)').run(password)

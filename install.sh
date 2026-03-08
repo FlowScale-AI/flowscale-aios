@@ -13,7 +13,7 @@ warn()    { echo -e "${YELLOW}${BOLD}[!]${RESET} $*"; }
 die()     { echo -e "${RED}${BOLD}[✗] ERROR:${RESET} $*" >&2; exit 1; }
 
 # ─── config ───────────────────────────────────────────────────────────────────
-REPO_URL="git@github.com:FlowScale-AI/flowscale-eios.git"
+REPO_URL="https://github.com/FlowScale-AI/flowscale-aios.git"
 REPO_DIR="${FLOWSCALE_DIR:-flowscale-aios}"
 WEB_PORT=14173
 NODE_MIN=20
@@ -124,7 +124,9 @@ fi
 
 # ─── 5. install node_modules ──────────────────────────────────────────────────
 info "Installing Node.js dependencies…"
-pnpm install --frozen-lockfile
+# --reporter=append-only prevents pnpm's interactive progress bar from hanging
+# when the script is piped from curl (no TTY attached to stdin).
+pnpm install --frozen-lockfile --reporter=append-only
 
 # ─── 6. build all packages (turbo respects dependency order) ──────────────────
 info "Building all packages…"

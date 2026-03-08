@@ -13,7 +13,7 @@ warn()    { echo -e "${YELLOW}${BOLD}[!]${RESET} $*"; }
 die()     { echo -e "${RED}${BOLD}[✗] ERROR:${RESET} $*" >&2; exit 1; }
 
 # ─── config ───────────────────────────────────────────────────────────────────
-REPO_URL="git@github.com:FlowScale-AI/flowscale-eios.git"
+REPO_URL="https://github.com/FlowScale-AI/flowscale-aios.git"
 REPO_DIR="${FLOWSCALE_DIR:-flowscale-aios}"
 WEB_PORT=14173
 NODE_MIN=20
@@ -124,7 +124,9 @@ fi
 
 # ─── 5. install node_modules ──────────────────────────────────────────────────
 info "Installing Node.js dependencies…"
-pnpm install --frozen-lockfile
+# --reporter=append-only prevents pnpm's interactive progress bar from hanging
+# when the script is piped from curl (no TTY attached to stdin).
+pnpm install --frozen-lockfile --reporter=append-only
 
 # ─── 6. build all packages (turbo respects dependency order) ──────────────────
 info "Building all packages…"
@@ -137,8 +139,8 @@ if [[ "$OS" == "Darwin" ]]; then
   # macOS: package as a proper .app bundle and install to /Applications.
   # The packaged app bundles its own Next.js standalone server (via
   # extraResources in electron-builder.yml), so no external web server needed.
-  # The package:mac script automatically rebuilds native modules (e.g.
-  # better-sqlite3) for Electron's Node.js ABI before bundling.
+  # At runtime the app uses the system `node` binary to run the server,
+  # so native modules (better-sqlite3) don't need rebuilding for Electron.
   APP_NAME="FlowScale AI OS"
   APP_BUNDLE="/Applications/${APP_NAME}.app"
 
