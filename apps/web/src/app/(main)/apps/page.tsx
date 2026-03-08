@@ -144,11 +144,25 @@ export default function AppsPage() {
             <FadeIn delay={0.15}>
               <div className="flex items-center justify-between mb-6">
                 <h2 className="font-tech text-2xl font-semibold text-white">Installed Apps</h2>
-                {!isLoading && !error && (
-                  <div className="text-sm text-zinc-500">
-                    {filteredApps.length + 1} {filteredApps.length + 1 === 1 ? 'app' : 'apps'} available
+                <div className="flex items-center gap-4">
+                  {!isLoading && !error && (
+                    <div className="text-sm text-zinc-500">
+                      {filteredApps.length + 1} {filteredApps.length + 1 === 1 ? 'app' : 'apps'} available
+                    </div>
+                  )}
+                  <div className="relative group/install">
+                    <button
+                      disabled
+                      className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-zinc-400 bg-white/5 border border-white/10 rounded-lg cursor-not-allowed opacity-60"
+                    >
+                      <Cube size={14} />
+                      Install App
+                    </button>
+                    <div className="absolute right-0 top-full mt-1.5 px-2.5 py-1 bg-zinc-800 border border-white/10 rounded-md text-xs text-zinc-300 whitespace-nowrap opacity-0 group-hover/install:opacity-100 transition-opacity pointer-events-none z-10">
+                      Coming soon
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             </FadeIn>
 
