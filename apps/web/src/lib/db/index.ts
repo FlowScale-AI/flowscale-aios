@@ -2,21 +2,40 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import Database from 'better-sqlite3'
 import { join } from 'path'
 import { homedir } from 'os'
-import { mkdirSync } from 'fs'
+import { mkdirSync, appendFileSync } from 'fs'
 import crypto from 'crypto'
 import * as schema from './schema'
 
 const DB_DIR = join(homedir(), '.flowscale')
 const DB_PATH = join(DB_DIR, 'aios.db')
+const LOG_FILE = join(DB_DIR, 'server-error.log')
+
+function logError(context: string, err: unknown) {
+  try {
+    const msg = err instanceof Error ? err.stack || err.message : String(err)
+    appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${context}:\n${msg}\n\n`)
+  } catch { /* ignore */ }
+}
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null
 
 export function getDb() {
   if (_db) return _db
 
-  mkdirSync(DB_DIR, { recursive: true })
+  try {
+    mkdirSync(DB_DIR, { recursive: true })
+  } catch (err) {
+    logError('Failed to create DB_DIR', err)
+    throw err
+  }
 
-  const sqlite = new Database(DB_PATH)
+  let sqlite: InstanceType<typeof Database>
+  try {
+    sqlite = new Database(DB_PATH)
+  } catch (err) {
+    logError('Failed to open SQLite database', err)
+    throw err
+  }
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
 
