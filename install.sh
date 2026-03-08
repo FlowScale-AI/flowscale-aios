@@ -159,6 +159,13 @@ ELECTRON_BIN="apps/desktop/node_modules/.bin/electron"
 [[ -x "$ELECTRON_BIN" ]] \
   || die "Electron binary not found at $ELECTRON_BIN — did pnpm install succeed?"
 
+# WSL display check
+if grep -qiE "microsoft|wsl" /proc/version 2>/dev/null; then
+  if [[ -z "${DISPLAY:-}" ]] && [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
+    die "WSL detected but no display found.\nOn Windows 11 WSL2, WSLg should provide a display automatically.\nOn Windows 10, install VcXsrv and run: export DISPLAY=:0"
+  fi
+fi
+
 echo ""
 success "All set. Launching FlowScale AI OS…"
 echo ""
