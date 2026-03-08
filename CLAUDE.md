@@ -61,9 +61,60 @@ Eleven tables (see `apps/web/src/lib/db/schema.ts` for Drizzle types):
 - **`users`** — auth; `role` is `'admin' | 'pipeline_td' | 'dev' | 'artist'`; `status` is `'active' | 'pending' | 'disabled'`
 - **`sessions`** — session tokens; FK → users
 - **`setup`** — one-time initial admin password (seeded on first run)
-- **`installed_apps`** — sideloaded or registry apps; `source` is `'sideloaded' | 'registry'`; `status` is `'active' | 'disabled'`
+- **`installed_apps`** — sideloaded or registry apps; `source` is `'sideloaded' | 'registry'`; `status` is `'active' | 'disabled'`; `bundlePath` points to `~/.flowscale/apps/[id]/`
 - **`app_storage`** — per-app key-value storage; FK → installed_apps
 - **`models`** — scanned local model files; `type` is `'checkpoint' | 'lora' | 'vae' | 'controlnet' | 'upscaler' | 'other'`
+
+### Output storage
+
+All tool execution outputs (both ComfyUI-engine and API-engine) are saved to `~/.flowscale/aios-outputs/[toolId]/[executionId_filename]` and served via `GET /api/outputs/[...path]`. The `outputsJson` column in `executions` stores items with a `path` field starting with `/api/outputs/...` — this is what the Assets page uses for display. Never trust a bare filename as a display URL; only `path` values starting with `/` are valid local paths.
+
+When a ComfyUI-engine execution completes (`PATCH /api/executions/[id]` with `status: 'completed'`), `saveOutputsToDisk` downloads files from ComfyUI, writes them to disk, and re-writes `outputsJson` with updated `path` fields.
+
+### App bundle system
+
+Apps live in `~/.flowscale/apps/[id]/` — each directory must contain a `flowscale.app.json` manifest. The DB `installed_apps` table is the installation record; `GET /api/apps` filters out any rows whose `bundlePath` no longer exists on disk (deleted folder = silently removed from the grid, DB record preserved).
+
+**App registry** (`apps/web/src/lib/registry/appRegistry.ts`) is filesystem-driven — it scans `~/.flowscale/apps/` at call time and builds `AppRegistryEntry` objects from each `flowscale.app.json`. There is no static registry JSON file.
+
+### App bridge protocol
+
+Apps run in sandboxed iframes (`sandbox="allow-scripts allow-same-origin"`). They communicate with the host exclusively via **JSON-RPC 2.0 over `postMessage`** — apps must never call ComfyUI directly via `fetch` or `WebSocket`.
+
+```js
+// Inside an app bundle — minimal bridge client
+const Bridge = (() => {
+  let _id = 1
+  const _pending = new Map()
+  window.addEventListener('message', (e) => {
+    const msg = e.data
+    if (!msg || msg.jsonrpc !== '2.0' || msg.id == null) return
+    const cb = _pending.get(msg.id)
+    if (cb) { _pending.delete(msg.id); cb(msg) }
+  })
+  return {
+    call(method, params) {
+      return new Promise((resolve) => {
+        const id = _id++
+        _pending.set(id, resolve)
+        window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*')
+      })
+    }
+  }
+})()
+```
+
+Key bridge methods (handled by `apps/web/src/lib/bridge/server.ts`):
+- `app.ready` — signal iframe is loaded
+- `tools.list` / `tools.get` / `tools.run` — requires `tools` permission; `tools.run` accepts `{ id, inputs, comfyPort? }` and resolves when execution completes
+- `providers.list` / `providers.run` — requires `providers:[name]` permission
+- `storage.get/set/delete/keys` — requires `storage:readwrite`
+- `storage.files.read/write/delete/list` — requires `storage:files`
+- `ui.toast` / `ui.confirm`
+
+For `tools.run`, registry tool inputs use `"${nodeId}.${paramName}"` keys (e.g. `"6.text"` for a CLIPTextEncode node). Image inputs can be passed as base64 data URLs (`data:image/png;base64,...`) — the server uploads them to ComfyUI's input dir before queuing.
+
+The `url` field in registry tool outputs is an absolute `http://127.0.0.1:PORT/view?...` URL. Convert to proxy before setting `img.src`: replace with `/api/comfy/PORT/path`.
 
 ### Workflow analysis (`packages/workflow`)
 
@@ -137,5 +188,5 @@ From `DESIGN.md` — cyber-tech aesthetic, dark-mode-first:
 ## Product concepts
 
 - **Tools** — single-model/workflow endpoints (e.g. Z-Image-Turbo). Built via the Build Tool wizard, stored in the `tools` table, run via `/api/tools/[id]/executions`.
-- **Apps** — full-fledged Next.js/React applications that orchestrate multiple tools underneath via `@flowscale/sdk`. Apps are not tools; they are standalone products composed on top of tools. Installed apps are stored in `installed_apps`; per-app state goes in `app_storage`.
+- **Apps** — full-fledged HTML bundles that orchestrate tools via the bridge protocol. Installed apps live in `~/.flowscale/apps/[id]/`; their DB record is in `installed_apps`; per-app state goes in `app_storage`.
 - **Models** — local model files scanned from ComfyUI paths; listed via `/api/models`.
