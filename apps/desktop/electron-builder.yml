@@ -4,7 +4,7 @@ copyright: Copyright © 2025 FlowScale
 
 directories:
   output: release
-  buildResources: build
+  buildResources: assets
 
 files:
   - dist/**/*
@@ -27,19 +27,19 @@ extraResources:
 linux:
   target:
     - AppImage
-  icon: build/icon.png
+  icon: assets/icon.png
   category: Development
 
 mac:
   target:
     - dmg
-  icon: build/icon.png
+  icon: assets/icon.png
   category: public.app-category.developer-tools
 
 win:
   target:
     - nsis
-  icon: build/icon.png
+  icon: assets/icon.png
 
 nsis:
   oneClick: false
