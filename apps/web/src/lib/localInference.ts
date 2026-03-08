@@ -1,16 +1,42 @@
 import { ChildProcess, spawn, execSync } from 'child_process'
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs'
+import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
+function resolveScriptPath(): string {
+  // In packaged Electron app: process.resourcesPath points to .app/Contents/Resources/
+  // where extraResources are copied. In dev: fall back to repo structure.
+  if (process.resourcesPath) {
+    const packaged = join(process.resourcesPath, 'scripts', 'z_image_turbo_server.py')
+    if (existsSync(packaged)) return packaged
+  }
+  // Dev fallback: repo root relative to apps/web/
+  return join(process.cwd(), '../../scripts/z_image_turbo_server.py')
+}
+
+function killPort(port: number): void {
+  // macOS uses lsof, Linux uses fuser
+  try {
+    if (process.platform === 'darwin') {
+      const pids = execSync(`lsof -ti :${port}`, { encoding: 'utf-8' }).trim()
+      if (pids) execSync(`kill -9 ${pids.split('\n').join(' ')}`, { stdio: 'ignore' })
+    } else {
+      execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' })
+    }
+  } catch { /* nothing on port */ }
+}
+
 export const LOCAL_INFERENCE_PORT = 8765
-const PID_FILE = join(homedir(), '.flowscale', 'aios', 'inference-server.pid')
+const INFERENCE_DIR = join(homedir(), '.flowscale', 'aios')
+const PID_FILE = join(INFERENCE_DIR, 'inference-server.pid')
+const LOG_FILE = join(INFERENCE_DIR, 'inference-server.log')
+const MAX_LOG_LINES = 300
+
+// Ensure the directory exists on module load
+try { mkdirSync(INFERENCE_DIR, { recursive: true }) } catch { /* ignore */ }
 
 // Module-level ref — survives across requests in the same process
 let _proc: ChildProcess | null = null
-
-const LOG_FILE = join(homedir(), '.flowscale', 'aios', 'inference-server.log')
-const MAX_LOG_LINES = 300
 
 function appendLog(chunk: Buffer) {
   // tqdm uses \r — split on both \r and \n, update progress lines in place
@@ -98,7 +124,9 @@ export function areDepsInstalled(python: string): boolean {
 }
 
 export function resolvePython(): string {
-  for (const bin of ['python3', 'python']) {
+  // Prefer Homebrew Python — macOS system Python (3.9 + LibreSSL) can't download
+  // large files from HuggingFace due to SSL incompatibility.
+  for (const bin of ['/opt/homebrew/bin/python3', '/usr/local/bin/python3', 'python3', 'python']) {
     try { execSync(`${bin} --version`, { stdio: 'ignore' }); return bin } catch { /* try next */ }
   }
   throw new Error('Python not found. Install Python 3.8+ and try again.')
@@ -112,9 +140,11 @@ export function spawnInstall(python: string): ChildProcess {
     gpu === 'rocm' ? 'https://download.pytorch.org/whl/rocm6.3' :
     gpu === 'cuda' ? 'https://download.pytorch.org/whl/cu124' :
     'https://download.pytorch.org/whl/cpu'
+  // --break-system-packages needed for Homebrew Python 3.12+ (PEP 668)
+  const pipFlags = '--break-system-packages'
   const cmd = [
-    `${python} -m pip install --force-reinstall torch torchvision --index-url ${torchIndex}`,
-    `${python} -m pip install --upgrade ${others}`,
+    `${python} -m pip install ${pipFlags} --force-reinstall torch torchvision --index-url ${torchIndex}`,
+    `${python} -m pip install ${pipFlags} --upgrade ${others}`,
   ].join(' && ')
   return spawn('sh', ['-c', cmd], { stdio: 'pipe' })
 }
@@ -130,9 +160,9 @@ export function spawnServer(python: string): void {
   if (pid && isAlive(pid)) { try { process.kill(pid, 'SIGKILL') } catch { /* ignore */ } clearPid() }
   if (_proc) { try { _proc.kill('SIGKILL') } catch { /* ignore */ } _proc = null }
   // Force-free the port in case a zombie thread pool is still holding it
-  try { execSync(`fuser -k ${LOCAL_INFERENCE_PORT}/tcp`, { stdio: 'ignore' }) } catch { /* nothing on port */ }
+  killPort(LOCAL_INFERENCE_PORT)
 
-  const scriptPath = join(process.cwd(), '../../scripts/z_image_turbo_server.py')
+  const scriptPath = resolveScriptPath()
   const proc = spawn(python, ['-u', scriptPath, '--port', String(LOCAL_INFERENCE_PORT)], {
     stdio: 'pipe',
     detached: false,
@@ -156,6 +186,6 @@ export function stopServer(): boolean {
   if (pid && isAlive(pid)) { try { process.kill(pid, 'SIGKILL'); stopped = true } catch { /* ignore */ } }
   clearPid()
   // Also kill anything still occupying the port (e.g. a thread-pool zombie)
-  try { execSync(`fuser -k ${LOCAL_INFERENCE_PORT}/tcp`, { stdio: 'ignore' }) } catch { /* nothing on port */ }
+  killPort(LOCAL_INFERENCE_PORT)
   return stopped
 }

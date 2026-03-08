@@ -87,7 +87,28 @@ else
   success "pnpm $(pnpm --version)"
 fi
 
-# ─── 3. Electron Linux system deps ────────────────────────────────────────────
+# ─── 3. Python (macOS: Homebrew Python required for HuggingFace downloads) ────
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  # macOS system Python (3.9 + LibreSSL) can't download large files from
+  # HuggingFace — SSL connections hang silently. Homebrew Python has OpenSSL.
+  if [[ -x /opt/homebrew/bin/python3 ]] || [[ -x /usr/local/bin/python3 ]]; then
+    BREW_PY=$(/opt/homebrew/bin/python3 --version 2>/dev/null || /usr/local/bin/python3 --version 2>/dev/null)
+    success "Homebrew Python: $BREW_PY"
+  else
+    if command -v brew &>/dev/null; then
+      info "Installing Python via Homebrew (required for AI model downloads)…"
+      brew install python
+      success "Homebrew Python installed."
+    else
+      warn "Homebrew Python not found. The built-in macOS Python has SSL issues"
+      warn "that prevent downloading AI models. Install Homebrew first:"
+      warn "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+      warn "Then run: brew install python"
+    fi
+  fi
+fi
+
+# ─── 4. Electron Linux system deps ───────────────────────────────────────────
 if [[ "$(uname -s)" == "Linux" ]]; then
   info "Installing Electron system dependencies…"
   if command -v apt-get &>/dev/null; then

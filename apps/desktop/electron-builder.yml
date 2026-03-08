@@ -23,6 +23,10 @@ extraResources:
     to: apps/web/.next/standalone/apps/web/public
     filter:
       - '**/*'
+  - from: ../../scripts
+    to: scripts
+    filter:
+      - '**/*.py'
 
 linux:
   target:
