@@ -4,6 +4,7 @@ import { installedApps } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { parseManifest } from '@/lib/appManifest'
 import { getRequestUser } from '@/lib/auth'
+import fs from 'fs'
 
 export async function GET(req: NextRequest) {
   const user = getRequestUser(req)
@@ -18,14 +19,16 @@ export async function GET(req: NextRequest) {
 
   const rows = await db.select().from(installedApps).where(condition)
 
-  const apps = rows.map((row) => {
-    try {
-      const manifest = parseManifest(JSON.parse(row.manifestJson))
-      return { ...row, manifest }
-    } catch {
-      return { ...row, manifest: null }
-    }
-  })
+  const apps = rows
+    .filter((row) => fs.existsSync(row.bundlePath))
+    .map((row) => {
+      try {
+        const manifest = parseManifest(JSON.parse(row.manifestJson))
+        return { ...row, manifest }
+      } catch {
+        return { ...row, manifest: null }
+      }
+    })
 
   return NextResponse.json(apps)
 }

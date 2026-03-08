@@ -1,7 +1,7 @@
 {
   "name": "@flowscale/sdk",
   "version": "1.0.0",
-  "description": "FlowScale EIOS SDK — build apps that run inside FlowScale AI OS",
+  "description": "FlowScale AIOS SDK — build apps that run inside FlowScale AI OS",
   "license": "AGPL-3.0-only",
   "files": [
     "dist"
@@ -26,7 +26,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/FlowScale-AI/flowscale-eios.git"
+    "url": "git+https://github.com/FlowScale-AI/flowscale-aios.git"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

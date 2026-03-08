@@ -187,9 +187,9 @@ function OutputGrid({ outputs, comfyPort }: { outputs: OutputItem[]; comfyPort?:
         const url = out.path.startsWith('/')
           ? out.path
           : (() => {
-              const subfolder = out.path.includes('/') ? out.path.substring(0, out.path.lastIndexOf('/')) : ''
-              return `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}${subfolder ? `&subfolder=${encodeURIComponent(subfolder)}` : ''}&type=output`
-            })()
+            const subfolder = out.path.includes('/') ? out.path.substring(0, out.path.lastIndexOf('/')) : ''
+            return `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}${subfolder ? `&subfolder=${encodeURIComponent(subfolder)}` : ''}&type=output`
+          })()
         if (out.kind === 'image') return (
           <div key={i} className={cardClass}>
             <div className="h-36 bg-zinc-950 overflow-hidden">
@@ -436,9 +436,9 @@ function NodeJsTab({ toolId, inputs }: { toolId: string; inputs: Record<string, 
   const installSnippet = `npm install @flowscale/sdk`
 
   const snippet =
-`import FlowScale from '@flowscale/sdk'
+    `import FlowScale from '@flowscale/sdk'
 
-// Only works inside an EIOS-hosted iframe app.
+// Only works inside an AIOS-hosted iframe app.
 // For external / standalone use, see the HTTP tab.
 const result = await FlowScale.tools.run('${toolId}', ${inputsStr})
 
@@ -464,7 +464,7 @@ function HttpTab({ toolId, inputs }: { toolId: string; inputs: Record<string, un
     : '  "inputs": {\n' + Object.entries(inputs).map(([k, v]) => `    "${k}": ${JSON.stringify(v)}`).join(',\n') + '\n  }'
 
   const runSnippet =
-`const BASE = 'http://localhost:14173'
+    `const BASE = 'http://localhost:14173'
 
 // 1. Execute the tool
 const res = await fetch(\`\${BASE}/api/tools/${toolId}/executions\`, {
@@ -504,7 +504,7 @@ console.log(outputs)`
     <div className="flex flex-col gap-5">
       <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5">
         <p className="text-xs text-amber-400 leading-relaxed">
-          Update <code className="bg-amber-500/10 px-1 rounded">BASE</code> if your EIOS instance is not running locally. Session tokens are obtained by logging in via <code className="bg-amber-500/10 px-1 rounded">POST /api/auth/login</code>.
+          Update <code className="bg-amber-500/10 px-1 rounded">BASE</code> if your AIOS instance is not running locally. Session tokens are obtained by logging in via <code className="bg-amber-500/10 px-1 rounded">POST /api/auth/login</code>.
         </p>
       </div>
       <div>
@@ -677,7 +677,7 @@ export default function ToolPage() {
       }
       return defaults
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool?.schemaJson])
 
   const [leftTab, setLeftTab] = useState<'form' | 'nodejs' | 'http'>('form')

@@ -1,3 +1,7 @@
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
+
 export interface CustomNodeRequirement {
   /** Human-readable name */
   name: string
@@ -16,7 +20,7 @@ export interface AppRegistryEntry {
   author: string
   repository?: string
   latestRelease: string
-  /** URL or local absolute path to a ZIP bundle or a directory */
+  /** Absolute path to the app bundle directory */
   releaseAssetUrl: string
   icon?: string
   screenshots?: string[]
@@ -29,16 +33,53 @@ export interface AppRegistryEntry {
   }
 }
 
-import registryJson from './appRegistry.json'
+const APPS_DIR = path.join(os.homedir(), '.flowscale', 'apps')
 
-export const APP_REGISTRY: AppRegistryEntry[] = registryJson as AppRegistryEntry[]
+function scanRegistry(): AppRegistryEntry[] {
+  if (!fs.existsSync(APPS_DIR)) return []
+
+  const entries: AppRegistryEntry[] = []
+
+  for (const dir of fs.readdirSync(APPS_DIR)) {
+    const bundlePath = path.join(APPS_DIR, dir)
+    if (!fs.statSync(bundlePath).isDirectory()) continue
+
+    const manifestPath = path.join(bundlePath, 'flowscale.app.json')
+    if (!fs.existsSync(manifestPath)) continue
+
+    try {
+      const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>
+      entries.push({
+        id: dir,
+        name: (raw.name as string) ?? dir,
+        displayName: (raw.displayName as string) ?? dir,
+        description: (raw.description as string) ?? '',
+        category: (raw.category as AppRegistryEntry['category']) ?? 'utility',
+        author: (raw.author as string) ?? 'FlowScale',
+        repository: raw.repository as string | undefined,
+        latestRelease: (raw.version as string) ?? '0.1.0',
+        releaseAssetUrl: bundlePath,
+        icon: raw.icon as string | undefined,
+        screenshots: raw.screenshots as string[] | undefined,
+        tools_used: raw.tools_used as string[] | undefined,
+        customNodes: raw.customNodes as CustomNodeRequirement[] | undefined,
+        permissions: (raw.permissions as string[]) ?? [],
+        capabilities: (raw.capabilities as { slots: string[] }) ?? { slots: [] },
+      })
+    } catch {
+      // Skip malformed manifests
+    }
+  }
+
+  return entries
+}
 
 export function getRegistryEntry(id: string): AppRegistryEntry | undefined {
-  return APP_REGISTRY.find((e) => e.id === id)
+  return scanRegistry().find((e) => e.id === id)
 }
 
 export function searchRegistry(query?: string, category?: string): AppRegistryEntry[] {
-  let results = APP_REGISTRY
+  let results = scanRegistry()
   if (category) results = results.filter((e) => e.category === category)
   if (query) {
     const q = query.toLowerCase()
@@ -51,3 +92,6 @@ export function searchRegistry(query?: string, category?: string): AppRegistryEn
   }
   return results
 }
+
+// Keep for callers that import APP_REGISTRY directly
+export const APP_REGISTRY: AppRegistryEntry[] = scanRegistry()

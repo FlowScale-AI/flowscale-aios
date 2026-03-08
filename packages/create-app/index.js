@@ -6,7 +6,7 @@ const path = require('path')
 const appName = process.argv[2]
 
 if (!appName) {
-  console.error('Usage: create-flowscale-eios-app <app-name>')
+  console.error('Usage: create-flowscale-aios-app <app-name>')
   process.exit(1)
 }
 
@@ -42,7 +42,7 @@ for (const file of filesToPatch) {
 }
 
 console.log(`
-✅ Created FlowScale EIOS app: ${appName}
+✅ Created FlowScale AIOS app: ${appName}
 
 Next steps:
   cd ${appName}
@@ -50,6 +50,6 @@ Next steps:
   npm run dev          # start Vite dev server
   npm run build        # build to dist/
 
-Then sideload in EIOS:
+Then sideload in AIOS:
   Settings > Developer > Load app from path → ${targetDir}
 `)

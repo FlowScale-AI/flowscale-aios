@@ -38,7 +38,7 @@ Turborepo + pnpm workspaces with five packages:
 - **`apps/desktop`** (`@flowscale/aios-desktop`) — Electron 39 shell that loads `apps/web` on port 14173
 - **`packages/workflow`** (`@flowscale/workflow`) — zero-dependency library for ComfyUI workflow analysis; used by `apps/web`
 - **`packages/sdk`** (`@flowscale/sdk`) — SDK for app developers building on top of tools
-- **`packages/create-app`** — CLI scaffolding tool (`create-flowscale-eios-app`)
+- **`packages/create-app`** — CLI scaffolding tool (`create-flowscale-aios-app`)
 
 ## Architecture
 

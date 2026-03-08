@@ -1,12 +1,17 @@
 {
   "name": "__APP_NAME__",
   "displayName": "__APP_NAME__",
-  "description": "A FlowScale EIOS app",
+  "description": "A FlowScale AIOS app",
   "version": "0.1.0",
   "sdk": "1.0.0",
   "entry": "index.html",
-  "permissions": ["tools", "storage:readwrite"],
+  "permissions": [
+    "tools",
+    "storage:readwrite"
+  ],
   "capabilities": {
-    "slots": ["main-app"]
+    "slots": [
+      "main-app"
+    ]
   }
 }

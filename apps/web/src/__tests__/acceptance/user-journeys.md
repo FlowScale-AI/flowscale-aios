@@ -1,4 +1,4 @@
-# FlowScale EIOS — User Journey Test Plan
+# FlowScale AIOS — User Journey Test Plan
 
 All journeys tested against `http://localhost:14173` with user `admin` / `admin123`.
 

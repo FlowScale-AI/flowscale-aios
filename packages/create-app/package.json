@@ -1,10 +1,10 @@
 {
-  "name": "create-flowscale-eios-app",
+  "name": "create-flowscale-aios-app",
   "version": "1.0.0",
-  "description": "Scaffold a new FlowScale EIOS app",
+  "description": "Scaffold a new FlowScale AIOS app",
   "license": "AGPL-3.0-only",
   "bin": {
-    "create-flowscale-eios-app": "./index.js"
+    "create-flowscale-aios-app": "./index.js"
   },
   "files": [
     "index.js",

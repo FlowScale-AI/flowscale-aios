@@ -1,19 +1,19 @@
-# FlowScale EIOS — MVP PRD
+# FlowScale AIOS — MVP PRD
 
 > **Scope:** Everything required to ship the MVP as defined in ECOSYSTEM_ARCHITECTURE.md and DEV_UX.md.
-> The EIOS codebase already has: Build Tool wizard, tool execution (`/apps/[id]`), multi-user auth, ComfyUI scan/proxy, canvas, outputs page, and integrations UI.
+> The AIOS codebase already has: Build Tool wizard, tool execution (`/apps/[id]`), multi-user auth, ComfyUI scan/proxy, canvas, outputs page, and integrations UI.
 > This PRD covers the **gaps only**.
 
 ---
 
 ## Problem Statement
 
-EIOS can build and run ComfyUI-backed tools today, but it has no SDK, no app runtime, no cloud providers, and no real app registry. Developers cannot build React apps that call tools through a structured API. Apps cannot be isolated, distributed, or installed. The platform is a tool runner, not an app ecosystem.
+AIOS can build and run ComfyUI-backed tools today, but it has no SDK, no app runtime, no cloud providers, and no real app registry. Developers cannot build React apps that call tools through a structured API. Apps cannot be isolated, distributed, or installed. The platform is a tool runner, not an app ecosystem.
 
 ## MVP Definition
 
 A complete MVP means:
-1. A developer can `npx create-flowscale-eios-app`, write a React app using `@flowscale/sdk`, and sideload it into EIOS for testing.
+1. A developer can `npx create-flowscale-aios-app`, write a React app using `@flowscale/sdk`, and sideload it into AIOS for testing.
 2. That app can call local registry tools (`tools.run`), cloud providers (`providers.fal`, etc.), and persist state (`storage.*`).
 3. Apps run in iframe isolation with permission enforcement.
 4. A user can browse a real app registry, install apps, and use them.
@@ -38,7 +38,7 @@ A complete MVP means:
 
 ## Epic E1 — `@flowscale/sdk` Package
 
-**Goal:** A TypeScript SDK that app developers import. In iframe mode it communicates with the EIOS host via postMessage. Standalone mode it talks directly to the EIOS API (for dev/testing).
+**Goal:** A TypeScript SDK that app developers import. In iframe mode it communicates with the AIOS host via postMessage. Standalone mode it talks directly to the AIOS API (for dev/testing).
 
 ---
 
@@ -46,7 +46,7 @@ A complete MVP means:
 
 **As a developer, I can install `@flowscale/sdk` and import from it.**
 
-- [ ] Create `packages/sdk/` in the eios turborepo root
+- [ ] Create `packages/sdk/` in the aios turborepo root
 - [ ] Add `packages/sdk/package.json`: name `@flowscale/sdk`, version `1.0.0`, `main: dist/index.js`, `types: dist/index.d.ts`, exports map
 - [ ] Add `packages/sdk/tsconfig.json` extending root, `"declaration": true`, `"outDir": "dist"`
 - [ ] Add `tsup` build config: `entry: ['src/index.ts']`, `format: ['cjs', 'esm']`, `dts: true`
@@ -238,7 +238,7 @@ One subtask per tool — each needs a typed definition + a tested ComfyUI workfl
 **As the platform, I store provider API keys server-side and never expose them to iframes.**
 
 - [ ] Create `apps/web/src/lib/providerSettings.ts`:
-  - `PROVIDER_KEYS_PATH = path.join(os.homedir(), '.flowscale', 'eios', 'provider-keys.json')`
+  - `PROVIDER_KEYS_PATH = path.join(os.homedir(), '.flowscale', 'aios', 'provider-keys.json')`
   - `getProviderKey(provider: 'fal'|'replicate'|'openrouter'|'huggingface'): string | null` — reads file, returns key or null
   - `setProviderKey(provider, key: string): void` — reads file, updates entry, writes file; creates dirs if needed
   - `listProviders(): ProviderInfo[]` — returns `[{ name, configured: boolean }]` without key values
@@ -450,7 +450,7 @@ One subtask per tool — each needs a typed definition + a tested ComfyUI workfl
 
 - [ ] Create `POST /api/bridge/storage/files/write` route:
   - Body: `{ appId: string, path: string, data: string }` (data is base64)
-  - Resolve target: `~/.flowscale/eios/app-data/{appId}/{path}`
+  - Resolve target: `~/.flowscale/aios/app-data/{appId}/{path}`
   - Reject paths with `..` or absolute paths (return 400)
   - `mkdir -p` the parent directory
   - Write `Buffer.from(data, 'base64')` to file
@@ -471,13 +471,13 @@ One subtask per tool — each needs a typed definition + a tested ComfyUI workfl
 
 ## Epic E6 — Sideloading + CLI
 
-**Goal:** Developers can load a local app build into EIOS for testing, with hot reload. A CLI scaffolds new apps instantly.
+**Goal:** Developers can load a local app build into AIOS for testing, with hot reload. A CLI scaffolds new apps instantly.
 
 ---
 
 ### Story E6.1 — Sideload UI in Settings
 
-**As a developer, I can load a local app directory into EIOS from Settings > Developer.**
+**As a developer, I can load a local app directory into AIOS from Settings > Developer.**
 
 - [ ] Add "Developer" tab to `apps/web/src/app/(main)/settings/page.tsx`
 - [ ] Gate the tab to `dev` and `admin` roles (check `user.role`; update `ROLE_NAV` in `auth.ts` to include `/settings` for `dev` already does — confirm)
@@ -501,7 +501,7 @@ One subtask per tool — each needs a typed definition + a tested ComfyUI workfl
 
 ### Story E6.2 — Sideload hot reload (desktop only)
 
-**As a developer, EIOS auto-refreshes my sideloaded app when I rebuild without manual re-sideload.**
+**As a developer, AIOS auto-refreshes my sideloaded app when I rebuild without manual re-sideload.**
 
 - [ ] Add `watch:start` and `watch:stop` IPC handlers in `apps/desktop/src/main.ts`:
   - `watch:start(path)`: `fs.watch(path, { recursive: true }, debounced_handler)` — debounce 500ms — send `app-dir-changed` event to renderer
@@ -516,12 +516,12 @@ One subtask per tool — each needs a typed definition + a tested ComfyUI workfl
 
 ---
 
-### Story E6.3 — `create-flowscale-eios-app` CLI
+### Story E6.3 — `create-flowscale-aios-app` CLI
 
-**As a developer, I can scaffold a new EIOS app in one command: `npx create-flowscale-eios-app my-app`.**
+**As a developer, I can scaffold a new AIOS app in one command: `npx create-flowscale-aios-app my-app`.**
 
 - [ ] Create `packages/create-app/` directory
-- [ ] Add `packages/create-app/package.json`: name `create-flowscale-eios-app`, `bin: { 'create-flowscale-eios-app': './index.js' }`, `files: ['index.js', 'template']`
+- [ ] Add `packages/create-app/package.json`: name `create-flowscale-aios-app`, `bin: { 'create-flowscale-aios-app': './index.js' }`, `files: ['index.js', 'template']`
 - [ ] Create `packages/create-app/index.js` (plain Node, no build):
   - Reads `process.argv[2]` as app name; exits with usage message if missing
   - `fs.cpSync('template/', path.join(process.cwd(), appName), { recursive: true })`
@@ -532,7 +532,7 @@ One subtask per tool — each needs a typed definition + a tested ComfyUI workfl
   {
     "name": "__APP_NAME__",
     "displayName": "__APP_NAME__",
-    "description": "A FlowScale EIOS app",
+    "description": "A FlowScale AIOS app",
     "version": "1.0.0",
     "sdk": "^1.0.0",
     "entry": "dist/index.html",
@@ -597,7 +597,7 @@ One subtask per tool — each needs a typed definition + a tested ComfyUI workfl
   - Fetch registry entry from `/api/apps/registry/{registryId}`
   - Run `checkInstallDeps()`; if not ok and `!force` return check result (200 with `status:'missing_deps'`)
   - Download `entry.releaseAssetUrl` to `/tmp/flowscale-install-{registryId}.zip`
-  - Unzip to `~/.flowscale/eios/apps/{registryId}/` using Node `child_process.execSync('unzip ...')` or `adm-zip`
+  - Unzip to `~/.flowscale/aios/apps/{registryId}/` using Node `child_process.execSync('unzip ...')` or `adm-zip`
   - Parse + validate `flowscale.app.json` from unzipped bundle
   - Deploy any `custom_tools` from manifest (call existing `/api/tools` POST for each)
   - Upsert into `installed_apps`: `source: 'registry'`, `bundlePath`, `entryPath`
@@ -630,7 +630,7 @@ One subtask per tool — each needs a typed definition + a tested ComfyUI workfl
 
 ## Epic E8 — Local Models Registry
 
-**Goal:** EIOS indexes model files from ComfyUI instances so dependency checks are reliable and users can browse what's installed.
+**Goal:** AIOS indexes model files from ComfyUI instances so dependency checks are reliable and users can browse what's installed.
 
 ---
 
@@ -704,7 +704,7 @@ One subtask per tool — each needs a typed definition + a tested ComfyUI workfl
 
 ### TypeScript
 
-- [ ] Run `pnpm --filter @flowscale/eios-web typecheck` after each epic; fix all errors before considering done
+- [ ] Run `pnpm --filter @flowscale/aios-web typecheck` after each epic; fix all errors before considering done
 - [ ] Run `pnpm --filter @flowscale/sdk build` after each SDK story; zero type errors
 
 ### Testing
