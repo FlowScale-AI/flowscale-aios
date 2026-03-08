@@ -11,10 +11,9 @@ pnpm --filter @flowscale/aios-web dev
 # Typecheck all workspaces
 pnpm typecheck
 
-# Run tests (vitest — workflow package has tests)
-pnpm test
+# Run tests (vitest)
+pnpm --filter @flowscale/aios-web test
 pnpm --filter @flowscale/workflow test
-pnpm --filter @flowscale/workflow test:coverage
 
 # Build all workspaces (turbo, respects dependency order)
 pnpm build
@@ -49,6 +48,8 @@ All ComfyUI communication goes through Next.js API routes (CORS-free):
 - `GET|POST /api/comfy/[port]/[...path]` — transparent proxy to `http://127.0.0.1:[port]/[path]`; uses `url.pathname` (not decoded route params) to preserve `%2F` encoding needed for ComfyUI's `/userdata` routes
 
 Persistence is local SQLite at `~/.flowscale/aios.db` via Drizzle ORM + better-sqlite3. Schema is in `apps/web/src/lib/db/schema.ts`; the DB is initialised in `apps/web/src/lib/db/index.ts`.
+
+> **Test DDL**: Integration tests use an in-memory SQLite DB built from a hand-written DDL in `apps/web/src/__tests__/integration/setup.ts`. When adding or renaming columns in `schema.ts`, also update that DDL or tests will fail with `SqliteError: no such column`.
 
 ### Database schema
 

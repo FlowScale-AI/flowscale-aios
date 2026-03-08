@@ -436,12 +436,20 @@ function NodeJsTab({ toolId, inputs }: { toolId: string; inputs: Record<string, 
   const installSnippet = `npm install @flowscale/sdk`
 
   const snippet =
-    `import FlowScale from '@flowscale/sdk'
+    `import { createClient, login } from '@flowscale/sdk'
 
-// Only works inside an AIOS-hosted iframe app.
-// For external / standalone use, see the HTTP tab.
-const result = await FlowScale.tools.run('${toolId}', ${inputsStr})
+const token = await login({
+  baseUrl: 'http://localhost:14173',
+  username: 'admin',
+  password: '<your-password>',
+})
 
+const client = createClient({ baseUrl: 'http://localhost:14173', sessionToken: token })
+
+const result = await client.tools.run('${toolId}', ${inputsStr})
+
+// Output paths are relative — prepend baseUrl for direct access:
+// client.resolveUrl(result.outputs[0].path)
 console.log(result.outputs)`
 
   return (

@@ -46,8 +46,8 @@ importers:
   apps/web:
     dependencies:
       '@flowscale/sdk':
-        specifier: ^1.0.0
-        version: 1.0.0
+        specifier: ^1.1.0
+        version: 1.1.0
       '@flowscale/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
@@ -692,8 +692,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@flowscale/sdk@1.0.0':
-    resolution: {integrity: sha512-O+xvn2UiJ3vremjmFWyluC+fFXYhDh5sLGsSGydAwFHJOSrRZXoNbiKTg7G/KGQIYmfflJKm5JQEJHHJ40pkYQ==}
+  '@flowscale/sdk@1.1.0':
+    resolution: {integrity: sha512-c5HQ/AkmVW3DaEWsIhnaBjIOuns5JWVxQpSuQF6m5pcHPnMg+HeOKBcvz7s5ryHiC4ZOhfvkL2Mys6mfvjn2kw==}
 
   '@gar/promisify@1.1.3':
     resolution: {integrity: sha512-k2Ty1JcVojjJFwrg/ThKi2ujJ7XNLYaFGNB/bWT9wGR+oSMJHMa5w+CUq6p/pVrKeNNgA7pCqEcjSnHVoqJQFw==}
@@ -4063,7 +4063,7 @@ snapshots:
   '@esbuild/win32-x64@0.27.3':
     optional: true
 
-  '@flowscale/sdk@1.0.0': {}
+  '@flowscale/sdk@1.1.0': {}
 
   '@gar/promisify@1.1.3': {}
 

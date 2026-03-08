@@ -45,6 +45,14 @@ async function saveOutputsToDisk(
   return results.map((r, i) => r.status === 'fulfilled' ? r.value : outputs[i])
 }
 
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const db = getDb()
+  const { id } = await params
+  const [row] = await db.select().from(executions).where(eq(executions.id, id))
+  if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  return NextResponse.json(row)
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const db = getDb()
   const { id } = await params

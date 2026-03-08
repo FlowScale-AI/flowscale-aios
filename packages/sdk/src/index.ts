@@ -4,6 +4,8 @@ export { providers } from './providers';
 export { storage } from './storage';
 export { ui } from './ui';
 export { app } from './app';
+export { createClient, login } from './http';
+export type { HttpClient, HttpClientOptions, LoginOptions } from './http';
 export * from './types';
 
 import { tools } from './tools';

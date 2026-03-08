@@ -74,6 +74,32 @@ chmod +x "FlowScale AI OS-*.AppImage"
 
 **ComfyUI** must be running on any port between 6188–16188 before launching the app. The app will auto-discover it.
 
+## Building External Apps with the SDK
+
+The `@flowscale/sdk` package lets you build apps that run **outside** FlowScale — Node.js scripts, Express servers, Next.js apps, or anything that can make HTTP requests.
+
+See **[packages/sdk/README.md](packages/sdk/README.md)** for the full guide, including authentication, listing tools, running tools, handling image inputs, and complete working examples.
+
+Quick start:
+
+```bash
+npm install @flowscale/sdk
+```
+
+```ts
+import { login, createClient } from '@flowscale/sdk'
+
+const token = await login({ baseUrl: 'http://localhost:14173', username: 'admin', password: 'your-password' })
+const client = createClient({ baseUrl: 'http://localhost:14173', sessionToken: token })
+
+const result = await client.tools.run('your-tool-id', {
+  '6__text': 'a photorealistic cat on the moon',
+})
+console.log(result.outputs)
+```
+
+---
+
 ## Project Structure
 
 ```

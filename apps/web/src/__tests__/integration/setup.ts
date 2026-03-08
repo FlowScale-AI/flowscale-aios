@@ -14,6 +14,7 @@ const DDL = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
+    engine TEXT NOT NULL DEFAULT 'comfyui',
     workflow_json TEXT NOT NULL,
     workflow_hash TEXT NOT NULL,
     schema_json TEXT NOT NULL,

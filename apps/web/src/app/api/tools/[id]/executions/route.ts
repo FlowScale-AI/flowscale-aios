@@ -5,10 +5,44 @@ import { eq, desc } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@flowscale/workflow'
 import { getRequestUser } from '@/lib/auth'
-import { mkdirSync, writeFileSync } from 'fs'
+import { mkdirSync, writeFileSync, mkdirSync as mkdirSyncFs, writeFileSync as writeFileSyncFs } from 'fs'
+import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { inFlightControllers } from '@/lib/inferenceRegistry'
+import { getHistory } from '@/lib/comfyui-client'
+
+type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
+
+async function saveComfyOutputsToDisk(
+  outputs: OutputItem[],
+  comfyPort: number,
+  toolId: string,
+  executionId: string,
+): Promise<OutputItem[]> {
+  const toolDir = join(homedir(), '.flowscale', 'aios-outputs', toolId)
+  await mkdir(toolDir, { recursive: true })
+
+  const results = await Promise.allSettled(
+    outputs.map(async (item) => {
+      if (!item.filename) return item
+      try {
+        const subfolder = item.subfolder ?? ''
+        const url = `http://localhost:${comfyPort}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
+        const res = await fetch(url)
+        if (!res.ok) return item
+        const buffer = Buffer.from(await res.arrayBuffer())
+        const destName = `${executionId.slice(0, 8)}_${item.filename}`
+        await writeFile(join(toolDir, destName), buffer)
+        return { ...item, path: `/api/outputs/${toolId}/${destName}` }
+      } catch {
+        return item
+      }
+    }),
+  )
+
+  return results.map((r, i) => (r.status === 'fulfilled' ? r.value : outputs[i]))
+}
 
 const API_OUTPUTS_DIR = join(homedir(), '.flowscale', 'aios-outputs')
 
@@ -243,6 +277,58 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { prompt_id: promptId } = (await queueRes.json()) as { prompt_id: string }
   await db.update(executions).set({ promptId }).where(eq(executions.id, executionId))
+
+  // ── Synchronous wait mode (?wait=true) ──────────────────────────────────────
+  // Poll ComfyUI history server-side until the prompt completes, then save
+  // outputs to disk and return the finished execution. Used by the HTTP SDK so
+  // external apps don't need a browser watching a WebSocket.
+  const waitMode = req.nextUrl.searchParams.get('wait') === 'true'
+  if (waitMode) {
+    const baseUrl = `http://localhost:${tool.comfyPort}`
+    const maxWait = 300_000
+    const started = Date.now()
+
+    while (Date.now() - started < maxWait) {
+      await new Promise((r) => setTimeout(r, 2000))
+      let history: Record<string, unknown>
+      try { history = await getHistory(promptId, baseUrl) } catch { continue }
+
+      const entry = history[promptId] as {
+        status?: { completed?: boolean; status_str?: string }
+        outputs?: Record<string, { images?: { filename: string; subfolder: string }[] }>
+      } | undefined
+
+      if (!entry?.status?.completed) continue
+
+      const rawOutputs: OutputItem[] = []
+      for (const nodeOut of Object.values(entry.outputs ?? {})) {
+        for (const img of nodeOut.images ?? []) {
+          rawOutputs.push({ kind: 'image', filename: img.filename, subfolder: img.subfolder ?? '' })
+        }
+      }
+
+      const isError = entry.status?.status_str === 'error'
+      if (isError) {
+        await db.update(executions)
+          .set({ status: 'error', errorMessage: 'ComfyUI reported an error', completedAt: Date.now() })
+          .where(eq(executions.id, executionId))
+        return NextResponse.json({ error: 'ComfyUI reported an error' }, { status: 500 })
+      }
+
+      const savedOutputs = await saveComfyOutputsToDisk(rawOutputs, tool.comfyPort, toolId, executionId)
+      await db.update(executions)
+        .set({ status: 'completed', outputsJson: JSON.stringify(savedOutputs), completedAt: Date.now() })
+        .where(eq(executions.id, executionId))
+
+      const [row] = await db.select().from(executions).where(eq(executions.id, executionId))
+      return NextResponse.json(row)
+    }
+
+    await db.update(executions)
+      .set({ status: 'error', errorMessage: 'Execution timed out', completedAt: Date.now() })
+      .where(eq(executions.id, executionId))
+    return NextResponse.json({ error: 'Execution timed out' }, { status: 504 })
+  }
 
   return NextResponse.json({
     executionId,

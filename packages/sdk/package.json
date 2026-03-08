@@ -1,7 +1,7 @@
 {
   "name": "@flowscale/sdk",
-  "version": "1.0.0",
-  "description": "FlowScale AIOS SDK — build apps that run inside FlowScale AI OS",
+  "version": "1.1.0",
+  "description": "FlowScale AIOS SDK — build apps inside FlowScale or externally via HTTP",
   "license": "AGPL-3.0-only",
   "files": [
     "dist"
