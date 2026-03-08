@@ -6,36 +6,43 @@ import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 
+type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
+
 async function saveOutputsToDisk(
   outputsJson: string,
   comfyPort: number,
   toolId: string,
   executionId: string,
-): Promise<void> {
-  let outputs: { filename: string }[]
+): Promise<OutputItem[]> {
+  let outputs: OutputItem[]
   try {
     outputs = JSON.parse(outputsJson)
   } catch {
-    return
+    return []
   }
 
   const toolDir = join(homedir(), '.flowscale', 'aios-outputs', toolId)
   await mkdir(toolDir, { recursive: true })
 
-  await Promise.allSettled(
-    outputs.map(async ({ filename }) => {
+  const results = await Promise.allSettled(
+    outputs.map(async (item) => {
+      if (!item.filename) return item
       try {
-        const url = `http://localhost:${comfyPort}/view?filename=${encodeURIComponent(filename)}&subfolder=&type=output`
+        const subfolder = item.subfolder ?? ''
+        const url = `http://localhost:${comfyPort}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
         const res = await fetch(url)
-        if (!res.ok) return
+        if (!res.ok) return item
         const buffer = Buffer.from(await res.arrayBuffer())
-        const destName = `${executionId.slice(0, 8)}_${filename}`
+        const destName = `${executionId.slice(0, 8)}_${item.filename}`
         await writeFile(join(toolDir, destName), buffer)
+        return { ...item, path: `/api/outputs/${toolId}/${destName}` }
       } catch {
-        // Non-fatal
+        return item
       }
     })
   )
+
+  return results.map((r, i) => r.status === 'fulfilled' ? r.value : outputs[i])
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -57,11 +64,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const [row] = await db.select().from(executions).where(eq(executions.id, id))
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // Save outputs to disk when execution completes
+  // Save outputs to disk when execution completes, then update outputsJson with local paths
   if (body.status === 'completed' && body.outputsJson) {
     const [tool] = await db.select().from(tools).where(eq(tools.id, row.toolId))
     if (tool?.comfyPort) {
-      saveOutputsToDisk(body.outputsJson, tool.comfyPort, tool.id, id).catch(console.error)
+      try {
+        const saved = await saveOutputsToDisk(body.outputsJson, tool.comfyPort, tool.id, id)
+        const updatedJson = JSON.stringify(saved)
+        await db.update(executions).set({ outputsJson: updatedJson }).where(eq(executions.id, id))
+        const [updated] = await db.select().from(executions).where(eq(executions.id, id))
+        return NextResponse.json(updated)
+      } catch (err) {
+        console.error('saveOutputsToDisk failed', err)
+      }
     }
   }
 

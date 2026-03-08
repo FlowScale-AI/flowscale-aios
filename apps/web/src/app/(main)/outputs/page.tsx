@@ -204,8 +204,11 @@ export default function AssetsPage() {
                     let schema: SchemaField[] = []
                     try { schema = JSON.parse(tool.schemaJson || '[]') } catch { /* skip */ }
                     const file = 'filename' in item ? item as OutputFile : null
-                    const url = file && tool.comfyPort
-                      ? `/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(file.filename)}&type=output`
+                    const validPath = file?.path?.startsWith('/') ? file.path : null
+                    const url = file
+                      ? (validPath ?? (tool.comfyPort
+                          ? `/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(file.filename)}&type=output`
+                          : null))
                       : null
                     setLightbox({ item, url, exec, schema, comfyPort: tool.comfyPort, toolName: tool.name })
                   }} />
@@ -259,9 +262,10 @@ function OutputCard({
 
   const file = item as OutputFile
   const kind = file.kind || inferKind(file.filename)
-  const url = comfyPort
+  const validPath = file.path?.startsWith('/') ? file.path : null
+  const url = validPath ?? (comfyPort
     ? `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(file.filename)}&type=output`
-    : null
+    : null)
 
   if (kind === 'image' && url) {
     return (

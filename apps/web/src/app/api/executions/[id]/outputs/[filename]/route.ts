@@ -3,7 +3,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-const API_OUTPUTS_DIR = join(homedir(), '.flowscale', 'aios', 'api-outputs')
+const API_OUTPUTS_DIR = join(homedir(), '.flowscale', 'aios-outputs')
 
 export async function GET(
   _req: NextRequest,

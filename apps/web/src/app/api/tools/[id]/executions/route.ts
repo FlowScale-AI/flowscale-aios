@@ -10,7 +10,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { inFlightControllers } from '@/lib/inferenceRegistry'
 
-const API_OUTPUTS_DIR = join(homedir(), '.flowscale', 'aios', 'api-outputs')
+const API_OUTPUTS_DIR = join(homedir(), '.flowscale', 'aios-outputs')
 
 async function runApiInference(
   executionId: string,

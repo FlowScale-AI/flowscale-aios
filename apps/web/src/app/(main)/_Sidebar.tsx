@@ -10,6 +10,8 @@ import {
   SignOut,
   Infinity as InfinityIcon,
   Cube,
+  ImageSquare,
+  Users,
 } from 'phosphor-react'
 import type { Role } from '@/lib/auth'
 
@@ -111,10 +113,24 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
         />
 
         <NavItem
+          href="/outputs"
+          icon={ImageSquare}
+          label="Assets"
+          active={pathname === '/outputs' || pathname.startsWith('/outputs/')}
+        />
+
+        <NavItem
           href="/providers"
           icon={Plugs}
           label="Providers"
           active={pathname === '/providers' || pathname.startsWith('/providers/')}
+        />
+
+        <NavItem
+          href="/users"
+          icon={Users}
+          label="Users"
+          active={pathname === '/users' || pathname.startsWith('/users/')}
         />
 
       </div>

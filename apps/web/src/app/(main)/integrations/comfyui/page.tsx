@@ -103,7 +103,8 @@ export default function ComfyUIIntegrationPage() {
           <>
             <div className="flex items-center gap-2">
               <CheckCircle size={16} weight="fill" className="text-emerald-400" />
-              <span className="text-white font-medium">127.0.0.1:{instance.port}</span>
+              <span className="text-white font-medium">ComfyUI</span>
+              <span className="text-zinc-500 text-sm">127.0.0.1:{instance.port}</span>
             </div>
             <span className="text-zinc-600 text-sm">
               {stats?.system?.comfyui_version ?? ''}
