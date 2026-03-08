@@ -159,6 +159,15 @@ if [[ "$OS" == "Darwin" ]]; then
     info "${APP_NAME}.app already exists in /Applications — skipping packaging."
   fi
 
+  # Clean up: the cloned repo is no longer needed — the .app is self-contained.
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -d "$SCRIPT_DIR/.git" ]]; then
+    info "Cleaning up build files…"
+    cd /
+    rm -rf "$SCRIPT_DIR"
+    success "Removed cloned repository (no longer needed)."
+  fi
+
   echo ""
   success "All set. Launching FlowScale AI OS…"
   echo ""
