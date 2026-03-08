@@ -12,11 +12,10 @@
   "scripts": {
     "dev": "electron dist/main.js",
     "build": "tsc",
-    "rebuild-standalone": "node scripts/rebuild-standalone-native.js",
-    "package": "npm run rebuild-standalone && electron-builder --config electron-builder.yml --publish never",
-    "package:mac": "npm run rebuild-standalone && electron-builder --config electron-builder.yml --mac --publish never",
-    "package:linux": "npm run rebuild-standalone && electron-builder --config electron-builder.yml --linux --publish never",
-    "package:win": "npm run rebuild-standalone && electron-builder --config electron-builder.yml --win --publish never",
+    "package": "electron-builder --config electron-builder.yml --publish never",
+    "package:mac": "electron-builder --config electron-builder.yml --mac --publish never",
+    "package:linux": "electron-builder --config electron-builder.yml --linux --publish never",
+    "package:win": "electron-builder --config electron-builder.yml --win --publish never",
     "rebuild": "electron-rebuild",
     "postinstall": "electron-rebuild"
   },
