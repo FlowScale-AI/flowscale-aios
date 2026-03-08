@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -8,7 +9,6 @@ import {
   Storefront,
   GearSix,
   SignOut,
-  Infinity as InfinityIcon,
   Cube,
   ImageSquare,
 } from 'phosphor-react'
@@ -78,12 +78,16 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
   return (
     <nav className="group/sidebar relative flex flex-col bg-[var(--color-background-panel)] border-r border-white/5 transition-all duration-200 ease-in-out w-16 hover:w-[220px] hover:shadow-2xl hover:shadow-black/50 shrink-0 overflow-hidden z-50">
       {/* Logo */}
-      <div className="flex items-center gap-3 px-3 py-5 border-b border-white/5 shrink-0">
-        <div className="size-10 rounded-xl bg-emerald-600/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-          <InfinityIcon size={24} weight="bold" className="text-emerald-500" />
-        </div>
-        <span className="font-tech text-lg font-bold tracking-tight text-white whitespace-nowrap opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75">
-          FlowScale
+      <div className="flex items-center gap-2.5 px-3 py-4 border-b border-white/5 shrink-0">
+        <Image
+          src="/flowscale-icon.png"
+          alt="FlowScale"
+          width={24}
+          height={24}
+          className="shrink-0 w-4 ml-3 h-auto"
+        />
+        <span className="font-tech text-[16px] font-semibold tracking-tight text-white whitespace-nowrap opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75">
+          FlowScale AIOS
         </span>
       </div>
 

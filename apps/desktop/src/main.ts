@@ -129,6 +129,29 @@ function waitForServer(url: string, timeoutMs = 30_000): Promise<void> {
   })
 }
 
+/** Locate the system `node` binary. Returns null if not found. */
+function findSystemNode(): string | null {
+  const candidates =
+    process.platform === 'darwin'
+      ? ['/opt/homebrew/bin/node', '/usr/local/bin/node']
+      : ['/usr/bin/node', '/usr/local/bin/node']
+
+  // Also try the user's PATH (GUI apps on macOS get a minimal PATH, so
+  // we check common locations first then fall back to a shell lookup)
+  for (const p of candidates) {
+    try {
+      if (existsSync(p)) return p
+    } catch { /* skip */ }
+  }
+
+  // Shell lookup as last resort
+  try {
+    return execSync('which node', { encoding: 'utf-8' }).trim() || null
+  } catch {
+    return null
+  }
+}
+
 function startNextServer(port: number): void {
   // In production: spawn the standalone Next.js server built into the app
   const serverScript = path.join(
@@ -142,13 +165,26 @@ function startNextServer(port: number): void {
     'server.js',
   )
 
-  log.info('[server] Starting Next.js standalone server:', serverScript, 'on port', port)
+  // Prefer system `node` over the Electron binary:
+  //  - avoids a spurious Dock icon on macOS (Electron binary = GUI app)
+  //  - avoids ABI mismatch for native modules (better-sqlite3)
+  const systemNode = findSystemNode()
+  const useSystemNode = !!systemNode
 
-  // ELECTRON_RUN_AS_NODE=1 makes the Electron binary behave as plain Node.js
-  nextServer = spawn(process.execPath, [serverScript], {
-    env: { ...process.env, PORT: String(port), HOSTNAME: '127.0.0.1', ELECTRON_RUN_AS_NODE: '1' },
-    stdio: 'pipe',
-  })
+  const nodeBin = systemNode ?? process.execPath
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    PORT: String(port),
+    HOSTNAME: '127.0.0.1',
+  }
+  if (!useSystemNode) {
+    // Fallback: make the Electron binary behave as plain Node.js
+    env.ELECTRON_RUN_AS_NODE = '1'
+  }
+
+  log.info('[server] Starting Next.js standalone server:', serverScript, 'on port', port, '(node:', nodeBin, ')')
+
+  nextServer = spawn(nodeBin, [serverScript], { env, stdio: 'pipe' })
 
   nextServer.stdout?.on('data', (data: Buffer) => log.info('[next]', data.toString().trim()))
   nextServer.stderr?.on('data', (data: Buffer) => log.warn('[next]', data.toString().trim()))
