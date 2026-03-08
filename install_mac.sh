@@ -135,8 +135,10 @@ OS="$(uname -s)"
 
 if [[ "$OS" == "Darwin" ]]; then
   # macOS: package as a proper .app bundle and install to /Applications.
-  # The packaged app bundles its own Next.js standalone server, so no
-  # external web server is needed.
+  # The packaged app bundles its own Next.js standalone server (via
+  # extraResources in electron-builder.yml), so no external web server needed.
+  # The package:mac script automatically rebuilds native modules (e.g.
+  # better-sqlite3) for Electron's Node.js ABI before bundling.
   APP_NAME="FlowScale AI OS"
   APP_BUNDLE="/Applications/${APP_NAME}.app"
 
@@ -144,7 +146,7 @@ if [[ "$OS" == "Darwin" ]]; then
     info "Packaging macOS app bundle…"
     pnpm --filter @flowscale/aios-desktop package:mac
     RELEASE_APP="apps/desktop/release/mac/${APP_NAME}.app"
-    # electron-builder may put it in mac-arm64/ on Apple Silicon
+    # electron-builder puts it in mac-arm64/ on Apple Silicon
     [[ -d "$RELEASE_APP" ]] || RELEASE_APP="apps/desktop/release/mac-arm64/${APP_NAME}.app"
     [[ -d "$RELEASE_APP" ]] \
       || die "App bundle not found after packaging. Check electron-builder output."
