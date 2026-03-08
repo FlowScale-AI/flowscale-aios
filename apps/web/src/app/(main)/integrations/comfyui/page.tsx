@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
@@ -71,6 +72,7 @@ const TABS: { id: Tab; label: string }[] = [
 ]
 
 export default function ComfyUIIntegrationPage() {
+  const router = useRouter()
   const [instance, setInstance] = useState<ComfyInstance | null>(null)
   const [scanning, setScanning] = useState(false)
   const [tab, setTab] = useState<Tab>('overview')
@@ -94,6 +96,13 @@ export default function ComfyUIIntegrationPage() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 shrink-0">
+        <button
+          onClick={() => router.back()}
+          className="text-zinc-500 hover:text-zinc-200 transition-colors shrink-0"
+          title="Go back"
+        >
+          <ArrowLeft size={16} />
+        </button>
         {scanning ? (
           <div className="flex items-center gap-2 text-zinc-500 text-sm">
             <ArrowClockwise size={14} className="animate-spin" />

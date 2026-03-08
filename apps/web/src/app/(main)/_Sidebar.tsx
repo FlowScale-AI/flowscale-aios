@@ -11,7 +11,6 @@ import {
   Infinity as InfinityIcon,
   Cube,
   ImageSquare,
-  Users,
 } from 'phosphor-react'
 import type { Role } from '@/lib/auth'
 
@@ -126,12 +125,6 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
           active={pathname === '/providers' || pathname.startsWith('/providers/')}
         />
 
-        <NavItem
-          href="/users"
-          icon={Users}
-          label="Users"
-          active={pathname === '/users' || pathname.startsWith('/users/')}
-        />
 
       </div>
 
