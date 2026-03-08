@@ -13,7 +13,7 @@ import os from 'os'
 import { spawnSync, execFileSync } from 'child_process'
 import { getComfyUIPath } from '@/lib/providerSettings'
 
-const APPS_DIR = path.join(os.homedir(), '.flowscale', 'aios', 'apps')
+const APPS_DIR = path.join(os.homedir(), '.flowscale', 'apps')
 
 async function downloadModel(downloadUrl: string, destPath: string): Promise<void> {
   const res = await fetch(downloadUrl, { redirect: 'follow' })

@@ -438,6 +438,8 @@ function NodeJsTab({ toolId, inputs }: { toolId: string; inputs: Record<string, 
   const snippet =
 `import FlowScale from '@flowscale/sdk'
 
+// Only works inside an EIOS-hosted iframe app.
+// For external / standalone use, see the HTTP tab.
 const result = await FlowScale.tools.run('${toolId}', ${inputsStr})
 
 console.log(result.outputs)`
@@ -451,6 +453,63 @@ console.log(result.outputs)`
       <div>
         <p className="text-xs text-zinc-500 mb-2">Run — values reflect the current form inputs</p>
         <CopyBlock code={snippet} />
+      </div>
+    </div>
+  )
+}
+
+function HttpTab({ toolId, inputs }: { toolId: string; inputs: Record<string, unknown> }) {
+  const inputsBody = Object.keys(inputs).length === 0
+    ? '  "inputs": {}'
+    : '  "inputs": {\n' + Object.entries(inputs).map(([k, v]) => `    "${k}": ${JSON.stringify(v)}`).join(',\n') + '\n  }'
+
+  const runSnippet =
+`const BASE = 'http://localhost:14173'
+
+// 1. Execute the tool
+const res = await fetch(\`\${BASE}/api/tools/${toolId}/executions\`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Cookie': 'fs_session=<your-session-token>',
+  },
+  body: JSON.stringify({
+${inputsBody}
+  }),
+})
+
+const { executionId, promptId, comfyPort } = await res.json()
+
+// 2. Poll history until complete (ComfyUI tools)
+let outputs = []
+while (true) {
+  await new Promise(r => setTimeout(r, 2000))
+  const hist = await fetch(
+    \`\${BASE}/api/comfy/\${comfyPort}/history/\${promptId}\`,
+    { headers: { 'Cookie': 'fs_session=<your-session-token>' } }
+  ).then(r => r.json())
+  const entry = hist[promptId]
+  if (!entry?.status?.completed) continue
+  for (const node of Object.values(entry.outputs ?? {})) {
+    for (const img of node.images ?? []) {
+      outputs.push(\`\${BASE}/api/comfy/\${comfyPort}/view?filename=\${img.filename}&type=output\`)
+    }
+  }
+  break
+}
+
+console.log(outputs)`
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5">
+        <p className="text-xs text-amber-400 leading-relaxed">
+          Update <code className="bg-amber-500/10 px-1 rounded">BASE</code> if your EIOS instance is not running locally. Session tokens are obtained by logging in via <code className="bg-amber-500/10 px-1 rounded">POST /api/auth/login</code>.
+        </p>
+      </div>
+      <div>
+        <p className="text-xs text-zinc-500 mb-2">Run &amp; poll — inputs reflect current form values</p>
+        <CopyBlock code={runSnippet} />
       </div>
     </div>
   )
@@ -621,7 +680,7 @@ export default function ToolPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool?.schemaJson])
 
-  const [leftTab, setLeftTab] = useState<'form' | 'nodejs'>('form')
+  const [leftTab, setLeftTab] = useState<'form' | 'nodejs' | 'http'>('form')
   const [runningId, setRunningId] = useState<string | null>(null)
   const [latestOutputs, setLatestOutputs] = useState<OutputItem[]>([])
   const sseRef = useRef<EventSource | null>(null)
@@ -851,7 +910,7 @@ export default function ToolPage() {
             <div className="h-full flex flex-col">
               {/* Tab bar */}
               <div className="flex items-center gap-1 px-4 pt-3 pb-0 shrink-0 border-b border-white/5">
-                {(['form', 'nodejs'] as const).map((t) => (
+                {(['form', 'nodejs', 'http'] as const).map((t) => (
                   <button
                     key={t}
                     onClick={() => setLeftTab(t)}
@@ -862,7 +921,7 @@ export default function ToolPage() {
                         : 'border-transparent text-zinc-500 hover:text-zinc-300',
                     ].join(' ')}
                   >
-                    {t === 'form' ? 'Form' : 'Node.js'}
+                    {t === 'form' ? 'Form' : t === 'nodejs' ? 'Node.js' : 'HTTP'}
                   </button>
                 ))}
               </div>
@@ -893,6 +952,9 @@ export default function ToolPage() {
                 )}
                 {leftTab === 'nodejs' && (
                   <NodeJsTab toolId={tool.id} inputs={inputs} />
+                )}
+                {leftTab === 'http' && (
+                  <HttpTab toolId={tool.id} inputs={inputs} />
                 )}
               </div>
             </div>

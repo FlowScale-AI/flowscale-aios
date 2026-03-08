@@ -68,9 +68,33 @@ export interface ToolRunOptions {
   onProgress?: (progress: number, message?: string) => void;
 }
 
+export interface ToolOutputItem {
+  kind: 'image' | 'video' | 'audio' | 'file';
+  filename: string;
+  subfolder: string;
+  /** Relative URL served by the host — use directly in <img src> or fetch() */
+  path: string;
+}
+
+/**
+ * Pass as an image input to FlowScale.tools.run() to chain the output of one
+ * step into the input of the next. The bridge handles the transfer server-side.
+ *
+ * @example
+ * const step1 = await FlowScale.tools.run(TOOL_A, { '1__image': dataUrl })
+ * const step2 = await FlowScale.tools.run(TOOL_B, {
+ *   '1__image': FlowScale.tools.outputRef(step1.outputs[0]),
+ * })
+ */
+export interface OutputRef {
+  __comfy_output__: { filename: string; subfolder: string };
+}
+
 export interface ToolRunResult {
-  outputs: Record<string, unknown>;
-  executionId?: string;
+  executionId: string;
+  toolId: string;
+  status: 'completed';
+  outputs: ToolOutputItem[];
 }
 
 // ─── Provider types ───────────────────────────────────────────────────────────

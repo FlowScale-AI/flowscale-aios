@@ -1,8 +1,18 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowUpRight, Palette } from 'phosphor-react'
-import { PageTransition, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
+import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { ArrowUpRight, Warning, MagnifyingGlass, Palette, Cube } from 'phosphor-react'
+import { PageTransition, FadeIn, StaggerGrid, StaggerItem, SkeletonCard } from '@/components/ui'
+import type { AppManifest } from '@/lib/appManifest'
+
+interface InstalledApp {
+  id: string
+  displayName: string
+  source: string
+  manifest: AppManifest | null
+}
 
 // ---------------------------------------------------------------------------
 // Tool card
@@ -31,11 +41,57 @@ function CanvasCard() {
   )
 }
 
+function AppCard({ app }: { app: InstalledApp }) {
+  return (
+    <div className="group relative h-full">
+      <Link href={`/installed-apps/${app.id}`} className="block h-full">
+        <div className="relative h-full overflow-hidden rounded-lg border border-white/5 bg-[var(--color-background-panel)] p-5 transition-all duration-200 group-hover:border-zinc-700 group-hover:bg-zinc-800/50">
+          <div className="relative z-10 flex flex-col gap-3">
+            <div className="flex size-10 items-center justify-center rounded-md border border-white/10 bg-white/5 transition-colors duration-200 group-hover:bg-emerald-500/10 group-hover:border-emerald-500/20 group-hover:text-emerald-400 text-zinc-400">
+              <Cube size={20} weight="duotone" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="font-tech text-base font-medium text-zinc-100 group-hover:text-white transition-colors">
+                {app.displayName}
+              </h3>
+              <p className="text-sm text-zinc-500 line-clamp-2 leading-relaxed">
+                {app.manifest?.description || 'No description'}
+              </p>
+            </div>
+          </div>
+          {app.source === 'sideloaded' && (
+            <span className="absolute top-3 right-3 text-[9px] font-semibold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">dev</span>
+          )}
+          <div className="absolute top-5 right-5 opacity-0 -translate-x-2 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0">
+            <ArrowUpRight size={16} className="text-zinc-400" />
+          </div>
+        </div>
+      </Link>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 export default function AppsPage() {
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const { data: apps, isLoading, error } = useQuery<InstalledApp[]>({
+    queryKey: ['installed-apps'],
+    queryFn: async () => {
+      const res = await fetch('/api/apps')
+      if (!res.ok) throw new Error('Failed to fetch apps')
+      return res.json()
+    },
+    staleTime: 30_000,
+  })
+
+  const filteredApps = (apps ?? []).filter(
+    (app) => app.displayName.toLowerCase().includes(searchQuery.toLowerCase()),
+  )
+
   return (
     <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
       <div className="flex-1 px-8">
@@ -66,20 +122,71 @@ export default function AppsPage() {
                   A unified operating system for all your AI tools. Create, analyze, and build faster than ever.
                 </p>
               </div>
+
+              <div className="relative max-w-md mx-auto w-full mt-8 group">
+                <div className="absolute inset-0 bg-emerald-500/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                <div className="relative flex items-center bg-[var(--color-background-panel)] border border-white/10 rounded-xl px-4 py-3 shadow-lg focus-within:border-emerald-500/50 transition-colors">
+                  <MagnifyingGlass size={20} className="text-zinc-500 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Search apps..."
+                    className="flex-1 bg-transparent border-none outline-none text-sm text-zinc-100 placeholder-zinc-600 px-3"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
             </section>
           </FadeIn>
 
           {/* Apps Grid */}
           <section>
             <FadeIn delay={0.15}>
-              <h2 className="font-tech text-2xl font-semibold text-white mb-6">Apps</h2>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="font-tech text-2xl font-semibold text-white">Installed Apps</h2>
+                {!isLoading && !error && (
+                  <div className="text-sm text-zinc-500">
+                    {filteredApps.length + 1} {filteredApps.length + 1 === 1 ? 'app' : 'apps'} available
+                  </div>
+                )}
+              </div>
             </FadeIn>
 
-            <StaggerGrid className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              <StaggerItem key="canvas">
-                <CanvasCard />
-              </StaggerItem>
-            </StaggerGrid>
+            {isLoading && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <SkeletonCard key={i} />
+                ))}
+              </div>
+            )}
+
+            {error && (
+              <div className="flex items-center gap-3 p-4 bg-red-950/30 border border-red-900/50 rounded-lg text-red-400 text-sm">
+                <Warning size={16} weight="fill" />
+                Failed to load apps. Make sure the server is running.
+              </div>
+            )}
+
+            {!isLoading && !error && apps && apps.length > 0 && filteredApps.length === 0 && (
+              <FadeIn>
+                <div className="text-center py-12 text-zinc-500">
+                  No apps found matching &lsquo;{searchQuery}&rsquo;
+                </div>
+              </FadeIn>
+            )}
+
+            {!isLoading && !error && (
+              <StaggerGrid className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <StaggerItem key="canvas">
+                  <CanvasCard />
+                </StaggerItem>
+                {filteredApps.map((app) => (
+                  <StaggerItem key={app.id}>
+                    <AppCard app={app} />
+                  </StaggerItem>
+                ))}
+              </StaggerGrid>
+            )}
           </section>
 
         </div>
