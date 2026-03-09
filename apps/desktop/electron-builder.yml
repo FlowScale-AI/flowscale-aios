@@ -1,56 +1,57 @@
 appId: ai.flowscale.aios
 productName: FlowScale AI OS
-copyright: Copyright © 2024 FlowScale
+copyright: Copyright © 2025 FlowScale
 
 directories:
   output: release
-  buildResources: build
+  buildResources: assets
 
 files:
   - dist/**/*
-  - assets/**/*
+  - assets/splash.html
+  - assets/icon.png
+  - package.json
 
 extraResources:
   - from: ../web/.next/standalone
     to: apps/web/.next/standalone
     filter:
-      - "**/*"
-      - "!**/*.map"
-  # Static CSS/JS chunks — monorepo server.js expects them at apps/web/.next/static
+      - '**/*'
   - from: ../web/.next/static
     to: apps/web/.next/standalone/apps/web/.next/static
     filter:
-      - "**/*"
-  # Public assets
+      - '**/*'
   - from: ../web/public
     to: apps/web/.next/standalone/apps/web/public
     filter:
-      - "**/*"
+      - '**/*'
+  - from: ../../scripts
+    to: scripts
+    filter:
+      - '**/*.py'
+
+linux:
+  executableName: flowscale-aios
+  target:
+    - AppImage
+  icon: assets/icon.png
+  category: Development
+
+publish:
+  provider: generic
+  url: https://flowscale-aios.s3.us-east-1.amazonaws.com
 
 mac:
   target:
-    - target: dmg
-      arch:
-        - x64
-        - arm64
+    - dmg
+    - zip
+  icon: assets/icon.png
   category: public.app-category.developer-tools
-
-dmg:
-  writeUpdateInfo: false
-
-linux:
-  target:
-    - target: dir
-      arch:
-        - x64
-  category: Development
-  executableName: flowscale-aios
 
 win:
   target:
-    - target: nsis
-      arch:
-        - x64
+    - nsis
+  icon: assets/icon.png
 
 nsis:
   oneClick: false

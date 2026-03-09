@@ -1,4 +1,4 @@
-// EIOS local-only axios instance — no cloud auth needed
+// AIOS local-only axios instance — no cloud auth needed
 import Axios from 'axios'
 
 export const axios = Axios.create({ baseURL: '/' })

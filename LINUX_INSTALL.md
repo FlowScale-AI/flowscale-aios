@@ -6,8 +6,8 @@ You need [Node.js 22+](https://nodejs.org) and [pnpm](https://pnpm.io) installed
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/flowscale/flowscale-eios.git
-cd flowscale-eios
+git clone https://github.com/FlowScale-AI/flowscale-aios.git
+cd flowscale-aios
 
 # 2. Install dependencies
 pnpm install

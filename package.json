@@ -1,15 +1,23 @@
 {
-  "name": "flowscale-eios",
+  "name": "flowscale-aios",
   "private": true,
+  "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
     "typecheck": "turbo typecheck",
-    "lint": "turbo lint"
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "test:coverage": "turbo test:coverage",
+    "release:linux": "turbo build --force && pnpm --filter @flowscale/aios-desktop exec electron-builder --config electron-builder.yml --linux --publish never",
+    "release:mac": "turbo build --force && pnpm --filter @flowscale/aios-desktop exec electron-builder --config electron-builder.yml --mac --publish never",
+    "release:win": "turbo build --force && pnpm --filter @flowscale/aios-desktop exec electron-builder --config electron-builder.yml --win --publish never"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.18",
     "turbo": "^2.5.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.18"
   },
   "engines": {
     "node": ">=20",

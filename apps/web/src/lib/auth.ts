@@ -8,10 +8,10 @@ import type { NextRequest } from 'next/server'
 export type Role = 'admin' | 'pipeline_td' | 'dev' | 'artist'
 
 export const ROLE_NAV: Record<Role, string[]> = {
-  admin: ['/apps', '/build-tool', '/canvas', '/settings', '/users'],
-  pipeline_td: ['/apps', '/build-tool', '/canvas', '/settings', '/users'],
-  dev: ['/apps', '/build-tool', '/canvas', '/settings'],
-  artist: ['/apps', '/canvas'],
+  admin: ['/home', '/tools', '/providers', '/explore', '/canvas', '/settings', '/users', '/models', '/outputs', '/integrations', '/apps', '/build-tool'],
+  pipeline_td: ['/home', '/tools', '/providers', '/explore', '/canvas', '/settings', '/users', '/models', '/outputs', '/integrations', '/apps', '/build-tool'],
+  dev: ['/home', '/tools', '/providers', '/explore', '/canvas', '/settings', '/models', '/outputs', '/integrations', '/apps', '/build-tool'],
+  artist: ['/home', '/canvas', '/explore', '/outputs', '/apps'],
 }
 
 export function hasManagerRole(role: string): boolean {

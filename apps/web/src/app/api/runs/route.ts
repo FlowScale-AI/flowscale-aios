@@ -33,7 +33,7 @@ function toRunItem(
     cluster_id: 'local',
     team_id: 'local',
     project_id: 'local',
-    workflow_id: `eios:${ex.toolId}`,
+    workflow_id: `aios:${ex.toolId}`,
     group_id: 'STUDIO',
     status: ex.status,
     trigger_type: 'manual',
@@ -51,7 +51,7 @@ function toRunItem(
     prompt_id: ex.promptId ?? ex.id,
     progress: ex.status === 'completed' ? 100 : 0,
     can_regenerate: true,
-    project_name: 'EIOS',
+    project_name: 'AIOS',
     workflow_name: tool?.name ?? ex.toolId,
     regenerations: [],
   }

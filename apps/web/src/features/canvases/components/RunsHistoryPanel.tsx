@@ -9,23 +9,10 @@ import {
   RunsListResponse,
 } from "../api/getAllRunsList";
 import { Spinner, X } from "phosphor-react";
-import { usePodsStore } from "@/store/podsStore";
-import { isDesktop } from "@/lib/platform";
-
-const DESKTOP_OPERATOR_URL = "http://localhost:30000";
-
-/** Rewrites a stored operator proxy URL to use the current operator host:port. */
-function rewriteOperatorUrl(url: string | undefined, currentOperatorUrl: string | null): string | undefined {
-  if (!url || !currentOperatorUrl) return url;
-  const match = url.match(/(\/api\/pods\/.+)$/);
-  if (match) return `${currentOperatorUrl}${match[1]}`;
-  return url;
-}
 
 interface RunsHistoryPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  projectId?: string;
   onOutputDragStart: (filename: string, result: any) => void;
 }
 
@@ -34,12 +21,9 @@ const PAGE_SIZE = 12;
 export default function RunsHistoryPanel({
   isOpen,
   onClose,
-  projectId,
   onOutputDragStart,
 }: RunsHistoryPanelProps) {
-  const storeOperatorUrl = usePodsStore((s) => s.operatorUrl);
-  const currentOperatorUrl = storeOperatorUrl ?? (isDesktop() ? DESKTOP_OPERATOR_URL : null);
-
+  const projectId = "local";
   const [runs, setRuns] = useState<RunItem[]>([]);
   const [pageNumber, setPageNumber] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -207,7 +191,7 @@ export default function RunsHistoryPanel({
       filename: output.filename,
       label: output.label || output.filename,
       size: output.size,
-      download_url: rewriteOperatorUrl(output.url, currentOperatorUrl) || "",
+      download_url: output.url || "",
       run_id: runId,
       // kind will be determined in handleResultDrop based on content_type
     };
@@ -237,7 +221,7 @@ export default function RunsHistoryPanel({
   const renderOutputPreview = (output: RunOutput) => {
     const type = getOutputType(output);
 
-    const displayUrl = rewriteOperatorUrl(output.url, currentOperatorUrl);
+    const displayUrl = output.url;
 
     if (type === "image" && displayUrl) {
       return (

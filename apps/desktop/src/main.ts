@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, nativeImage, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeImage, session, shell } from 'electron'
 import path from 'path'
 import { spawn, type ChildProcess } from 'child_process'
 import { writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs'
@@ -6,12 +6,28 @@ import { execSync } from 'child_process'
 import log from 'electron-log'
 import { registerAuthIpc, handleOAuthCallback } from './ipc/auth.js'
 import { registerDialogIpc } from './ipc/dialog.js'
+import { registerUpdaterIpc } from './ipc/updates.js'
+import { registerReportIpc } from './ipc/report.js'
 import type { FlowscaleTokens } from './config/store.js'
 
 log.initialize()
 
 const isDev = !app.isPackaged
-const EIOS_PORT = 14173
+const AIOS_PORT_START = 14173
+
+/** Try ports starting at `start` until one is free, then return it. */
+function findAvailablePort(start: number): Promise<number> {
+  return new Promise((resolve) => {
+    const net = require('net') as typeof import('net')
+    const tryPort = (port: number): void => {
+      const server = net.createServer()
+      server.once('error', () => tryPort(port + 1))
+      server.once('listening', () => server.close(() => resolve(port)))
+      server.listen(port, '127.0.0.1')
+    }
+    tryPort(start)
+  })
+}
 
 // Set app name and desktop file name so KDE Wayland matches the window to flowscale-aios.desktop
 app.setName('flowscale-aios')
@@ -24,9 +40,9 @@ if (process.platform === 'linux') {
 // Register OAuth protocol handler before single-instance lock (Windows/Linux)
 if (process.platform !== 'darwin') {
   if (isDev) {
-    app.setAsDefaultProtocolClient('flowscaleeios', process.execPath, [__filename])
+    app.setAsDefaultProtocolClient('flowscaleaios', process.execPath, [__filename])
   } else {
-    app.setAsDefaultProtocolClient('flowscaleeios')
+    app.setAsDefaultProtocolClient('flowscaleaios')
   }
 
   if (process.platform === 'linux') {
@@ -58,12 +74,12 @@ if (process.platform !== 'darwin') {
         'Terminal=false',
         'Type=Application',
         'Categories=Development;',
-        'MimeType=x-scheme-handler/flowscaleeios;',
+        'MimeType=x-scheme-handler/flowscaleaios;',
         '',
       ].join('\n')
       writeFileSync(desktopFile, content, 'utf-8')
       execSync(`update-desktop-database ${appsDir}`)
-      execSync(`xdg-mime default flowscale-aios.desktop x-scheme-handler/flowscaleeios`)
+      execSync(`xdg-mime default flowscale-aios.desktop x-scheme-handler/flowscaleaios`)
     } catch (err) {
       log.warn('[linux] Failed to register icon/.desktop:', err)
     }
@@ -79,6 +95,7 @@ if (!gotLock) {
 
 let mainWindow: BrowserWindow | null = null
 let nextServer: ChildProcess | null = null
+let isQuitting = false
 
 function notifyOAuthComplete(tokens: FlowscaleTokens): void {
   mainWindow?.webContents.send('auth:complete', tokens)
@@ -87,7 +104,7 @@ function notifyOAuthComplete(tokens: FlowscaleTokens): void {
 // macOS: protocol URL arrives here when app is already running
 app.on('open-url', (event, url) => {
   event.preventDefault()
-  if (url.startsWith('flowscaleeios://oauth/cb')) {
+  if (url.startsWith('flowscaleaios://oauth/cb')) {
     handleOAuthCallback(url, notifyOAuthComplete)
   }
 })
@@ -115,7 +132,30 @@ function waitForServer(url: string, timeoutMs = 30_000): Promise<void> {
   })
 }
 
-function startNextServer(): void {
+/** Locate the system `node` binary. Returns null if not found. */
+function findSystemNode(): string | null {
+  const candidates =
+    process.platform === 'darwin'
+      ? ['/opt/homebrew/bin/node', '/usr/local/bin/node']
+      : ['/usr/bin/node', '/usr/local/bin/node']
+
+  // Also try the user's PATH (GUI apps on macOS get a minimal PATH, so
+  // we check common locations first then fall back to a shell lookup)
+  for (const p of candidates) {
+    try {
+      if (existsSync(p)) return p
+    } catch { /* skip */ }
+  }
+
+  // Shell lookup as last resort
+  try {
+    return execSync('which node', { encoding: 'utf-8' }).trim() || null
+  } catch {
+    return null
+  }
+}
+
+function startNextServer(port: number): void {
   // In production: spawn the standalone Next.js server built into the app
   const serverScript = path.join(
     process.resourcesPath,
@@ -128,29 +168,51 @@ function startNextServer(): void {
     'server.js',
   )
 
-  log.info('[server] Starting Next.js standalone server:', serverScript)
+  // Prefer system `node` over the Electron binary:
+  //  - avoids a spurious Dock icon on macOS (Electron binary = GUI app)
+  //  - avoids ABI mismatch for native modules (better-sqlite3)
+  const systemNode = findSystemNode()
+  const useSystemNode = !!systemNode
 
-  // ELECTRON_RUN_AS_NODE=1 makes the Electron binary behave as plain Node.js
-  nextServer = spawn(process.execPath, [serverScript], {
-    env: { ...process.env, PORT: String(EIOS_PORT), HOSTNAME: '127.0.0.1', ELECTRON_RUN_AS_NODE: '1' },
-    stdio: 'pipe',
-  })
+  const nodeBin = systemNode ?? process.execPath
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    PORT: String(port),
+    HOSTNAME: '127.0.0.1',
+  }
+  if (!useSystemNode) {
+    // Fallback: make the Electron binary behave as plain Node.js
+    env.ELECTRON_RUN_AS_NODE = '1'
+  }
+
+  log.info('[server] Starting Next.js standalone server:', serverScript, 'on port', port, '(node:', nodeBin, ')')
+
+  nextServer = spawn(nodeBin, [serverScript], { env, stdio: 'pipe' })
 
   nextServer.stdout?.on('data', (data: Buffer) => log.info('[next]', data.toString().trim()))
   nextServer.stderr?.on('data', (data: Buffer) => log.warn('[next]', data.toString().trim()))
 
-  nextServer.on('exit', (code) => {
-    log.warn('[server] Next.js server exited with code', code)
+  nextServer.on('exit', (code, signal) => {
+    log.warn('[server] Next.js server exited with code', code, 'signal', signal)
+    // Always restart unless the app is quitting — even code 0 exits need restart
+    // because the server may exit cleanly while background work (e.g. inference)
+    // is still in progress.
+    if (!isQuitting) {
+      log.info('[server] Restarting Next.js server…')
+      setTimeout(() => startNextServer(port), 1000)
+    }
   })
 }
 
-function createWindow(): BrowserWindow {
+function createWindow(port: number): BrowserWindow {
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 900,
     minHeight: 600,
     title: 'FlowScale AI OS',
+    backgroundColor: '#09090b',
+    show: false,
     icon: nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'icon.png')),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -160,20 +222,19 @@ function createWindow(): BrowserWindow {
     },
   })
 
-  const url = `http://127.0.0.1:${EIOS_PORT}`
+  // Show splash screen immediately, then swap to real app when server is ready
+  const splashPath = path.join(__dirname, '..', 'assets', 'splash.html')
+  win.loadFile(splashPath).then(() => win.show())
 
-  if (isDev) {
-    waitForServer(url)
-      .then(() => win.loadURL(url))
-      .catch((err) => {
-        log.error('[window] Dev server not ready:', err)
-        win.loadURL(url)
-      })
-  } else {
-    waitForServer(url, 60_000)
-      .then(() => win.loadURL(url))
-      .catch(() => win.loadURL(url))
-  }
+  const url = `http://127.0.0.1:${port}`
+  const timeout = isDev ? 30_000 : 60_000
+
+  waitForServer(url, timeout)
+    .then(() => win.loadURL(url))
+    .catch((err) => {
+      log.error('[window] Server not ready:', err)
+      win.loadURL(url)
+    })
 
   // Open external URLs (window.open / <a target="_blank">) in the system browser
   win.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
@@ -191,10 +252,12 @@ app.whenReady().then(async () => {
 
   registerAuthIpc()
   registerDialogIpc()
+  registerUpdaterIpc()
+  registerReportIpc()
 
   // macOS: register protocol after ready
   if (process.platform === 'darwin') {
-    app.setAsDefaultProtocolClient('flowscaleeios')
+    app.setAsDefaultProtocolClient('flowscaleaios')
   }
 
   // Inject CORS headers for localhost so the renderer can talk to ComfyUI directly if ever needed
@@ -209,21 +272,23 @@ app.whenReady().then(async () => {
     },
   )
 
+  const port = isDev ? AIOS_PORT_START : await findAvailablePort(AIOS_PORT_START)
+
   if (!isDev) {
-    startNextServer()
+    startNextServer(port)
   }
 
-  mainWindow = createWindow()
+  mainWindow = createWindow(port)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createWindow()
+      mainWindow = createWindow(port)
     }
   })
 })
 
 app.on('second-instance', (_event, argv) => {
-  const protocolUrl = argv.find((arg) => arg.startsWith('flowscaleeios://'))
+  const protocolUrl = argv.find((arg) => arg.startsWith('flowscaleaios://'))
   if (protocolUrl) {
     handleOAuthCallback(protocolUrl, notifyOAuthComplete)
   }
@@ -239,9 +304,77 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', () => {
-  if (nextServer) {
-    nextServer.kill()
-    nextServer = null
+/** Check if the local inference server (Python) is running on port 8765. */
+function isInferenceRunning(): boolean {
+  try {
+    const pid = require('fs').readFileSync(
+      path.join(app.getPath('home'), '.flowscale', 'aios', 'inference-server.pid'),
+      'utf-8',
+    ).trim()
+    if (!pid) return false
+    process.kill(Number(pid), 0) // signal 0 = existence check
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Kill the inference server by PID + port. */
+function killInferenceServer(): void {
+  try {
+    const pidFile = path.join(app.getPath('home'), '.flowscale', 'aios', 'inference-server.pid')
+    const pid = require('fs').readFileSync(pidFile, 'utf-8').trim()
+    if (pid) {
+      process.kill(Number(pid), 'SIGKILL')
+      require('fs').unlinkSync(pidFile)
+    }
+  } catch { /* ignore */ }
+  // Also kill anything listening on port 8765
+  try {
+    execSync('lsof -ti TCP:8765 -sTCP:LISTEN | xargs kill -9', { stdio: 'ignore' })
+  } catch { /* nothing on port */ }
+}
+
+app.on('before-quit', async (event) => {
+  if (isQuitting) {
+    // Second pass — actually quit, clean up the Next.js server
+    if (nextServer) {
+      nextServer.kill()
+      nextServer = null
+    }
+    return
+  }
+
+  if (isInferenceRunning()) {
+    event.preventDefault()
+    const { response } = await dialog.showMessageBox({
+      type: 'question',
+      buttons: ['Stop & Quit', 'Keep Running & Quit', 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+      title: 'Inference Server Running',
+      message: 'The local inference server is still running.',
+      detail: 'Would you like to stop it before quitting, or keep it running in the background?',
+    })
+
+    if (response === 2) {
+      // Cancel — don't quit
+      return
+    }
+
+    if (response === 0) {
+      // Stop & Quit
+      killInferenceServer()
+    }
+    // response 1 = Keep Running & Quit — leave it running
+
+    isQuitting = true
+    app.quit()
+  } else {
+    // No inference server — clean up and quit normally
+    if (nextServer) {
+      nextServer.kill()
+      nextServer = null
+    }
   }
 })

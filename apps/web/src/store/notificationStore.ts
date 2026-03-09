@@ -1,4 +1,4 @@
-// Minimal notification store for EIOS — no cloud auth, no UI notifications library needed.
+// Minimal notification store for AIOS — no cloud auth, no UI notifications library needed.
 // Logs to console; replace with a toast library if needed.
 
 interface Notification {

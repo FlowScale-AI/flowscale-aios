@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { ImageSquare, Clock, Hash, ArrowClockwise, X, DownloadSimple } from 'phosphor-react'
+import { ImageSquare, Clock, Hash, ArrowClockwise, X, DownloadSimple, Wrench, User } from 'phosphor-react'
 import { LottieSpinner, StaggerGrid, StaggerItem } from '@/components/ui'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -32,6 +32,7 @@ interface Execution {
   status: string
   createdAt: number
   completedAt: number | null
+  createdBy: string | null
 }
 
 type OutputFile = { filename: string; kind: string; path?: string }
@@ -65,7 +66,7 @@ export default function AssetsPage() {
   const [executions, setExecutions] = useState<Execution[]>([])
   const [loadingTools, setLoadingTools] = useState(true)
   const [loadingExecs, setLoadingExecs] = useState(false)
-  const [lightbox, setLightbox] = useState<{ item: OutputItem; url: string | null; exec: Execution; schema: SchemaField[]; comfyPort: number | null } | null>(null)
+  const [lightbox, setLightbox] = useState<{ item: OutputItem; url: string | null; exec: Execution; schema: SchemaField[]; comfyPort: number | null; toolName: string } | null>(null)
 
   // Fetch all tools
   useEffect(() => {
@@ -199,14 +200,17 @@ export default function AssetsPage() {
             <StaggerGrid className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {allOutputs.map(({ exec, item, tool }, i) => (
                 <StaggerItem key={`${exec.id}-${i}`}>
-                  <OutputCard item={item} exec={exec} comfyPort={tool.comfyPort} onClick={() => {
+                  <OutputCard item={item} exec={exec} comfyPort={tool.comfyPort} toolName={tool.name} onClick={() => {
                     let schema: SchemaField[] = []
                     try { schema = JSON.parse(tool.schemaJson || '[]') } catch { /* skip */ }
                     const file = 'filename' in item ? item as OutputFile : null
-                    const url = file && tool.comfyPort
-                      ? `/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(file.filename)}&type=output`
+                    const validPath = file?.path?.startsWith('/') ? file.path : null
+                    const url = file
+                      ? (validPath ?? (tool.comfyPort
+                          ? `/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(file.filename)}&type=output`
+                          : null))
                       : null
-                    setLightbox({ item, url, exec, schema, comfyPort: tool.comfyPort })
+                    setLightbox({ item, url, exec, schema, comfyPort: tool.comfyPort, toolName: tool.name })
                   }} />
                 </StaggerItem>
               ))}
@@ -227,11 +231,13 @@ function OutputCard({
   item,
   exec,
   comfyPort,
+  toolName,
   onClick,
 }: {
   item: OutputItem
   exec: Execution
   comfyPort: number | null
+  toolName: string
   onClick: () => void
 }) {
   const cardClass = "group flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50 hover:border-emerald-500/30 hover:shadow-xl hover:shadow-emerald-900/10 transition-all duration-200 text-left w-full cursor-pointer"
@@ -245,8 +251,9 @@ function OutputCard({
           </p>
         </div>
         <div className="px-3 py-2 bg-[#18181b] border-t border-white/5">
-          <p className="text-[10px] text-zinc-500 flex items-center gap-2">
-            <Clock size={10} /> {timeAgo(exec.createdAt)}
+          <p className="text-[10px] text-zinc-400 truncate mb-0.5">{exec.createdBy ?? 'unknown'}</p>
+          <p className="text-[10px] text-zinc-600 flex items-center gap-1.5">
+            <Clock size={9} /> {timeAgo(exec.createdAt)}
           </p>
         </div>
       </button>
@@ -255,9 +262,10 @@ function OutputCard({
 
   const file = item as OutputFile
   const kind = file.kind || inferKind(file.filename)
-  const url = comfyPort
+  const validPath = file.path?.startsWith('/') ? file.path : null
+  const url = validPath ?? (comfyPort
     ? `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(file.filename)}&type=output`
-    : null
+    : null)
 
   if (kind === 'image' && url) {
     return (
@@ -271,9 +279,9 @@ function OutputCard({
           />
         </div>
         <div className="px-3 py-2 bg-[#18181b] border-t border-white/5">
-          <p className="text-xs text-zinc-300 truncate mb-1">{file.filename}</p>
-          <p className="text-[10px] text-zinc-500 flex items-center gap-2">
-            <Clock size={10} /> {timeAgo(exec.createdAt)}
+          <p className="text-[10px] text-zinc-400 truncate mb-0.5">{exec.createdBy ?? 'unknown'}</p>
+          <p className="text-[10px] text-zinc-600 flex items-center gap-1.5">
+            <Clock size={9} /> {timeAgo(exec.createdAt)}
           </p>
         </div>
       </button>
@@ -287,9 +295,9 @@ function OutputCard({
           <video src={url} className="w-full h-full object-cover" muted loop onMouseEnter={(e) => e.currentTarget.play()} onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0 }} />
         </div>
         <div className="px-3 py-2 bg-[#18181b] border-t border-white/5">
-          <p className="text-xs text-zinc-300 truncate mb-1">{file.filename}</p>
-          <p className="text-[10px] text-zinc-500 flex items-center gap-2">
-            <Clock size={10} /> {timeAgo(exec.createdAt)}
+          <p className="text-[10px] text-zinc-400 truncate mb-0.5">{exec.createdBy ?? 'unknown'}</p>
+          <p className="text-[10px] text-zinc-600 flex items-center gap-1.5">
+            <Clock size={9} /> {timeAgo(exec.createdAt)}
           </p>
         </div>
       </button>
@@ -303,9 +311,9 @@ function OutputCard({
           <audio controls src={url} className="w-full" onClick={(e) => e.stopPropagation()} />
         </div>
         <div className="px-3 py-2 bg-[#18181b] border-t border-white/5">
-          <p className="text-xs text-zinc-300 truncate mb-1">{file.filename}</p>
-          <p className="text-[10px] text-zinc-500 flex items-center gap-2">
-            <Clock size={10} /> {timeAgo(exec.createdAt)}
+          <p className="text-[10px] text-zinc-400 truncate mb-0.5">{exec.createdBy ?? 'unknown'}</p>
+          <p className="text-[10px] text-zinc-600 flex items-center gap-1.5">
+            <Clock size={9} /> {timeAgo(exec.createdAt)}
           </p>
         </div>
       </button>
@@ -314,7 +322,7 @@ function OutputCard({
 
   // Text/file fallback
   if (kind === 'file' && url) {
-    return <TextFileCard url={url} filename={file.filename} exec={exec} onClick={onClick} />
+    return <TextFileCard url={url} filename={file.filename} exec={exec} toolName={toolName} onClick={onClick} />
   }
 
   // Model files
@@ -324,9 +332,9 @@ function OutputCard({
         <span className="text-2xl text-zinc-700">{'\u2B21'}</span>
       </div>
       <div className="px-3 py-2 bg-[#18181b] border-t border-white/5">
-        <p className="text-xs text-zinc-300 truncate mb-1">{file.filename}</p>
-        <p className="text-[10px] text-zinc-500 flex items-center gap-2">
-          <Clock size={10} /> {timeAgo(exec.createdAt)}
+        <p className="text-[10px] text-zinc-500 truncate mb-0.5">{toolName}</p>
+        <p className="text-[10px] text-zinc-600 flex items-center gap-1.5">
+          <Clock size={9} /> {timeAgo(exec.createdAt)}
         </p>
       </div>
     </button>
@@ -339,7 +347,7 @@ function DetailPanel({
   lightbox,
   onClose,
 }: {
-  lightbox: { item: OutputItem; url: string | null; exec: Execution; schema: SchemaField[]; comfyPort: number | null }
+  lightbox: { item: OutputItem; url: string | null; exec: Execution; schema: SchemaField[]; comfyPort: number | null; toolName: string }
   onClose: () => void
 }) {
   const item = lightbox.item
@@ -401,6 +409,12 @@ function DetailPanel({
             <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Metadata</p>
             <div className="flex items-center gap-2 text-xs text-zinc-400">
               <Clock size={11} /> {timeAgo(lightbox.exec.createdAt)}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <User size={11} /> {lightbox.exec.createdBy ?? 'unknown'}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <Wrench size={11} /> {lightbox.toolName}
             </div>
             {lightbox.exec.seed != null && (
               <div className="flex items-center gap-2 text-xs text-zinc-400">
@@ -479,7 +493,7 @@ function WorkflowInputs({ exec, schema }: { exec: Execution; schema: SchemaField
 
 // ─── Text File Card ───────────────────────────────────────────────────────────
 
-function TextFileCard({ url, filename, exec, onClick }: { url: string; filename: string; exec: Execution; onClick: () => void }) {
+function TextFileCard({ url, filename, exec, toolName, onClick }: { url: string; filename: string; exec: Execution; toolName: string; onClick: () => void }) {
   const [text, setText] = useState<string | null>(null)
 
   useEffect(() => {
@@ -497,9 +511,9 @@ function TextFileCard({ url, filename, exec, onClick }: { url: string; filename:
         </p>
       </div>
       <div className="px-3 py-2 bg-[#18181b] border-t border-white/5">
-        <p className="text-xs text-zinc-300 truncate mb-1">{filename}</p>
-        <p className="text-[10px] text-zinc-500 flex items-center gap-2">
-          <Clock size={10} /> {timeAgo(exec.createdAt)}
+        <p className="text-[10px] text-zinc-500 truncate mb-0.5">{toolName}</p>
+        <p className="text-[10px] text-zinc-600 flex items-center gap-1.5">
+          <Clock size={9} /> {timeAgo(exec.createdAt)}
         </p>
       </div>
     </button>

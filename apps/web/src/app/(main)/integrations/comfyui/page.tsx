@@ -1,13 +1,17 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
   ArrowLeft,
   CheckCircle,
+  Eye,
+  EyeSlash,
   Flask as FlaskConical,
   Gear,
+  Key,
   MagicWand,
   Monitor,
   Plus,
@@ -18,6 +22,7 @@ import {
   Wrench,
   X,
 } from 'phosphor-react'
+import { getComfyOrgApiKey, setComfyOrgApiKey } from '@/lib/platform'
 import { LottieSpinner, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { ToolTestPlayground } from '@/components/ToolTestPlayground'
@@ -67,6 +72,7 @@ const TABS: { id: Tab; label: string }[] = [
 ]
 
 export default function ComfyUIIntegrationPage() {
+  const router = useRouter()
   const [instance, setInstance] = useState<ComfyInstance | null>(null)
   const [scanning, setScanning] = useState(false)
   const [tab, setTab] = useState<Tab>('overview')
@@ -90,6 +96,13 @@ export default function ComfyUIIntegrationPage() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 shrink-0">
+        <button
+          onClick={() => router.back()}
+          className="text-zinc-500 hover:text-zinc-200 transition-colors shrink-0"
+          title="Go back"
+        >
+          <ArrowLeft size={16} />
+        </button>
         {scanning ? (
           <div className="flex items-center gap-2 text-zinc-500 text-sm">
             <ArrowClockwise size={14} className="animate-spin" />
@@ -99,7 +112,8 @@ export default function ComfyUIIntegrationPage() {
           <>
             <div className="flex items-center gap-2">
               <CheckCircle size={16} weight="fill" className="text-emerald-400" />
-              <span className="text-white font-medium">127.0.0.1:{instance.port}</span>
+              <span className="text-white font-medium">ComfyUI</span>
+              <span className="text-zinc-500 text-sm">127.0.0.1:{instance.port}</span>
             </div>
             <span className="text-zinc-600 text-sm">
               {stats?.system?.comfyui_version ?? ''}
@@ -187,6 +201,7 @@ type ToolRow = {
   name: string
   description: string | null
   status: string
+  engine: string
   createdAt: number
 }
 
@@ -201,7 +216,7 @@ type FullToolDetails = {
   workflowHash: string
 }
 
-type EditTab = 'configure' | 'test' | 'deploy'
+type EditTab = 'configure' | 'test'
 
 function ToolsTab() {
   const [tools, setTools] = useState<ToolRow[] | null>(null)
@@ -214,8 +229,10 @@ function ToolsTab() {
     try {
       const r = await fetch('/api/tools')
       const data: ToolRow[] = await r.json()
-      setTools(data)
-      if (!selectedId && !creating && data.length > 0) setSelectedId(data[0].id)
+      const filtered = data.filter((t) => t.engine === 'comfyui')
+      setTools(filtered)
+      if (selectedId && !filtered.find((t) => t.id === selectedId)) setSelectedId(null)
+      else if (!selectedId && !creating && filtered.length > 0) setSelectedId(filtered[0].id)
     } catch {
       setError('Failed to load tools')
     } finally {
@@ -230,9 +247,12 @@ function ToolsTab() {
     setSelectedId(null)
   }
 
+  const [freshlyCreatedId, setFreshlyCreatedId] = useState<string | null>(null)
+
   const handleCreated = (id: string) => {
     setCreating(false)
     setSelectedId(id)
+    setFreshlyCreatedId(id)
     fetchTools()
   }
 
@@ -309,7 +329,7 @@ function ToolsTab() {
         {creating ? (
           <NewToolPanel onCreated={handleCreated} onCancel={handleCancelCreate} />
         ) : selectedId ? (
-          <ToolEditPanel key={selectedId} toolId={selectedId} onToolUpdated={fetchTools} onToolDeleted={() => { setSelectedId(null); fetchTools() }} />
+          <ToolEditPanel key={selectedId} toolId={selectedId} initialTab={freshlyCreatedId === selectedId ? 'test' : 'configure'} onToolUpdated={fetchTools} onToolDeleted={() => { setSelectedId(null); fetchTools() }} />
         ) : (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-zinc-600">
             <Wrench size={32} />
@@ -682,12 +702,14 @@ function NewToolConfigure({
 
 // ─── Tool Edit Panel ──────────────────────────────────────────────────────────
 
-function ToolEditPanel({ toolId, onToolUpdated, onToolDeleted }: { toolId: string; onToolUpdated: () => void; onToolDeleted: () => void }) {
+function ToolEditPanel({ toolId, initialTab = 'configure', onToolUpdated, onToolDeleted }: { toolId: string; initialTab?: EditTab; onToolUpdated: () => void; onToolDeleted: () => void }) {
   const [tool, setTool] = useState<FullToolDetails | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<EditTab>('configure')
+  const [activeTab, setActiveTab] = useState<EditTab>(initialTab)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [deployStatus, setDeployStatus] = useState<'idle' | 'deploying' | 'done' | 'error'>('idle')
+  const [deployError, setDeployError] = useState('')
 
   const loadTool = useCallback(async () => {
     setLoading(true)
@@ -707,13 +729,31 @@ function ToolEditPanel({ toolId, onToolUpdated, onToolDeleted }: { toolId: strin
     onToolDeleted()
   }
 
+  const handleDeploy = async () => {
+    setDeployStatus('deploying')
+    setDeployError('')
+    try {
+      const res = await fetch(`/api/tools/${toolId}/deploy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (!res.ok) { const e = await res.json(); setDeployError(e.error ?? 'Deploy failed'); setDeployStatus('error'); return }
+      setDeployStatus('done')
+      loadTool()
+      onToolUpdated()
+    } catch {
+      setDeployError('Deploy failed')
+      setDeployStatus('error')
+    }
+  }
+
   if (loading) return <div className="flex items-center justify-center h-full"><Spinner /></div>
   if (!tool) return <div className="px-6 py-4"><ErrorMsg msg="Tool not found" /></div>
 
   const EDIT_TABS: { id: EditTab; label: string; icon: React.ElementType }[] = [
     { id: 'configure', label: 'Configure', icon: Gear },
     { id: 'test', label: 'Test', icon: FlaskConical },
-    { id: 'deploy', label: 'Deploy', icon: RocketLaunch },
   ]
 
   return (
@@ -737,6 +777,25 @@ function ToolEditPanel({ toolId, onToolUpdated, onToolDeleted }: { toolId: strin
           </div>
           {tool.description && <p className="text-xs text-zinc-500 truncate">{tool.description}</p>}
         </div>
+        {/* Deploy button */}
+        {deployStatus === 'done' ? (
+          <div className="flex items-center gap-1.5 text-emerald-400 text-xs font-medium shrink-0">
+            <CheckCircle size={13} weight="fill" /> Deployed
+          </div>
+        ) : (
+          <button
+            onClick={handleDeploy}
+            disabled={deployStatus === 'deploying'}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-white text-black text-xs font-semibold rounded-md disabled:opacity-50 transition-colors"
+            title={deployError || undefined}
+          >
+            {deployStatus === 'deploying'
+              ? <ArrowClockwise size={12} className="animate-spin" />
+              : <RocketLaunch size={12} weight="fill" />}
+            {deployStatus === 'deploying' ? 'Deploying…' : tool.status === 'production' ? 'Redeploy' : 'Deploy'}
+          </button>
+        )}
+        {/* Delete button */}
         {confirmDelete ? (
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs text-zinc-400">Delete?</span>
@@ -786,14 +845,11 @@ function ToolEditPanel({ toolId, onToolUpdated, onToolDeleted }: { toolId: strin
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto px-6 py-5">
+      <div className={['flex-1', activeTab === 'test' ? 'overflow-hidden' : 'overflow-y-auto px-6 py-5'].join(' ')}>
         {activeTab === 'configure' && (
-          <ConfigurePanel tool={tool} onSaved={() => { loadTool(); onToolUpdated() }} />
+          <ConfigurePanel tool={tool} onSaved={() => { loadTool(); onToolUpdated(); setActiveTab('test') }} />
         )}
         {activeTab === 'test' && <TestPanel tool={tool} />}
-        {activeTab === 'deploy' && (
-          <DeployPanel tool={tool} onDeployed={() => { loadTool(); onToolUpdated() }} />
-        )}
       </div>
     </div>
   )
@@ -1085,70 +1141,6 @@ function TestPanel({ tool }: { tool: FullToolDetails }) {
   )
 }
 
-// ─── Deploy Panel ─────────────────────────────────────────────────────────────
-
-function DeployPanel({ tool, onDeployed }: { tool: FullToolDetails; onDeployed: () => void }) {
-  const [status, setStatus] = useState<'idle' | 'deploying' | 'done' | 'error'>('idle')
-  const [error, setError] = useState('')
-
-  const handleDeploy = async () => {
-    setStatus('deploying')
-    setError('')
-    try {
-      const res = await fetch(`/api/tools/${tool.id}/deploy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-      if (!res.ok) { const e = await res.json(); setError(e.error ?? 'Deploy failed'); setStatus('error'); return }
-      setStatus('done')
-      onDeployed()
-    } catch {
-      setError('Deploy failed')
-      setStatus('error')
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-4 max-w-md">
-      <div className="p-4 bg-zinc-900/50 border border-white/5 rounded-xl flex flex-col gap-2 text-sm">
-        <div className="flex justify-between">
-          <span className="text-zinc-500">Status</span>
-          <span className={tool.status === 'production' ? 'text-emerald-400' : 'text-zinc-400'}>
-            {tool.status}
-          </span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-zinc-500">Tool ID</span>
-          <span className="text-zinc-400 font-mono text-xs truncate max-w-[180px]">{tool.id}</span>
-        </div>
-      </div>
-
-      {tool.status === 'production' && (
-        <p className="text-xs text-zinc-500">This tool is already in production. Redeploying will pin the latest configuration.</p>
-      )}
-
-      {error && <ErrorMsg msg={error} />}
-
-      {status === 'done' ? (
-        <div className="flex items-center gap-2 text-emerald-400 text-sm">
-          <CheckCircle size={16} weight="fill" /> Deployed successfully
-        </div>
-      ) : (
-        <button
-          onClick={handleDeploy}
-          disabled={status === 'deploying'}
-          className="self-start flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md disabled:opacity-50 transition-colors"
-        >
-          {status === 'deploying' && <ArrowClockwise size={14} className="animate-spin" />}
-          <RocketLaunch size={14} weight="fill" />
-          {status === 'deploying' ? 'Deploying…' : tool.status === 'production' ? 'Redeploy' : 'Deploy to Production'}
-        </button>
-      )}
-    </div>
-  )
-}
-
 // ─── No Instance ──────────────────────────────────────────────────────────────
 
 function NoInstance({ onRefresh, scanning }: { onRefresh: () => void; scanning: boolean }) {
@@ -1223,7 +1215,142 @@ function OverviewTab({ stats }: { stats: SysInfo | null }) {
           </div>
         </Section>
       )}
+
+      <ComfyOrgApiKeySection />
     </div>
+  )
+}
+
+// ─── ComfyOrg API Key ─────────────────────────────────────────────────────────
+
+function ComfyOrgApiKeySection() {
+  const [key, setKey] = useState('')
+  const [show, setShow] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    // Load from server-side storage; fall back to localStorage for backwards compat
+    fetch('/api/settings/comfyorg-key')
+      .then((r) => r.json())
+      .then((data: { configured?: boolean }) => {
+        if (!data.configured) {
+          // Migrate from localStorage if present
+          const local = getComfyOrgApiKey()
+          if (local) {
+            setKey(local)
+          }
+        }
+      })
+      .catch(() => {
+        setKey(getComfyOrgApiKey())
+      })
+  }, [])
+
+  const handleSave = async () => {
+    const trimmed = key.trim()
+    // Save server-side (used by SDK / API routes)
+    await fetch('/api/settings/comfyorg-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: trimmed }),
+    })
+    // Also keep localStorage in sync (used by browser tool runner)
+    setComfyOrgApiKey(trimmed)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  const handleClear = async () => {
+    setKey('')
+    await fetch('/api/settings/comfyorg-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: '' }),
+    })
+    setComfyOrgApiKey('')
+    setSaved(false)
+  }
+
+  return (
+    <Section title="ComfyUI API Key">
+      <div className="bg-white/5 rounded-xl p-4 space-y-4">
+        <div className="flex items-start gap-3">
+          <Key size={16} className="text-zinc-400 mt-0.5 shrink-0" />
+          <div className="space-y-2 flex-1 min-w-0">
+            <p className="text-sm text-zinc-300">
+              Required for workflows that use <span className="text-white font-medium">API nodes</span> (OpenAI, Stability, Flux, Kling, etc.).
+              These nodes call external services through ComfyUI&apos;s API proxy and need a ComfyOrg API key for authentication.
+            </p>
+
+            {/* Input */}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={show ? 'text' : 'password'}
+                  value={key}
+                  onChange={(e) => { setKey(e.target.value); setSaved(false) }}
+                  placeholder="comfyui-xxxxxxxx..."
+                  spellCheck={false}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShow(!show)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  {show ? <EyeSlash size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              <button
+                onClick={() => void handleSave()}
+                disabled={!key.trim()}
+                className="px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg transition-colors shrink-0"
+              >
+                {saved ? 'Saved' : 'Save'}
+              </button>
+              {key && (
+                <button
+                  onClick={handleClear}
+                  className="px-3 py-2 text-sm text-zinc-400 hover:text-red-400 border border-zinc-700 hover:border-red-500/30 rounded-lg transition-colors shrink-0"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {/* Instructions */}
+            <details className="group">
+              <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-400 transition-colors select-none">
+                How to get an API key
+              </summary>
+              <div className="mt-3 space-y-2 text-xs text-zinc-400 bg-zinc-900/50 rounded-lg p-3 border border-zinc-800">
+                <ol className="list-decimal list-inside space-y-1.5">
+                  <li>
+                    Go to{' '}
+                    <a
+                      href="https://platform.comfy.org/login"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
+                    >
+                      platform.comfy.org
+                    </a>{' '}
+                    and sign in (or create an account)
+                  </li>
+                  <li>Navigate to <span className="text-zinc-300">API Keys</span> in the dashboard</li>
+                  <li>Click <span className="text-zinc-300">Create API Key</span> and copy the generated key</li>
+                  <li>Paste it above and click <span className="text-zinc-300">Save</span></li>
+                </ol>
+                <p className="pt-1.5 border-t border-zinc-800 text-zinc-500">
+                  The key is stored locally in your browser and sent to ComfyUI with each workflow execution.
+                  API node usage is billed through your ComfyOrg account.
+                </p>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+    </Section>
   )
 }
 

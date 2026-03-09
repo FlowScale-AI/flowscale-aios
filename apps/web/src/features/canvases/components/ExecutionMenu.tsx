@@ -22,31 +22,38 @@ interface ResultItem {
 interface ExecutionMenuProps {
   executionState: ExecutionState;
   activeToolId?: string;
-  projectId?: string;
   onRunGeneration: () => void;
   onStopGeneration: () => void;
   onResultDragStart: (filename: string, result: any) => void;
   onReset: () => void;
+  readOnly?: boolean;
 }
 
 export default function ExecutionMenu({
   executionState,
   activeToolId,
-  projectId,
   onRunGeneration,
   onStopGeneration,
   onResultDragStart,
   onReset,
+  readOnly = false,
 }: ExecutionMenuProps) {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
 
-  const comfyPort = typeof window !== "undefined"
-    ? (() => {
-        const url = localStorage.getItem("flowscale_comfyui_url") || "http://localhost:8188";
-        try { return Number(new URL(url).port || 8188); } catch { return 8188; }
-      })()
-    : 8188;
+  const comfyPort =
+    typeof window !== "undefined"
+      ? (() => {
+          const url =
+            localStorage.getItem("flowscale_comfyui_url") ||
+            "http://localhost:8188";
+          try {
+            return Number(new URL(url).port || 8188);
+          } catch {
+            return 8188;
+          }
+        })()
+      : 8188;
 
   // Accumulated results from all generations
   const [accumulatedResults, setAccumulatedResults] = useState<
@@ -88,7 +95,7 @@ export default function ExecutionMenu({
   return (
     <>
       {/* Results Pill - show accumulated results */}
-      {Object.keys(accumulatedResults).length > 0 && (
+      {!readOnly && Object.keys(accumulatedResults).length > 0 && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex flex-col items-center gap-3 z-20">
           <ResultsPill
             results={accumulatedResults}
@@ -170,57 +177,83 @@ export default function ExecutionMenu({
       {/* Control Button */}
       <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-20">
         <div className="flex items-center gap-2 bg-[#111] border border-white/10 rounded-full p-2 px-3 shadow-2xl backdrop-blur-sm transition-transform hover:scale-105 active:scale-95 duration-200">
-          {executionState.status === "submitting" ||
-          executionState.status === "running" ? (
-            <button
-              onClick={onStopGeneration}
-              className="bg-red-600 hover:bg-red-500 text-white rounded-full px-4 py-1.5 text-xs font-medium flex items-center gap-2 transition-colors shadow-[0_0_20px_rgba(220,38,38,0.3)] hover:shadow-[0_0_25px_rgba(220,38,38,0.5)]"
-            >
-              <Icon icon="solar:stop-circle-bold" />
-              Stop Generation
-            </button>
-          ) : (
-            <Tooltip
-              content={
-                !activeToolId ? "Select a tool to enable" : "Run Generation"
-              }
-              side="top"
-            >
-              <button
-                onClick={onRunGeneration}
-                disabled={!activeToolId}
-                className={`rounded-full px-4 py-1.5 text-xs font-medium flex items-center gap-2 transition-colors ${
-                  activeToolId
-                    ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_25px_rgba(5,150,105,0.5)]"
-                    : "bg-zinc-700 text-zinc-500 cursor-not-allowed"
-                }`}
-              >
-                <Icon icon="solar:play-circle-bold" className="pointer-events-none" />
-                Run Generation
-              </button>
-            </Tooltip>
-          )}
-          <div className="w-px h-5 bg-white/10" />
+          {!readOnly && (
+            <>
+              {executionState.status === "submitting" ||
+              executionState.status === "running" ? (
+                <button
+                  onClick={onStopGeneration}
+                  className="bg-red-600 hover:bg-red-500 text-white rounded-full px-4 py-1.5 text-xs font-medium flex items-center gap-2 transition-colors shadow-[0_0_20px_rgba(220,38,38,0.3)] hover:shadow-[0_0_25px_rgba(220,38,38,0.5)]"
+                >
+                  <Icon icon="solar:stop-circle-bold" />
+                  Stop Generation
+                </button>
+              ) : (
+                <Tooltip
+                  content={
+                    !activeToolId ? "Select a tool to enable" : "Run Generation"
+                  }
+                  side="top"
+                >
+                  <button
+                    onClick={onRunGeneration}
+                    disabled={!activeToolId}
+                    className={`rounded-full px-4 py-1.5 text-xs font-medium flex items-center gap-2 transition-colors ${
+                      activeToolId
+                        ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_20px_rgba(5,150,105,0.3)] hover:shadow-[0_0_25px_rgba(5,150,105,0.5)]"
+                        : "bg-zinc-700 text-zinc-500 cursor-not-allowed"
+                    }`}
+                  >
+                    <Icon
+                      icon="solar:play-circle-bold"
+                      className="pointer-events-none"
+                    />
+                    Run Generation
+                  </button>
+                </Tooltip>
+              )}
+              <div className="w-px h-5 bg-white/10" />
 
-          {/* History Button */}
-          <Tooltip content="Generation History" side="top">
-            <button
-              onClick={() => { setIsHistoryOpen(true); setIsLogsOpen(false); }}
-              className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
-            >
-              <Icon icon="solar:clock-circle-bold" width="18" className="pointer-events-none" />
-            </button>
-          </Tooltip>
+              {/* History Button */}
+              <Tooltip content="Generation History" side="top">
+                <button
+                  onClick={() => {
+                    setIsHistoryOpen(true);
+                    setIsLogsOpen(false);
+                  }}
+                  className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
+                >
+                  <Icon
+                    icon="solar:clock-circle-bold"
+                    width="18"
+                    className="pointer-events-none"
+                  />
+                </button>
+              </Tooltip>
+            </>
+          )}
 
           {/* Logs Button */}
-          <Tooltip content="ComfyUI Logs" side="top">
-            <button
-              onClick={() => { setIsLogsOpen(true); setIsHistoryOpen(false); }}
-              className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
-            >
-              <Icon icon="solar:monitor-smartphone-bold" width="18" className="pointer-events-none" />
-            </button>
-          </Tooltip>
+          {!readOnly && (
+            <>
+              <div className="w-px h-5 bg-white/10" />
+              <Tooltip content="ComfyUI Logs" side="top">
+                <button
+                  onClick={() => {
+                    setIsLogsOpen(true);
+                    setIsHistoryOpen(false);
+                  }}
+                  className="p-1 rounded-full transition-colors text-zinc-400 hover:text-white hover:bg-white/10"
+                >
+                  <Icon
+                    icon="solar:monitor-smartphone-bold"
+                    width="18"
+                    className="pointer-events-none"
+                  />
+                </button>
+              </Tooltip>
+            </>
+          )}
         </div>
       </div>
 
@@ -228,19 +261,27 @@ export default function ExecutionMenu({
       <RunsHistoryPanel
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
-        projectId={projectId}
         onOutputDragStart={onResultDragStart}
       />
 
       {/* ComfyUI Logs Panel */}
       {isLogsOpen && (
         <div className="fixed top-0 right-0 h-full z-30 flex">
-          <div className="fixed inset-0 z-29" onClick={() => setIsLogsOpen(false)} />
+          <div
+            className="fixed inset-0 z-29"
+            onClick={() => setIsLogsOpen(false)}
+          />
           <div className="relative z-30 w-96 h-full bg-[#0a0a0a] border-l border-white/10 flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
               <div className="flex items-center gap-2">
-                <Icon icon="solar:monitor-smartphone-bold" width="18" className="text-zinc-400" />
-                <span className="text-sm font-medium text-white">ComfyUI Logs</span>
+                <Icon
+                  icon="solar:monitor-smartphone-bold"
+                  width="18"
+                  className="text-zinc-400"
+                />
+                <span className="text-sm font-medium text-white">
+                  ComfyUI Logs
+                </span>
               </div>
               <button
                 onClick={() => setIsLogsOpen(false)}

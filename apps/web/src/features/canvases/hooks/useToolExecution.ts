@@ -1,12 +1,13 @@
 "use client";
 
-// EIOS: Canvas execution uses the same POST→poll pattern as the apps and
+// AIOS: Canvas execution uses the same POST→poll pattern as the apps and
 // build-tool pages. All work happens server-side via /api/tools/[id]/executions,
 // then we poll /api/comfy/[port]/history/[promptId] (through the CORS-free proxy)
 // until the job completes.
 
 import { useState, useCallback, useRef } from "react";
 import type { ExecutionState } from "../types";
+import { getComfyOrgApiKey } from "@/lib/platform";
 
 interface UseToolExecutionProps {
   apiUrl?: string;
@@ -23,7 +24,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<EventSource | null>(null);
 
   const clearPoll = () => {
     if (pollTimerRef.current) {
@@ -37,7 +38,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
       abortRef.current = false;
       clearPoll();
 
-      if (!workflowId.startsWith("eios:")) {
+      if (!workflowId.startsWith("aios:")) {
         setExecutionState({
           status: "error",
           progress: 0,
@@ -48,7 +49,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
         return;
       }
 
-      const toolId = workflowId.slice("eios:".length);
+      const toolId = workflowId.slice("aios:".length);
 
       // Canvas passes inputs as "nodeId::paramName" — convert to "nodeId__paramName".
       // Skip zero/empty values: unconfigured number fields default to 0 in the canvas
@@ -77,7 +78,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
         const res = await fetch(`/api/tools/${toolId}/executions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inputs: apiInputs }),
+          body: JSON.stringify({ inputs: apiInputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
         });
 
         if (!res.ok) {
@@ -87,11 +88,12 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
 
         ({ executionId, promptId, comfyPort, seed, clientId } = await res.json());
 
-        // Connect WebSocket for live progress updates
+        // Connect to server-side SSE proxy for live progress updates
+        // (avoids direct WS to ComfyUI which triggers CORS host/origin mismatch)
         try {
-          const ws = new WebSocket(`ws://localhost:${comfyPort}/ws?clientId=${clientId}`);
-          wsRef.current = ws;
-          ws.onmessage = (evt) => {
+          const sse = new EventSource(`/api/comfy/${comfyPort}/ws`);
+          wsRef.current = sse;
+          sse.onmessage = (evt) => {
             try {
               const msg = JSON.parse(evt.data as string);
               if (msg.type === "progress") {
@@ -104,10 +106,10 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
                   logs: [...prev.logs, `Executing node: ${msg.data.node}`],
                 }));
               }
-            } catch { /* binary preview frame */ }
+            } catch { /* ignore parse errors */ }
           };
-          ws.onerror = () => { wsRef.current = null; };
-        } catch { /* WebSocket unavailable */ }
+          sse.onerror = () => { sse.close(); wsRef.current = null; };
+        } catch { /* SSE unavailable */ }
       } catch (err: any) {
         setExecutionState({
           status: "error",
@@ -151,7 +153,11 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
             status?: { completed?: boolean; status_str?: string };
             outputs?: Record<string, {
               images?: { filename: string; subfolder: string; type: string }[];
+              gifs?: { filename: string; subfolder: string; type: string }[];
+              videos?: { filename: string; subfolder: string; type: string }[];
+              audio?: { filename: string; subfolder: string; type: string }[];
               text?: string[];
+              string?: string[];
             }>;
           }>;
 
@@ -162,25 +168,49 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
           wsRef.current?.close();
           wsRef.current = null;
 
+          const inferContentType = (filename: string, defaultType: string): string => {
+            const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+            if (["mp4", "webm", "mov", "avi", "mkv"].includes(ext)) return "video/mp4";
+            if (["gif"].includes(ext)) return "image/gif";
+            if (["glb", "gltf"].includes(ext)) return "model/gltf-binary";
+            if (["obj"].includes(ext)) return "model/obj";
+            if (["fbx", "stl", "ply"].includes(ext)) return "model/fbx";
+            if (["mp3"].includes(ext)) return "audio/mpeg";
+            if (["wav"].includes(ext)) return "audio/wav";
+            if (["flac"].includes(ext)) return "audio/flac";
+            if (["ogg"].includes(ext)) return "audio/ogg";
+            if (["m4a"].includes(ext)) return "audio/mp4";
+            if (["png"].includes(ext)) return "image/png";
+            if (["jpg", "jpeg"].includes(ext)) return "image/jpeg";
+            if (["webp"].includes(ext)) return "image/webp";
+            return defaultType;
+          };
+
+          const addResult = (file: { filename: string; subfolder: string }, defaultType: string) => {
+            const proxyUrl = `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(file.filename)}&subfolder=${encodeURIComponent(file.subfolder || "")}&type=output`;
+            const contentType = inferContentType(file.filename, defaultType);
+            const key = file.filename;
+            resultsMap[key] = {
+              content_type: contentType,
+              // Both data and download_url point to the ComfyUI proxy — the file
+              // lives in ComfyUI's output dir and is immediately accessible via /view.
+              data: proxyUrl,
+              download_url: proxyUrl,
+              filename: file.filename,
+              label: file.filename,
+              run_id: promptId,
+            };
+          };
+
           // Build results map — use ComfyUI /view URL for immediate preview,
           // and the persisted /api/outputs URL for long-term access.
           const resultsMap: Record<string, any> = {};
           for (const nodeOut of Object.values(entry.outputs ?? {})) {
-            for (const img of nodeOut.images ?? []) {
-              const destName = `${executionId.slice(0, 8)}_${img.filename}`;
-              const persistUrl = `/api/outputs/${toolId}/${encodeURIComponent(destName)}`;
-              // ComfyUI proxy URL works immediately (file just generated)
-              const previewUrl = `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder || "")}&type=output`;
-              resultsMap[img.filename] = {
-                content_type: "image/png",
-                data: previewUrl,
-                download_url: persistUrl,
-                filename: img.filename,
-                label: img.filename,
-                run_id: promptId,
-              };
-            }
-            for (const t of nodeOut.text ?? []) {
+            for (const img of nodeOut.images ?? []) addResult(img, "image/png");
+            for (const gif of nodeOut.gifs ?? []) addResult(gif, "video/mp4");
+            for (const vid of nodeOut.videos ?? []) addResult(vid, "video/mp4");
+            for (const aud of nodeOut.audio ?? []) addResult(aud, "audio/mpeg");
+            for (const t of [...(nodeOut.text ?? []), ...(nodeOut.string ?? [])]) {
               if (typeof t === "string" && t.trim()) {
                 const key = `text_${Object.keys(resultsMap).length}`;
                 resultsMap[key] = {

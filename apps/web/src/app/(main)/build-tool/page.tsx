@@ -20,6 +20,7 @@ import {
 } from 'phosphor-react'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
+import { getComfyOrgApiKey } from '@/lib/platform'
 
 interface WorkflowIO {
   nodeId: string
@@ -1089,7 +1090,7 @@ function StepTest({
       const res = await fetch(`/api/tools/${tool.id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs }),
+        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
       })
       if (!res.ok) {
         const err = await res.json()
