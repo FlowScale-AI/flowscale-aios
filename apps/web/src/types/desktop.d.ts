@@ -28,6 +28,16 @@ interface DesktopBridge {
     clearFlowscaleTokens(): Promise<void>
     onComplete(callback: (tokens: FlowscaleTokens) => void): () => void
   }
+  updates?: {
+    onAvailable(callback: (info: { version: string }) => void): () => void
+    onNotAvailable(callback: () => void): () => void
+    onProgress(callback: (p: { percent: number }) => void): () => void
+    onDownloaded(callback: (info: { version: string }) => void): () => void
+    onError(callback: (err: { message: string }) => void): () => void
+    check(): Promise<void>
+    download(): Promise<void>
+    install(): Promise<void>
+  }
 }
 
 declare global {

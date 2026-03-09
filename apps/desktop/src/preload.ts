@@ -37,4 +37,34 @@ contextBridge.exposeInMainWorld('desktop', {
       }
     },
   },
+  updates: {
+    onAvailable: (callback: (info: { version: string }) => void): (() => void) => {
+      const handler = (_: unknown, info: { version: string }): void => callback(info)
+      ipcRenderer.on('updates:available', handler)
+      return (): void => { ipcRenderer.removeListener('updates:available', handler) }
+    },
+    onNotAvailable: (callback: () => void): (() => void) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('updates:not-available', handler)
+      return (): void => { ipcRenderer.removeListener('updates:not-available', handler) }
+    },
+    onProgress: (callback: (p: { percent: number }) => void): (() => void) => {
+      const handler = (_: unknown, p: { percent: number }): void => callback(p)
+      ipcRenderer.on('updates:progress', handler)
+      return (): void => { ipcRenderer.removeListener('updates:progress', handler) }
+    },
+    onDownloaded: (callback: (info: { version: string }) => void): (() => void) => {
+      const handler = (_: unknown, info: { version: string }): void => callback(info)
+      ipcRenderer.on('updates:downloaded', handler)
+      return (): void => { ipcRenderer.removeListener('updates:downloaded', handler) }
+    },
+    onError: (callback: (err: { message: string }) => void): (() => void) => {
+      const handler = (_: unknown, err: { message: string }): void => callback(err)
+      ipcRenderer.on('updates:error', handler)
+      return (): void => { ipcRenderer.removeListener('updates:error', handler) }
+    },
+    check: (): Promise<void> => ipcRenderer.invoke('updates:check'),
+    download: (): Promise<void> => ipcRenderer.invoke('updates:download'),
+    install: (): Promise<void> => ipcRenderer.invoke('updates:install'),
+  },
 })

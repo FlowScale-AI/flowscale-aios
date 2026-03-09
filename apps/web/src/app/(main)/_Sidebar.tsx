@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { useEffect } from 'react'
 import {
   Wrench,
   Plugs,
@@ -13,6 +14,7 @@ import {
   ImageSquare,
 } from 'phosphor-react'
 import type { Role } from '@/lib/auth'
+import { useUpdateStore } from '@/store/updateStore'
 
 function SectionLabel({ label }: { label: string }) {
   return (
@@ -69,6 +71,18 @@ function NavItem({
 export default function Sidebar({ role, username }: { role: Role; username: string }) {
   const pathname = usePathname()
   const router = useRouter()
+  const { status, setAvailable, setNotAvailable, setProgress, setDownloaded, setError } = useUpdateStore()
+
+  useEffect(() => {
+    const u = window.desktop?.updates
+    if (!u) return
+    const cleanAvail  = u.onAvailable(({ version }) => setAvailable(version))
+    const cleanNone   = u.onNotAvailable(() => setNotAvailable())
+    const cleanProg   = u.onProgress(({ percent }) => setProgress(percent))
+    const cleanDone   = u.onDownloaded(({ version }) => setDownloaded(version))
+    const cleanErr    = u.onError(({ message }) => setError(message))
+    return () => { cleanAvail(); cleanNone(); cleanProg(); cleanDone(); cleanErr() }
+  }, [setAvailable, setNotAvailable, setProgress, setDownloaded, setError])
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -137,12 +151,17 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
 
       {/* Footer */}
       <div className="p-2 border-t border-white/5 shrink-0">
-        <NavItem
-          href="/settings"
-          icon={GearSix}
-          label="Settings"
-          active={pathname === '/settings'}
-        />
+        <div className="relative">
+          <NavItem
+            href="/settings"
+            icon={GearSix}
+            label="Settings"
+            active={pathname === '/settings'}
+          />
+          {(status === 'available' || status === 'downloading' || status === 'downloaded') && (
+            <span className="absolute top-2 right-2 size-2 rounded-full bg-emerald-400 ring-2 ring-[#121214]" />
+          )}
+        </div>
         <div className="flex items-center gap-3 px-3 py-2 mt-1">
           <div className="size-7 rounded-full bg-zinc-800 border border-white/10 shrink-0 flex items-center justify-center">
             <span className="text-[10px] text-zinc-300 font-medium uppercase">

@@ -174,9 +174,9 @@ if [[ "$OS" == "Darwin" ]]; then
   if [[ ! -d "$APP_BUNDLE" ]]; then
     info "Packaging macOS app bundle…"
     pnpm --filter @flowscale/aios-desktop package:mac
-    RELEASE_APP="apps/desktop/release/mac/${APP_NAME}.app"
+    RELEASE_APP="apps/desktop/releases/mac/${APP_NAME}.app"
     # electron-builder puts it in mac-arm64/ on Apple Silicon
-    [[ -d "$RELEASE_APP" ]] || RELEASE_APP="apps/desktop/release/mac-arm64/${APP_NAME}.app"
+    [[ -d "$RELEASE_APP" ]] || RELEASE_APP="apps/desktop/releases/mac-arm64/${APP_NAME}.app"
     [[ -d "$RELEASE_APP" ]] \
       || die "App bundle not found after packaging. Check electron-builder output."
     info "Installing to /Applications…"

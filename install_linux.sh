@@ -120,7 +120,7 @@ APPIMAGE_DEST="${INSTALL_DIR}/${APP_NAME}.AppImage"
 info "Packaging Linux AppImage..."
 pnpm --filter @flowscale/aios-desktop package:linux
 
-APPIMAGE=$(ls apps/desktop/release/*.AppImage 2>/dev/null | head -1)
+APPIMAGE=$(ls apps/desktop/releases/*.AppImage 2>/dev/null | head -1)
 [[ -n "$APPIMAGE" ]] \
   || die "AppImage not found after packaging. Check electron-builder output."
 

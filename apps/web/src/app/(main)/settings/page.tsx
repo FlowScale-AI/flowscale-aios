@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useEffect, type FormEvent } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import {
-  HardDrive, Globe, ArrowSquareOut, Copy, Check, Code, FolderOpen, X,
-  ToggleLeft, ToggleRight,
+  HardDrive, Globe, ArrowSquareOut, Copy, Check, X,
   UserCircle, CheckCircle, XCircle, Trash, UserPlus, PencilSimple, Key,
+  ArrowsClockwise, DownloadSimple, ArrowCircleUp,
 } from 'phosphor-react'
 import { PageTransition } from '@/components/ui'
+import { useUpdateStore } from '@/store/updateStore'
 
 // ─── Settings types ───────────────────────────────────────────────────────────
 
@@ -15,13 +16,6 @@ interface UserMe {
   id: string
   username: string
   role: string
-}
-
-interface SideloadedApp {
-  id: string
-  displayName: string
-  bundlePath: string
-  installedAt: number
 }
 
 interface NetworkData {
@@ -60,8 +54,11 @@ type Tab = 'general' | 'users'
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('general')
-  const queryClient = useQueryClient()
+  const [isDesktop, setIsDesktop] = useState(false)
 
+  useEffect(() => {
+    setIsDesktop(!!window.desktop?.updates)
+  }, [])
   const { data: network } = useQuery<NetworkData>({
     queryKey: ['network'],
     queryFn: async () => {
@@ -79,60 +76,6 @@ export default function SettingsPage() {
       return res.json()
     },
   })
-
-  const canDevelop = me?.role === 'admin' || me?.role === 'dev'
-
-  const [devMode, setDevMode] = useState(false)
-  const [sideloadPath, setSideloadPath] = useState('')
-  const [sideloadError, setSideloadError] = useState<string | null>(null)
-
-  const { data: sideloadedApps = [], refetch: refetchApps } = useQuery<SideloadedApp[]>({
-    queryKey: ['sideloaded-apps'],
-    queryFn: async () => {
-      const res = await fetch('/api/apps?source=sideloaded')
-      if (!res.ok) return []
-      return res.json()
-    },
-    enabled: canDevelop,
-  })
-
-  const sideloadMutation = useMutation({
-    mutationFn: async (path: string) => {
-      const res = await fetch('/api/apps/sideload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-      })
-      const data = await res.json() as { error?: string }
-      if (!res.ok) throw new Error(data.error ?? 'Sideload failed')
-      return data
-    },
-    onSuccess: () => {
-      setSideloadPath('')
-      setSideloadError(null)
-      refetchApps()
-      queryClient.invalidateQueries({ queryKey: ['installed-apps'] })
-    },
-    onError: (err: Error) => setSideloadError(err.message),
-  })
-
-  const removeAppMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(`/api/apps/${id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Failed to remove app')
-    },
-    onSuccess: () => {
-      refetchApps()
-      queryClient.invalidateQueries({ queryKey: ['installed-apps'] })
-    },
-  })
-
-  async function handleBrowseDirectory() {
-    if (window.desktop?.dialog?.openDirectory) {
-      const dir = await window.desktop.dialog.openDirectory()
-      if (dir) setSideloadPath(dir)
-    }
-  }
 
   const [copied, setCopied] = useState<string | null>(null)
 
@@ -180,6 +123,9 @@ export default function SettingsPage() {
       {tab === 'general' ? (
         <div className="flex-1 overflow-y-auto px-8 py-6">
           <div className="max-w-2xl mx-auto space-y-8">
+
+            {/* Updates */}
+            {isDesktop && <UpdatesSection />}
 
             {/* Network Access */}
             <section>
@@ -252,77 +198,11 @@ export default function SettingsPage() {
               <p className="text-xs text-zinc-600 mt-2">All data stays on this machine. Nothing is sent to the cloud.</p>
             </section>
 
-            {/* Developer Mode */}
-            {canDevelop && (
-              <section>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Code size={16} className="text-zinc-400" />
-                    <h2 className="font-tech text-sm font-semibold text-zinc-200">Developer Mode</h2>
-                  </div>
-                  <button onClick={() => setDevMode((v) => !v)} className="text-zinc-400 hover:text-zinc-200 transition-colors" title={devMode ? 'Disable developer mode' : 'Enable developer mode'}>
-                    {devMode ? <ToggleRight size={28} weight="fill" className="text-emerald-400" /> : <ToggleLeft size={28} className="text-zinc-600" />}
-                  </button>
-                </div>
-                {!devMode && <p className="text-xs text-zinc-600">Enable to show developer tools for building and sideloading FlowScale apps.</p>}
-                {devMode && (
-                  <div className="p-4 bg-zinc-900/50 border border-white/5 rounded-xl space-y-3">
-                    <div>
-                      <p className="text-xs text-zinc-400 mb-3">
-                        Load an app from a local directory for testing. Point to a directory containing a{' '}
-                        <span className="font-mono-custom">flowscale.app.json</span> manifest.
-                      </p>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="/absolute/path/to/my-app"
-                          value={sideloadPath}
-                          onChange={(e) => { setSideloadPath(e.target.value); setSideloadError(null) }}
-                          className="flex-1 px-3 py-2 text-xs font-mono-custom bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-                        />
-                        {window.desktop?.dialog && (
-                          <button onClick={handleBrowseDirectory} className="p-2 text-zinc-400 hover:text-zinc-200 bg-zinc-800 border border-zinc-700 rounded-lg transition-colors" title="Browse">
-                            <FolderOpen size={15} />
-                          </button>
-                        )}
-                        <button
-                          disabled={!sideloadPath.trim() || sideloadMutation.isPending}
-                          onClick={() => sideloadMutation.mutate(sideloadPath.trim())}
-                          className="px-4 py-2 text-xs font-medium text-zinc-200 bg-zinc-700 hover:bg-zinc-600 border border-zinc-600 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          {sideloadMutation.isPending ? 'Loading…' : 'Load'}
-                        </button>
-                      </div>
-                      {sideloadError && <p className="text-xs text-red-400 mt-2">{sideloadError}</p>}
-                    </div>
-                    {sideloadedApps.length > 0 && (
-                      <div>
-                        <p className="text-xs text-zinc-500 font-semibold mb-2">Currently sideloaded</p>
-                        <div className="flex flex-col gap-1.5">
-                          {sideloadedApps.map((app) => (
-                            <div key={app.id} className="flex items-center justify-between p-3 bg-zinc-800/50 border border-white/5 rounded-lg">
-                              <div>
-                                <div className="text-sm text-zinc-200 font-medium">{app.displayName}</div>
-                                <div className="text-xs font-mono-custom text-zinc-500 mt-0.5">{app.bundlePath}</div>
-                              </div>
-                              <button onClick={() => removeAppMutation.mutate(app.id)} className="p-1.5 text-zinc-600 hover:text-red-400 transition-colors" title="Unload">
-                                <X size={14} />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </section>
-            )}
-
             {/* App info */}
             <section className="pt-4 border-t border-white/5">
               <div className="flex justify-between text-xs text-zinc-600">
                 <span className="font-tech">FlowScale AI OS</span>
-                <span className="font-mono-custom">v0.2.0</span>
+                <span className="font-mono-custom">v{process.env.NEXT_PUBLIC_APP_VERSION ?? '0.2.0'}</span>
               </div>
             </section>
 
@@ -332,6 +212,127 @@ export default function SettingsPage() {
         <UsersPanel currentUserId={me?.id ?? null} />
       )}
     </PageTransition>
+  )
+}
+
+// ─── Updates Section ──────────────────────────────────────────────────────────
+
+function UpdatesSection() {
+  const { status, version, progress, error, setChecking } = useUpdateStore()
+
+  async function handleCheck() {
+    setChecking()
+    await window.desktop?.updates?.check()
+  }
+
+  async function handleDownload() {
+    await window.desktop?.updates?.download()
+  }
+
+  async function handleInstall() {
+    await window.desktop?.updates?.install()
+  }
+
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-4">
+        <ArrowsClockwise size={16} className="text-zinc-400" />
+        <h2 className="font-tech text-sm font-semibold text-zinc-200">Updates</h2>
+      </div>
+      <div className="p-4 bg-zinc-900/50 border border-white/5 rounded-lg">
+        {status === 'idle' && (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-zinc-400">Check for the latest version.</span>
+            <button
+              onClick={handleCheck}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
+            >
+              <ArrowsClockwise size={13} /> Check for updates
+            </button>
+          </div>
+        )}
+
+        {status === 'checking' && (
+          <div className="flex items-center gap-2 text-sm text-zinc-400">
+            <ArrowsClockwise size={14} className="animate-spin" /> Checking for updates…
+          </div>
+        )}
+
+        {status === 'up-to-date' && (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm text-emerald-400">
+              <CheckCircle size={14} weight="fill" /> You&apos;re up to date.
+            </div>
+            <button
+              onClick={handleCheck}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              <ArrowsClockwise size={13} /> Check again
+            </button>
+          </div>
+        )}
+
+        {status === 'available' && (
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm text-zinc-200 font-medium">Update available — v{version}</div>
+              <div className="text-xs text-zinc-500 mt-0.5">Download and install when ready.</div>
+            </div>
+            <button
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-md transition-colors"
+            >
+              <DownloadSimple size={13} /> Download
+            </button>
+          </div>
+        )}
+
+        {status === 'downloading' && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-zinc-400">Downloading v{version}…</span>
+              <span className="text-zinc-500 font-mono-custom text-xs">{progress}%</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+              <div
+                className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                style={{ width: `${progress ?? 0}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {status === 'downloaded' && (
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm text-zinc-200 font-medium">v{version} ready to install</div>
+              <div className="text-xs text-zinc-500 mt-0.5">The app will restart to apply the update.</div>
+            </div>
+            <button
+              onClick={handleInstall}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-500 rounded-md transition-colors"
+            >
+              <ArrowCircleUp size={13} /> Restart &amp; install
+            </button>
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm text-red-400">Update check failed</div>
+              <div className="text-xs text-zinc-600 mt-0.5 font-mono-custom">{error}</div>
+            </div>
+            <button
+              onClick={handleCheck}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-md transition-colors"
+            >
+              <ArrowsClockwise size={13} /> Retry
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 
