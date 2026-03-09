@@ -85,6 +85,21 @@ function isAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true } catch { return false }
 }
 
+/** Check if a PID is actually a Python process (our inference server), not a recycled PID. */
+function isPythonProcess(pid: number): boolean {
+  try {
+    const cmd = execSync(
+      process.platform === 'darwin'
+        ? `ps -p ${pid} -o command=`
+        : `ps -p ${pid} -o cmd=`,
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }
+    ).trim()
+    return cmd.includes('python') || cmd.includes('z_image_turbo_server')
+  } catch {
+    return false
+  }
+}
+
 export async function isServerRunning(): Promise<boolean> {
   try {
     const res = await fetch(`http://127.0.0.1:${LOCAL_INFERENCE_PORT}/health`, {
@@ -155,9 +170,16 @@ export function spawnInstall(python: string): ChildProcess {
  * first run may take many minutes due to model download.
  */
 export function spawnServer(python: string): void {
-  // Kill stale process if alive
+  // Kill stale process if alive — but ONLY if it's actually a Python process.
+  // PIDs get recycled by the OS; a stale PID file could point to the Node.js
+  // standalone server itself, and killing it would crash the app.
   const pid = storedPid()
-  if (pid && isAlive(pid)) { try { process.kill(pid, 'SIGKILL') } catch { /* ignore */ } clearPid() }
+  if (pid && isAlive(pid)) {
+    if (isPythonProcess(pid)) {
+      try { process.kill(pid, 'SIGKILL') } catch { /* ignore */ }
+    }
+    clearPid()
+  }
   if (_proc) { try { _proc.kill('SIGKILL') } catch { /* ignore */ } _proc = null }
   // Force-free the port in case a zombie thread pool is still holding it
   killPort(LOCAL_INFERENCE_PORT)
@@ -183,7 +205,9 @@ export function stopServer(): boolean {
   let stopped = false
   if (_proc) { try { _proc.kill('SIGKILL'); stopped = true } catch { /* ignore */ } _proc = null }
   const pid = storedPid()
-  if (pid && isAlive(pid)) { try { process.kill(pid, 'SIGKILL'); stopped = true } catch { /* ignore */ } }
+  if (pid && isAlive(pid) && isPythonProcess(pid)) {
+    try { process.kill(pid, 'SIGKILL'); stopped = true } catch { /* ignore */ }
+  }
   clearPid()
   // Also kill anything still occupying the port (e.g. a thread-pool zombie)
   killPort(LOCAL_INFERENCE_PORT)
