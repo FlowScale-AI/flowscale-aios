@@ -97,8 +97,14 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   else
     if command -v brew &>/dev/null; then
       info "Installing Python via Homebrew (required for AI model downloads)…"
-      brew install python
-      success "Homebrew Python installed."
+      brew install python || brew upgrade python || true
+      # Rehash so the new binary is found
+      hash -r 2>/dev/null || true
+      if [[ -x /opt/homebrew/bin/python3 ]] || [[ -x /usr/local/bin/python3 ]]; then
+        success "Homebrew Python installed."
+      else
+        die "Failed to install Python via Homebrew."
+      fi
     else
       warn "Homebrew Python not found. The built-in macOS Python has SSL issues"
       warn "that prevent downloading AI models. Install Homebrew first:"
