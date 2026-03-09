@@ -118,6 +118,28 @@ export async function isServerRunning(): Promise<boolean> {
   }
 }
 
+/** Check if the Python process is alive (PID file + process check). */
+export function isProcessAlive(): boolean {
+  const pid = storedPid()
+  if (!pid) return false
+  return isAlive(pid) && isPythonProcess(pid)
+}
+
+export type ServerStatus = 'running' | 'starting' | 'stopped'
+
+/**
+ * Returns granular server status:
+ * - `running`: health check passes (model loaded, ready)
+ * - `starting`: process alive but health check fails (downloading/loading)
+ * - `stopped`: no process alive
+ */
+export async function getServerStatus(): Promise<ServerStatus> {
+  const healthy = await isServerRunning()
+  if (healthy) return 'running'
+  if (isProcessAlive()) return 'starting'
+  return 'stopped'
+}
+
 function detectGpuType(): 'rocm' | 'cuda' | 'cpu' {
   try { execSync('nvidia-smi', { stdio: 'ignore' }); return 'cuda' } catch { /* no nvidia */ }
   try { if (existsSync('/dev/kfd')) return 'rocm' } catch { /* ignore */ }

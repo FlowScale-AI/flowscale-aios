@@ -40,21 +40,20 @@ export function LocalInferenceSetup() {
   async function checkStatus() {
     try {
       const res = await fetch('/api/local-inference/status')
-      const { running } = await res.json() as { running: boolean }
-      if (running) {
-        failCountRef.current = 0
+      const data = await res.json() as { status?: string; running: boolean }
+      const serverStatus = data.status as InferenceStatus | undefined
+      if (serverStatus === 'running') {
         applyStatus('running')
+      } else if (serverStatus === 'starting') {
+        applyStatus('starting')
+      } else if (serverStatus === 'stopped') {
+        applyStatus('stopped')
       } else {
-        failCountRef.current++
-        // Only transition to stopped after 6 consecutive failures (~12s) —
-        // CPU inference holds the GIL and can briefly block health checks
-        if (failCountRef.current >= 6) {
-          applyStatus(statusRef.current === 'starting' ? 'starting' : 'stopped')
-        }
+        // Fallback for old API shape
+        applyStatus(data.running ? 'running' : 'stopped')
       }
     } catch {
-      failCountRef.current++
-      if (failCountRef.current >= 6 && statusRef.current !== 'starting') applyStatus('stopped')
+      // Network error — don't change status immediately, might be transient
     }
   }
 
