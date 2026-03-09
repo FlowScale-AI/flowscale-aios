@@ -1,24 +1,39 @@
 import { ChildProcess, spawn, execSync } from 'child_process'
 import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from 'fs'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { homedir } from 'os'
 
 function resolveScriptPath(): string {
-  // In packaged Electron app: process.resourcesPath points to .app/Contents/Resources/
-  // where extraResources are copied. In dev: fall back to repo structure.
+  const scriptName = join('scripts', 'z_image_turbo_server.py')
+
+  // 1. Electron's process.resourcesPath (set when running inside Electron binary)
   if (process.resourcesPath) {
-    const packaged = join(process.resourcesPath, 'scripts', 'z_image_turbo_server.py')
-    if (existsSync(packaged)) return packaged
+    const p = join(process.resourcesPath, scriptName)
+    if (existsSync(p)) return p
   }
-  // Dev fallback: repo root relative to apps/web/
+
+  // 2. Standalone server: derive Resources dir from the server.js path.
+  //    server.js lives at: .app/Contents/Resources/apps/web/.next/standalone/apps/web/server.js
+  //    scripts live at:    .app/Contents/Resources/scripts/z_image_turbo_server.py
+  if (process.argv[1]) {
+    const serverDir = dirname(process.argv[1])
+    // Walk up from apps/web/ to the standalone root, then up to Resources
+    const resourcesDir = join(serverDir, '..', '..', '..', '..', '..', '..')
+    const p = join(resourcesDir, scriptName)
+    if (existsSync(p)) return p
+  }
+
+  // 3. Dev fallback: repo root relative to apps/web/
   return join(process.cwd(), '../../scripts/z_image_turbo_server.py')
 }
 
 function killPort(port: number): void {
-  // macOS uses lsof, Linux uses fuser
+  // Kill only processes LISTENING on this port — never connections in TIME_WAIT
+  // or ESTABLISHED, which could match the Node.js server itself (if it recently
+  // made a health-check fetch to this port).
   try {
     if (process.platform === 'darwin') {
-      const pids = execSync(`lsof -ti :${port}`, { encoding: 'utf-8' }).trim()
+      const pids = execSync(`lsof -ti TCP:${port} -sTCP:LISTEN`, { encoding: 'utf-8' }).trim()
       if (pids) execSync(`kill -9 ${pids.split('\n').join(' ')}`, { stdio: 'ignore' })
     } else {
       execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' })
@@ -198,6 +213,11 @@ export function spawnServer(python: string): void {
   clearServerLogs()
   proc.stdout?.on('data', appendLog)
   proc.stderr?.on('data', appendLog)
+  proc.on('error', (err) => {
+    appendLog(Buffer.from(`[spawn error] ${err.message}\n`))
+    _proc = null
+    clearPid()
+  })
   proc.on('exit', () => { _proc = null; clearPid() })
 }
 
