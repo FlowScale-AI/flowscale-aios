@@ -1,6 +1,6 @@
 {
   "name": "@flowscale/aios-desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "AGPL-3.0-only",
   "description": "FlowScale AIOS desktop application",
   "author": {
@@ -16,9 +16,6 @@
     "package:mac": "electron-builder --config electron-builder.yml --mac --publish never",
     "package:linux": "electron-builder --config electron-builder.yml --linux --publish never",
     "package:win": "electron-builder --config electron-builder.yml --win --publish never",
-    "release:mac": "electron-builder --config electron-builder.yml --mac --publish never",
-    "release:linux": "electron-builder --config electron-builder.yml --linux --publish never",
-    "release:win": "electron-builder --config electron-builder.yml --win --publish never",
     "rebuild": "electron-rebuild"
   },
   "dependencies": {
