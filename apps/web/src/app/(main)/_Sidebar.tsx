@@ -89,6 +89,9 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
         <span className="font-tech text-[16px] font-semibold tracking-tight text-white whitespace-nowrap opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75">
           FlowScale AIOS
         </span>
+        <span className="opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 uppercase tracking-wider shrink-0">
+          Beta
+        </span>
       </div>
 
       {/* Nav */}
