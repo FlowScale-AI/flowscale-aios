@@ -28,6 +28,9 @@ os.environ["HF_HUB_ENABLE_XET"] = "0"
 # We print plain-text progress from a monitor thread instead.
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 os.environ["TQDM_DISABLE"] = "1"
+# Allow MPS to use all available unified memory instead of hard-crashing at ~75%.
+# Without this, large models OOM on 24GB Macs at 1024x1024.
+os.environ.setdefault("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.0")
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -139,7 +142,9 @@ async def load_model():
     from diffusers import DiffusionPipeline
 
     use_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-    dtype = torch.float16 if use_mps else torch.bfloat16
+    # float16 causes NaN outputs on MPS (Apple Silicon) for large diffusion models
+    # due to numerical overflow in attention layers. Use float32 on MPS instead.
+    dtype = torch.float32 if use_mps else torch.bfloat16
 
     model_id = "Tongyi-MAI/Z-Image-Turbo"
     print(f"Loading {model_id}…", flush=True)
@@ -163,7 +168,9 @@ async def load_model():
             pipe.enable_sequential_cpu_offload()
     elif use_mps:
         pipe = pipe.to("mps")
-        print("Using MPS (Apple Silicon).")
+        # Reduce peak memory on Apple Silicon — process attention in slices
+        pipe.enable_attention_slicing()
+        print("Using MPS (Apple Silicon) with attention slicing.")
     else:
         pipe = pipe.to("cpu")
         print("Warning: running on CPU — inference will be slow.")
@@ -182,6 +189,8 @@ def _run_inference(req: GenerateRequest) -> str:
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        torch.mps.empty_cache()
     generator = torch.Generator().manual_seed(req.seed) if req.seed >= 0 else None
     image = pipe(
         prompt=req.prompt,
@@ -211,5 +220,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Z-Image Turbo local inference server")
     parser.add_argument("--port", type=int, default=8765, help="Port to listen on (default: 8765)")
     args = parser.parse_args()
+
+    # Configure logging to filter out /health spam
+    import logging
+
+    class HealthFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            msg = record.getMessage()
+            return not ("/health" in msg and "200" in msg)
+
+    logging.getLogger("uvicorn.access").addFilter(HealthFilter())
 
     uvicorn.run(app, host="127.0.0.1", port=args.port)

@@ -60,6 +60,8 @@ export function getServerLogs(): string[] {
     for (const seg of segments) {
       const line = seg.trim()
       if (!line) continue
+      // Filter out noisy health-check access logs
+      if (line.includes('/health') && line.includes('200')) continue
       const last = lines[lines.length - 1] ?? ''
       if (last.includes('%|') && line.includes('%|')) {
         lines[lines.length - 1] = line // keep latest progress bar only

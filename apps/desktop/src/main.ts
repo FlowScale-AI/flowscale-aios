@@ -93,6 +93,7 @@ if (!gotLock) {
 
 let mainWindow: BrowserWindow | null = null
 let nextServer: ChildProcess | null = null
+let isQuitting = false
 
 function notifyOAuthComplete(tokens: FlowscaleTokens): void {
   mainWindow?.webContents.send('auth:complete', tokens)
@@ -191,8 +192,10 @@ function startNextServer(port: number): void {
 
   nextServer.on('exit', (code, signal) => {
     log.warn('[server] Next.js server exited with code', code, 'signal', signal)
-    // Auto-restart if killed unexpectedly while app is still running
-    if (code !== 0 || signal) {
+    // Always restart unless the app is quitting — even code 0 exits need restart
+    // because the server may exit cleanly while background work (e.g. inference)
+    // is still in progress.
+    if (!isQuitting) {
       log.info('[server] Restarting Next.js server…')
       setTimeout(() => startNextServer(port), 1000)
     }
@@ -326,8 +329,6 @@ function killInferenceServer(): void {
     execSync('lsof -ti TCP:8765 -sTCP:LISTEN | xargs kill -9', { stdio: 'ignore' })
   } catch { /* nothing on port */ }
 }
-
-let isQuitting = false
 
 app.on('before-quit', async (event) => {
   if (isQuitting) {
