@@ -97,7 +97,7 @@ if [[ -d "$REPO_DIR/.git" ]]; then
   git pull --ff-only || warn "Could not pull latest changes (uncommitted local changes?)."
 else
   info "Cloning ${REPO_URL} -> ./${REPO_DIR}"
-  git clone --branch mvp "$REPO_URL" "$REPO_DIR"
+  git clone --branch main "$REPO_URL" "$REPO_DIR"
   cd "$REPO_DIR"
 fi
 
