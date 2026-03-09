@@ -117,21 +117,17 @@ APP_ID="flowscale-aios"
 INSTALL_DIR="$HOME/.local/share/${APP_ID}"
 APPIMAGE_DEST="${INSTALL_DIR}/${APP_NAME}.AppImage"
 
-if [[ ! -f "$APPIMAGE_DEST" ]]; then
-  info "Packaging Linux AppImage..."
-  pnpm --filter @flowscale/aios-desktop package:linux
+info "Packaging Linux AppImage..."
+pnpm --filter @flowscale/aios-desktop package:linux
 
-  APPIMAGE=$(ls apps/desktop/release/*.AppImage 2>/dev/null | head -1)
-  [[ -n "$APPIMAGE" ]] \
-    || die "AppImage not found after packaging. Check electron-builder output."
+APPIMAGE=$(ls apps/desktop/release/*.AppImage 2>/dev/null | head -1)
+[[ -n "$APPIMAGE" ]] \
+  || die "AppImage not found after packaging. Check electron-builder output."
 
-  mkdir -p "$INSTALL_DIR"
-  cp "$APPIMAGE" "$APPIMAGE_DEST"
-  chmod +x "$APPIMAGE_DEST"
-  success "Installed AppImage to ${APPIMAGE_DEST}."
-else
-  info "AppImage already installed at ${APPIMAGE_DEST} -- skipping packaging."
-fi
+mkdir -p "$INSTALL_DIR"
+cp "$APPIMAGE" "$APPIMAGE_DEST"
+chmod +x "$APPIMAGE_DEST"
+success "Installed AppImage to ${APPIMAGE_DEST}."
 
 # --- 8. icon ------------------------------------------------------------------
 ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
