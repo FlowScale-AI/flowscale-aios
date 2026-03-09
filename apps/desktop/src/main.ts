@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, nativeImage, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeImage, session, shell } from 'electron'
 import path from 'path'
 import { spawn, type ChildProcess } from 'child_process'
 import { writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs'
@@ -296,9 +296,79 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', () => {
-  if (nextServer) {
-    nextServer.kill()
-    nextServer = null
+/** Check if the local inference server (Python) is running on port 8765. */
+function isInferenceRunning(): boolean {
+  try {
+    const pid = require('fs').readFileSync(
+      path.join(app.getPath('home'), '.flowscale', 'aios', 'inference-server.pid'),
+      'utf-8',
+    ).trim()
+    if (!pid) return false
+    process.kill(Number(pid), 0) // signal 0 = existence check
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Kill the inference server by PID + port. */
+function killInferenceServer(): void {
+  try {
+    const pidFile = path.join(app.getPath('home'), '.flowscale', 'aios', 'inference-server.pid')
+    const pid = require('fs').readFileSync(pidFile, 'utf-8').trim()
+    if (pid) {
+      process.kill(Number(pid), 'SIGKILL')
+      require('fs').unlinkSync(pidFile)
+    }
+  } catch { /* ignore */ }
+  // Also kill anything listening on port 8765
+  try {
+    execSync('lsof -ti TCP:8765 -sTCP:LISTEN | xargs kill -9', { stdio: 'ignore' })
+  } catch { /* nothing on port */ }
+}
+
+let isQuitting = false
+
+app.on('before-quit', async (event) => {
+  if (isQuitting) {
+    // Second pass — actually quit, clean up the Next.js server
+    if (nextServer) {
+      nextServer.kill()
+      nextServer = null
+    }
+    return
+  }
+
+  if (isInferenceRunning()) {
+    event.preventDefault()
+    const { response } = await dialog.showMessageBox({
+      type: 'question',
+      buttons: ['Stop & Quit', 'Keep Running & Quit', 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+      title: 'Inference Server Running',
+      message: 'The local inference server is still running.',
+      detail: 'Would you like to stop it before quitting, or keep it running in the background?',
+    })
+
+    if (response === 2) {
+      // Cancel — don't quit
+      return
+    }
+
+    if (response === 0) {
+      // Stop & Quit
+      killInferenceServer()
+    }
+    // response 1 = Keep Running & Quit — leave it running
+
+    isQuitting = true
+    app.quit()
+  } else {
+    // No inference server — clean up and quit normally
+    if (nextServer) {
+      nextServer.kill()
+      nextServer = null
+    }
   }
 })

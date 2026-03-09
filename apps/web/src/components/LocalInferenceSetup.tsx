@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { CheckCircle, WarningCircle, Spinner, Stop } from 'phosphor-react'
 
 export type InferenceStatus = 'checking' | 'running' | 'starting' | 'stopped'
@@ -62,6 +63,41 @@ export function LocalInferenceSetup() {
     pollRef.current = setInterval(checkStatus, 2000)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [])
+
+  // Navigation guard — warn when model is downloading / deps installing
+  const isActive = installing || status === 'starting'
+  useEffect(() => {
+    if (!isActive) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isActive])
+
+  // Intercept in-app link clicks when download/install is active
+  useEffect(() => {
+    if (!isActive) return
+    const handler = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null
+      if (!anchor) return
+      const href = anchor.getAttribute('href')
+      if (!href || href.startsWith('http') || href.startsWith('#')) return
+      // It's an internal navigation — confirm before allowing
+      const ok = window.confirm(
+        'The inference server is still setting up (downloading model / installing dependencies). ' +
+        'It will continue in the background, but you won\'t be able to see progress.\n\n' +
+        'Leave this page?'
+      )
+      if (!ok) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    // Use capture phase to intercept before Next.js router handles it
+    document.addEventListener('click', handler, true)
+    return () => document.removeEventListener('click', handler, true)
+  }, [isActive])
 
   async function handleInstall() {
     setInstalling(true)

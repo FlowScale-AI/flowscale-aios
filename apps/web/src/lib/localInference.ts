@@ -1,5 +1,5 @@
-import { ChildProcess, spawn, execSync } from 'child_process'
-import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from 'fs'
+import { type ChildProcess, spawn, execSync } from 'child_process'
+import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync, openSync, closeSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 
@@ -50,34 +50,26 @@ const MAX_LOG_LINES = 300
 // Ensure the directory exists on module load
 try { mkdirSync(INFERENCE_DIR, { recursive: true }) } catch { /* ignore */ }
 
-// Module-level ref — survives across requests in the same process
-let _proc: ChildProcess | null = null
-
-function appendLog(chunk: Buffer) {
-  // tqdm uses \r — split on both \r and \n, update progress lines in place
-  const segments = chunk.toString().split(/\r|\n/)
-  let lines: string[] = []
-  try {
-    const existing = readFileSync(LOG_FILE, 'utf-8').split('\n').filter(Boolean)
-    lines = existing
-  } catch { /* first write */ }
-
-  for (const seg of segments) {
-    const line = seg.trim()
-    if (!line) continue
-    const last = lines[lines.length - 1] ?? ''
-    if (last.includes('%|') && line.includes('%|')) {
-      lines[lines.length - 1] = line // update progress bar in place
-    } else {
-      lines.push(line)
-    }
-  }
-  if (lines.length > MAX_LOG_LINES) lines.splice(0, lines.length - MAX_LOG_LINES)
-  try { writeFileSync(LOG_FILE, lines.join('\n') + '\n', 'utf-8') } catch { /* ignore */ }
-}
-
 export function getServerLogs(): string[] {
-  try { return readFileSync(LOG_FILE, 'utf-8').split('\n').filter(Boolean) } catch { return [] }
+  try {
+    const raw = readFileSync(LOG_FILE, 'utf-8')
+    // Python writes directly to the log file — collapse \r-separated progress
+    // lines so only the latest progress bar is shown.
+    const segments = raw.split(/\r|\n/).filter(Boolean)
+    const lines: string[] = []
+    for (const seg of segments) {
+      const line = seg.trim()
+      if (!line) continue
+      const last = lines[lines.length - 1] ?? ''
+      if (last.includes('%|') && line.includes('%|')) {
+        lines[lines.length - 1] = line // keep latest progress bar only
+      } else {
+        lines.push(line)
+      }
+    }
+    // Return only the last MAX_LOG_LINES
+    return lines.slice(-MAX_LOG_LINES)
+  } catch { return [] }
 }
 
 export function clearServerLogs() {
@@ -180,9 +172,11 @@ export function spawnInstall(python: string): ChildProcess {
 }
 
 /**
- * Spawn the inference server in the background and return immediately.
- * The caller should poll isServerRunning() to detect readiness —
- * first run may take many minutes due to model download.
+ * Spawn the inference server as a fully detached background process.
+ * It writes stdout/stderr directly to the log file so it survives
+ * independently of the Node.js server lifecycle (page navigations,
+ * server restarts, etc.). The caller should poll isServerRunning()
+ * to detect readiness.
  */
 export function spawnServer(python: string): void {
   // Kill stale process if alive — but ONLY if it's actually a Python process.
@@ -195,35 +189,36 @@ export function spawnServer(python: string): void {
     }
     clearPid()
   }
-  if (_proc) { try { _proc.kill('SIGKILL') } catch { /* ignore */ } _proc = null }
   // Force-free the port in case a zombie thread pool is still holding it
   killPort(LOCAL_INFERENCE_PORT)
 
   const scriptPath = resolveScriptPath()
+  clearServerLogs()
+
+  // Open the log file for direct writing — the detached process writes here
+  // instead of via pipes, so it survives even if the Node.js server restarts.
+  const logFd = openSync(LOG_FILE, 'w')
+
   const proc = spawn(python, ['-u', scriptPath, '--port', String(LOCAL_INFERENCE_PORT)], {
-    stdio: 'pipe',
-    detached: false,
+    stdio: ['ignore', logFd, logFd],
+    detached: true,
     env: { ...process.env, PYTHONUNBUFFERED: '1' },
   })
 
-  if (!proc.pid) throw new Error('Failed to spawn inference server')
+  if (!proc.pid) {
+    closeSync(logFd)
+    throw new Error('Failed to spawn inference server')
+  }
 
-  _proc = proc
   writePid(proc.pid)
-  clearServerLogs()
-  proc.stdout?.on('data', appendLog)
-  proc.stderr?.on('data', appendLog)
-  proc.on('error', (err) => {
-    appendLog(Buffer.from(`[spawn error] ${err.message}\n`))
-    _proc = null
-    clearPid()
-  })
-  proc.on('exit', () => { _proc = null; clearPid() })
+  closeSync(logFd)
+
+  // Detach: let the Python process run independently of this Node.js process
+  proc.unref()
 }
 
 export function stopServer(): boolean {
   let stopped = false
-  if (_proc) { try { _proc.kill('SIGKILL'); stopped = true } catch { /* ignore */ } _proc = null }
   const pid = storedPid()
   if (pid && isAlive(pid) && isPythonProcess(pid)) {
     try { process.kill(pid, 'SIGKILL'); stopped = true } catch { /* ignore */ }
