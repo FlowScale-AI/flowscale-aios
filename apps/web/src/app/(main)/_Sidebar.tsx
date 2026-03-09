@@ -97,12 +97,12 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
       {/* Nav */}
       <div className="flex flex-col gap-0.5 p-2 flex-1 overflow-y-auto overflow-x-hidden">
 
-        <NavItem
+        {/* <NavItem
           href="/explore"
           icon={Storefront}
           label="Discover"
           active={pathname === '/explore' || pathname.startsWith('/explore/')}
-        />
+        /> */}
 
         <NavItem
           href="/apps"
