@@ -1,5 +1,5 @@
 {
-  "name": "flowscale-image-generator",
+  "name": "flowscale-image-gen-and-resize",
   "version": "1.0.0",
   "private": true,
   "type": "module",

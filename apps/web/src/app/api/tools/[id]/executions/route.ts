@@ -11,6 +11,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { inFlightControllers } from '@/lib/inferenceRegistry'
 import { getHistory } from '@/lib/comfyui-client'
+import { getComfyOrgApiKey as getComfyOrgApiKeyServer } from '@/lib/providerSettings'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
 
@@ -175,7 +176,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!tool) return NextResponse.json({ error: 'Tool not found' }, { status: 404 })
 
   const body = await req.json()
-  const { inputs, comfyOrgApiKey } = body
+  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody } = body
+  const comfyOrgApiKey = comfyOrgApiKeyFromBody || getComfyOrgApiKeyServer()
 
   // ── API-engine tools (non-ComfyUI) ──────────────────────────────────────────
   if (tool.engine === 'api') {

@@ -32,6 +32,20 @@ export function setComfyUIPath(p: string): void {
   writeSettingsFile(settings)
 }
 
+export function getComfyOrgApiKey(): string | undefined {
+  return readSettingsFile()['comfyOrgApiKey'] || undefined
+}
+
+export function setComfyOrgApiKey(key: string): void {
+  const settings = readSettingsFile()
+  if (key) {
+    settings['comfyOrgApiKey'] = key
+  } else {
+    delete settings['comfyOrgApiKey']
+  }
+  writeSettingsFile(settings)
+}
+
 export const PROVIDERS: Record<ProviderName, { label: string; baseUrl: string; docsUrl: string }> = {
   fal: {
     label: 'fal.ai',

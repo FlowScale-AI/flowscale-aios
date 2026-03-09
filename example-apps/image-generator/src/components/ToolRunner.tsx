@@ -13,7 +13,7 @@ export function ToolRunner({ tool }: Props) {
   const inputFields = schema.filter((f) => f.isInput && f.enabled !== false)
 
   const [inputs, setInputs] = useState<Record<string, unknown>>({})
-  const { run, cancel, reset, status, result, error } = useRunTool()
+  const { run, reset, status, result, error } = useRunTool()
 
   // Seed defaults from schema when tool changes
   useEffect(() => {
@@ -90,15 +90,6 @@ export function ToolRunner({ tool }: Props) {
             {running ? 'Running…' : 'Run'}
           </button>
 
-          {running && (
-            <button
-              type="button"
-              onClick={cancel}
-              className="px-4 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
-            >
-              Cancel
-            </button>
-          )}
         </div>
       </form>
 

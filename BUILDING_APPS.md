@@ -47,6 +47,8 @@ for (const tool of tools) {
 }
 ```
 
+![alt text](image-1.png)
+
 ## Inspecting Inputs
 
 Each tool has a `schemaJson` mapping out what inputs it requires. Input keys are always formatted as **`"${nodeId}__${paramName}"`**.
@@ -61,6 +63,8 @@ for (const field of inputs) {
   console.log(`Type: ${field.paramType}`)                 // e.g. "string"
 }
 ```
+
+![alt text](image-2.png)
 
 ## Running a tool
 
@@ -79,6 +83,9 @@ for (const output of result.outputs) {
   console.log(`Generated ${output.kind}:`, fullUrl)
 }
 ```
+
+![alt text](image-3.png)
+![alt text](image-4.png)
 
 ## Progress Callbacks
 

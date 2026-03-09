@@ -49,10 +49,6 @@ export const apiClient = {
     return sdkClient.tools.list() as unknown as Promise<ToolDefinition[]>
   },
 
-  async getTool(id: string): Promise<ToolDefinition> {
-    return sdkClient.tools.get(id) as unknown as Promise<ToolDefinition>
-  },
-
   async runTool(
     id: string,
     inputs: Record<string, unknown>,

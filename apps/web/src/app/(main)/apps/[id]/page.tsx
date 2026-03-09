@@ -895,8 +895,9 @@ export default function ToolPage() {
         try {
           const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
           if (!histRes.ok) return
-          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean } }>
-          if (hist[run.promptId]?.status?.completed) finish()
+          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
+          const s = hist[run.promptId]?.status
+          if (s?.completed || s?.status_str === 'error') finish()
         } catch { /* ignore */ }
       }, 3000)
 
@@ -954,7 +955,7 @@ export default function ToolPage() {
             <p className="text-xs text-zinc-500 mt-0.5">{tool.description}</p>
           )}
         </div>
-        {isRunning && tool.engine === 'api' && (
+        {isRunning && (
           <button
             onClick={handleStopInference}
             disabled={stopping}
