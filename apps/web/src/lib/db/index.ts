@@ -187,30 +187,6 @@ export function getDb() {
     sqlite.exec('ALTER TABLE executions ADD COLUMN user_id TEXT')
   }
 
-  // Seed built-in API tools (idempotent)
-  const Z_IMAGE_ID = 'z-image-turbo-builtin'
-  const Z_IMAGE_DESC = 'Generate high-quality images locally using Z-Image Turbo. Runs on your GPU — no API key needed.'
-  const zImageExists = sqlite.prepare('SELECT id FROM tools WHERE id = ?').get(Z_IMAGE_ID)
-  if (zImageExists) {
-    // Keep description up to date
-    sqlite.prepare('UPDATE tools SET description = ? WHERE id = ?').run(Z_IMAGE_DESC, Z_IMAGE_ID)
-  } else {
-    const zImageSchema = JSON.stringify([
-      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'prompt', paramType: 'string', defaultValue: 'a beautiful landscape', label: 'Prompt', isInput: true, enabled: true },
-      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'negative_prompt', paramType: 'string', defaultValue: '', label: 'Negative Prompt', isInput: true, enabled: true },
-      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'width', paramType: 'number', defaultValue: 1024, label: 'Width', isInput: true, enabled: true },
-      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'height', paramType: 'number', defaultValue: 1024, label: 'Height', isInput: true, enabled: true },
-      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'num_inference_steps', paramType: 'number', defaultValue: 4, label: 'Steps', isInput: true, enabled: true },
-      { nodeId: 'api', nodeType: 'ZImageTurbo', nodeTitle: 'Z-Image Turbo', paramName: 'guidance_scale', paramType: 'number', defaultValue: 0, label: 'Guidance Scale', isInput: true, enabled: true },
-      { nodeId: 'api_output', nodeType: 'APIImageOutput', nodeTitle: 'Output', paramName: 'image', paramType: 'image', isInput: false, enabled: true },
-    ])
-    const zImageWorkflow = JSON.stringify({ engine: 'api', model: 'Tongyi-MAI/Z-Image-Turbo' })
-    const zImageHash = crypto.createHash('sha256').update(zImageWorkflow).digest('hex')
-    sqlite.prepare(
-      'INSERT OR IGNORE INTO tools (id, name, description, engine, workflow_json, workflow_hash, schema_json, layout, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(Z_IMAGE_ID, 'Z-Image Turbo', Z_IMAGE_DESC, 'api', zImageWorkflow, zImageHash, zImageSchema, 'left-right', 'production', Date.now())
-  }
-
   // First-run: seed admin user if no users exist.
   // Uses a transaction with INSERT OR IGNORE to be fully idempotent — safe
   // even if next build prerenders the login page across multiple workers.

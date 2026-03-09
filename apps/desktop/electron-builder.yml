@@ -34,9 +34,14 @@ linux:
   icon: assets/icon.png
   category: Development
 
+publish:
+  provider: generic
+  url: https://flowscale-aios.s3.us-east-1.amazonaws.com
+
 mac:
   target:
     - dmg
+    - zip
   icon: assets/icon.png
   category: public.app-category.developer-tools
 

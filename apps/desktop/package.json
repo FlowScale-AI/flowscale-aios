@@ -1,6 +1,6 @@
 {
   "name": "@flowscale/aios-desktop",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "license": "AGPL-3.0-only",
   "description": "FlowScale AIOS desktop application",
   "author": {
@@ -19,7 +19,8 @@
     "rebuild": "electron-rebuild"
   },
   "dependencies": {
-    "electron-log": "^5.3.0"
+    "electron-log": "^5.3.0",
+    "electron-updater": "^6.8.3"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",

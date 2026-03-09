@@ -1,4 +1,6 @@
-# FlowScale AIOS
+# FlowScale AIOS — Beta
+
+> **This project is currently in beta.** Expect rough edges and breaking changes as we iterate.
 
 An open-source platform to build, test, and deploy AI workflows powered by ComfyUI — available as a web app and native desktop app.
 
