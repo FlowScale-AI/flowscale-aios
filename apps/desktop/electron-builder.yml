@@ -3,7 +3,7 @@ productName: FlowScale AI OS
 copyright: Copyright © 2025 FlowScale
 
 directories:
-  output: releases
+  output: release
   buildResources: assets
 
 files:
