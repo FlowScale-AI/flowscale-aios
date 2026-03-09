@@ -44,10 +44,27 @@ else
   warn "No app data found — skipping."
 fi
 
+# Remove Launch Services registration (removes Spotlight / "Open With" entries)
+info "Clearing Launch Services registration…"
+# lsregister -u unregisters the app so Spotlight forgets it immediately
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [[ -x "$LSREGISTER" ]]; then
+  # Unregister both common install locations
+  $LSREGISTER -u "/Applications/FlowScale AI OS.app" 2>/dev/null || true
+  $LSREGISTER -u "$HOME/Applications/FlowScale AI OS.app" 2>/dev/null || true
+fi
+success "Launch Services cleared."
+
 # Clear icon cache
 info "Clearing macOS icon cache…"
-sudo rm -rf /Library/Caches/com.apple.iconservices.store
+sudo rm -rf /Library/Caches/com.apple.iconservices.store 2>/dev/null || true
+killall -HUP Finder 2>/dev/null || true
 success "Icon cache cleared."
+
+# Force Spotlight to re-index /Applications so stale entries disappear
+info "Refreshing Spotlight index…"
+mdutil -E /Applications 2>/dev/null || true
+success "Spotlight refreshed."
 
 # Restart Dock
 info "Restarting Dock…"
