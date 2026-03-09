@@ -29,6 +29,7 @@ extraResources:
       - '**/*.py'
 
 linux:
+  executableName: flowscale-aios
   target:
     - AppImage
   icon: assets/icon.png
