@@ -158,6 +158,16 @@ In **production**, Electron spawns the Next.js standalone server from `process.r
 
 ComfyUI is installed at `/home/silverion/projects/flowscale/ComfyUI/`.
 
+### Log file paths (electron-log)
+
+The Electron app writes logs via `electron-log`. The log file location per platform:
+
+- **Linux:** `~/.config/flowscale-aios/logs/main.log`
+- **macOS:** `~/Library/Logs/flowscale-aios/main.log`
+- **Windows:** `%APPDATA%\flowscale-aios\logs\main.log`
+
+These logs are automatically attached to issue reports submitted via the "Report Issue" button in the sidebar (read via `report:getSystemInfo` IPC, last 1000 lines).
+
 ### Reserved ports
 
 - **14173** — `apps/web` Next.js dev server

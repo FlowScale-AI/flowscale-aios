@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Wrench,
   Plugs,
@@ -12,9 +12,11 @@ import {
   SignOut,
   Cube,
   ImageSquare,
+  Bug,
 } from 'phosphor-react'
 import type { Role } from '@/lib/auth'
 import { useUpdateStore } from '@/store/updateStore'
+import ReportIssueModal from '@/components/ReportIssueModal'
 
 function SectionLabel({ label }: { label: string }) {
   return (
@@ -72,6 +74,7 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
   const pathname = usePathname()
   const router = useRouter()
   const { status, setAvailable, setNotAvailable, setProgress, setDownloaded, setError } = useUpdateStore()
+  const [reportOpen, setReportOpen] = useState(false)
 
   useEffect(() => {
     const u = window.desktop?.updates
@@ -162,6 +165,15 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
             <span className="absolute top-2 right-2 size-2 rounded-full bg-emerald-400 ring-2 ring-[#121214]" />
           )}
         </div>
+        <button
+          onClick={() => setReportOpen(true)}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-zinc-400 hover:bg-white/5 hover:text-zinc-100 transition-colors duration-150 whitespace-nowrap"
+        >
+          <Bug size={20} className="shrink-0" />
+          <span className="text-sm font-medium opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75">
+            Report Issue
+          </span>
+        </button>
         <div className="flex items-center gap-3 px-3 py-2 mt-1">
           <div className="size-7 rounded-full bg-zinc-800 border border-white/10 shrink-0 flex items-center justify-center">
             <span className="text-[10px] text-zinc-300 font-medium uppercase">
@@ -180,6 +192,7 @@ export default function Sidebar({ role, username }: { role: Role; username: stri
           </button>
         </div>
       </div>
+      <ReportIssueModal isOpen={reportOpen} onClose={() => setReportOpen(false)} />
     </nav>
   )
 }

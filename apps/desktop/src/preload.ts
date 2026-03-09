@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld('desktop', {
       }
     },
   },
+  report: {
+    getSystemInfo: (): Promise<{ version: string; platform: string; logs: string }> =>
+      ipcRenderer.invoke('report:getSystemInfo'),
+  },
   updates: {
     onAvailable: (callback: (info: { version: string }) => void): (() => void) => {
       const handler = (_: unknown, info: { version: string }): void => callback(info)

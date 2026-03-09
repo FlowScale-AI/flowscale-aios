@@ -28,6 +28,9 @@ interface DesktopBridge {
     clearFlowscaleTokens(): Promise<void>
     onComplete(callback: (tokens: FlowscaleTokens) => void): () => void
   }
+  report?: {
+    getSystemInfo(): Promise<{ version: string; platform: string; logs: string }>
+  }
   updates?: {
     onAvailable(callback: (info: { version: string }) => void): () => void
     onNotAvailable(callback: () => void): () => void

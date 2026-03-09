@@ -7,6 +7,7 @@ import log from 'electron-log'
 import { registerAuthIpc, handleOAuthCallback } from './ipc/auth.js'
 import { registerDialogIpc } from './ipc/dialog.js'
 import { registerUpdaterIpc } from './ipc/updates.js'
+import { registerReportIpc } from './ipc/report.js'
 import type { FlowscaleTokens } from './config/store.js'
 
 log.initialize()
@@ -243,6 +244,7 @@ app.whenReady().then(async () => {
   registerAuthIpc()
   registerDialogIpc()
   registerUpdaterIpc()
+  registerReportIpc()
 
   // macOS: register protocol after ready
   if (process.platform === 'darwin') {
