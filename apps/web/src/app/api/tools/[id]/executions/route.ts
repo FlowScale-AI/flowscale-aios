@@ -46,6 +46,58 @@ async function saveComfyOutputsToDisk(
 
 const API_OUTPUTS_DIR = join(homedir(), '.flowscale', 'aios-outputs')
 
+/**
+ * Make a POST request to the inference server with NO body/idle timeout.
+ *
+ * Node.js `fetch` (undici) has a hard-coded 300s (5 min) body timeout that
+ * cannot be configured. Slow inference (e.g. 10–15 min on MPS) exceeds this,
+ * causing "fetch failed". Using `http.request` avoids the timeout entirely.
+ */
+function inferencePost(
+  port: number,
+  body: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<{ ok: boolean; status: number; body: string }> {
+  const http = require('http') as typeof import('http')
+  const payload = JSON.stringify(body)
+
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: '/generate',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+        // No socket/response timeout — we wait as long as the model needs
+      },
+      (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (c: Buffer) => chunks.push(c))
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf-8')
+          resolve({ ok: res.statusCode! >= 200 && res.statusCode! < 300, status: res.statusCode!, body: text })
+        })
+        res.on('error', reject)
+      },
+    )
+
+    req.on('error', reject)
+
+    // Respect the AbortSignal (user cancel / 30-min safety net)
+    const onAbort = () => { req.destroy(new Error('AbortError')); reject(new Error('AbortError')) }
+    if (signal.aborted) { onAbort(); return }
+    signal.addEventListener('abort', onAbort, { once: true })
+    req.on('close', () => signal.removeEventListener('abort', onAbort))
+
+    req.write(payload)
+    req.end()
+  })
+}
+
 async function runApiInference(
   executionId: string,
   model: string,
@@ -57,29 +109,23 @@ async function runApiInference(
   const LOCAL_INFERENCE_PORT = 8765
 
   try {
-    const inferRes = await fetch(`http://127.0.0.1:${LOCAL_INFERENCE_PORT}/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: inputs?.['api__prompt'] ?? '',
-        negative_prompt: inputs?.['api__negative_prompt'] ?? '',
-        width: inputs?.['api__width'] ?? 1024,
-        height: inputs?.['api__height'] ?? 1024,
-        num_inference_steps: inputs?.['api__num_inference_steps'] ?? 4,
-        guidance_scale: inputs?.['api__guidance_scale'] ?? 0,
-        seed,
-      }),
-      signal: AbortSignal.any([signal, AbortSignal.timeout(1_800_000)]),
-    })
+    const inferRes = await inferencePost(LOCAL_INFERENCE_PORT, {
+      prompt: inputs?.['api__prompt'] ?? '',
+      negative_prompt: inputs?.['api__negative_prompt'] ?? '',
+      width: inputs?.['api__width'] ?? 1024,
+      height: inputs?.['api__height'] ?? 1024,
+      num_inference_steps: inputs?.['api__num_inference_steps'] ?? 4,
+      guidance_scale: inputs?.['api__guidance_scale'] ?? 0,
+      seed,
+    }, AbortSignal.any([signal, AbortSignal.timeout(1_800_000)]))
 
     if (!inferRes.ok) {
-      const errText = await inferRes.text()
-      await db.update(executions).set({ status: 'error', errorMessage: errText, completedAt: Date.now() })
+      await db.update(executions).set({ status: 'error', errorMessage: inferRes.body, completedAt: Date.now() })
         .where(eq(executions.id, executionId))
       return
     }
 
-    const { image: imageB64 } = await inferRes.json() as { image: string }
+    const { image: imageB64 } = JSON.parse(inferRes.body) as { image: string }
     const imgBuffer = Buffer.from(imageB64, 'base64')
     const filename = 'output.png'
     const outDir = join(API_OUTPUTS_DIR, executionId)
@@ -94,14 +140,13 @@ async function runApiInference(
       completedAt: Date.now(),
     }).where(eq(executions.id, executionId))
   } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      await db.update(executions).set({ status: 'error', errorMessage: 'Cancelled', completedAt: Date.now() })
-        .where(eq(executions.id, executionId))
-    } else {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      await db.update(executions).set({ status: 'error', errorMessage: msg, completedAt: Date.now() })
-        .where(eq(executions.id, executionId))
-    }
+    const msg = err instanceof Error ? err.message : 'Unknown error'
+    const isCancel = msg === 'AbortError' || (err instanceof Error && err.name === 'AbortError')
+    await db.update(executions).set({
+      status: 'error',
+      errorMessage: isCancel ? 'Cancelled' : msg,
+      completedAt: Date.now(),
+    }).where(eq(executions.id, executionId))
   } finally {
     inFlightControllers.delete(executionId)
   }
