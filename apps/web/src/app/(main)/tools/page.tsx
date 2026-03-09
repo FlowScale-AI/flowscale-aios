@@ -12,6 +12,9 @@ import {
   ArrowRight,
   Download,
   SpinnerGap,
+  CheckCircle,
+  Spinner,
+  WarningCircle,
 } from 'phosphor-react'
 import { PageTransition, Modal } from '@/components/ui'
 
@@ -42,7 +45,17 @@ const BUILTIN_CATALOG: CatalogEntry[] = [
   },
 ]
 
-function CustomToolCard({ tool, onDelete }: { tool: CustomTool; onDelete: () => void }) {
+function CustomToolCard({
+  tool,
+  onDelete,
+  inferenceStatus,
+}: {
+  tool: CustomTool
+  onDelete: () => void
+  inferenceStatus?: 'running' | 'starting' | 'stopped'
+}) {
+  const showInference = tool.engine === 'api' && inferenceStatus
+
   return (
     <div className="group flex flex-col rounded-xl border border-white/5 bg-[var(--color-background-panel)] hover:border-zinc-700 transition-all duration-150 relative overflow-hidden">
       <Link href={`/tools/${tool.id}`} className="flex flex-col p-4 flex-1">
@@ -71,7 +84,24 @@ function CustomToolCard({ tool, onDelete }: { tool: CustomTool; onDelete: () => 
         </p>
       </Link>
       <div className="flex items-center justify-between px-4 py-2 border-t border-white/5">
-        <span className="text-xs text-zinc-600">Click to run</span>
+        {showInference ? (
+          <span className="flex items-center gap-1.5 text-xs">
+            {inferenceStatus === 'running' && (
+              <><CheckCircle size={12} weight="fill" className="text-emerald-500" />
+              <span className="text-emerald-400">Running</span></>
+            )}
+            {inferenceStatus === 'starting' && (
+              <><Spinner size={12} className="text-amber-400 animate-spin" />
+              <span className="text-amber-400">Starting…</span></>
+            )}
+            {inferenceStatus === 'stopped' && (
+              <><WarningCircle size={12} weight="fill" className="text-zinc-500" />
+              <span className="text-zinc-500">Not running</span></>
+            )}
+          </span>
+        ) : (
+          <span className="text-xs text-zinc-600">Click to run</span>
+        )}
         <button
           onClick={(e) => { e.stopPropagation(); onDelete() }}
           className="text-zinc-600 hover:text-red-400 transition-colors"
@@ -170,6 +200,25 @@ export default function ToolsPage() {
       !search.trim() ||
       e.name.toLowerCase().includes(search.toLowerCase()) ||
       e.description.toLowerCase().includes(search.toLowerCase()),
+  )
+          
+  // Poll inference server status — shown on api-engine tool cards
+  const hasApiTools = customTools.some((t) => t.engine === 'api')
+  const { data: inferenceStatus } = useQuery<'running' | 'starting' | 'stopped'>({
+    queryKey: ['inference-status'],
+    queryFn: async () => {
+      const res = await fetch('/api/local-inference/status')
+      const data = await res.json() as { status?: string; running: boolean }
+      return (data.status as 'running' | 'starting' | 'stopped') ?? (data.running ? 'running' : 'stopped')
+    },
+    enabled: hasApiTools,
+    refetchInterval: 3000,
+  })
+
+  const filteredTools = customTools.filter((t) =>
+    !search.trim() ||
+    t.name.toLowerCase().includes(search.toLowerCase()) ||
+    (t.description ?? '').toLowerCase().includes(search.toLowerCase())
   )
 
   async function confirmDelete() {
@@ -298,6 +347,7 @@ export default function ToolsPage() {
                     key={tool.id}
                     tool={tool}
                     onDelete={() => setPendingDelete(tool)}
+                    inferenceStatus={tool.engine === 'api' ? inferenceStatus : undefined}
                   />
                 ))}
               </div>

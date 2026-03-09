@@ -15,6 +15,17 @@ echo -e "${BOLD}FlowScale AI OS — Uninstall${RESET}"
 echo "────────────────────────────────────────"
 echo ""
 
+# Kill any running FlowScale processes first
+info "Stopping running processes…"
+# Kill inference server on port 8765
+lsof -ti TCP:8765 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+# Kill Next.js standalone server on port 14173
+lsof -ti TCP:14173 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+# Kill the Electron app itself
+killall "FlowScale AI OS" 2>/dev/null || true
+sleep 1
+success "Processes stopped."
+
 # Remove the app bundle
 if [[ -d "/Applications/FlowScale AI OS.app" ]]; then
   info "Removing /Applications/FlowScale AI OS.app…"

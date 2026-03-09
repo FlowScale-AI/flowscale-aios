@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { CheckCircle, WarningCircle, Spinner, Stop } from 'phosphor-react'
 
 export type InferenceStatus = 'checking' | 'running' | 'starting' | 'stopped'
@@ -39,21 +40,20 @@ export function LocalInferenceSetup() {
   async function checkStatus() {
     try {
       const res = await fetch('/api/local-inference/status')
-      const { running } = await res.json() as { running: boolean }
-      if (running) {
-        failCountRef.current = 0
+      const data = await res.json() as { status?: string; running: boolean }
+      const serverStatus = data.status as InferenceStatus | undefined
+      if (serverStatus === 'running') {
         applyStatus('running')
+      } else if (serverStatus === 'starting') {
+        applyStatus('starting')
+      } else if (serverStatus === 'stopped') {
+        applyStatus('stopped')
       } else {
-        failCountRef.current++
-        // Only transition to stopped after 6 consecutive failures (~12s) —
-        // CPU inference holds the GIL and can briefly block health checks
-        if (failCountRef.current >= 6) {
-          applyStatus(statusRef.current === 'starting' ? 'starting' : 'stopped')
-        }
+        // Fallback for old API shape
+        applyStatus(data.running ? 'running' : 'stopped')
       }
     } catch {
-      failCountRef.current++
-      if (failCountRef.current >= 6 && statusRef.current !== 'starting') applyStatus('stopped')
+      // Network error — don't change status immediately, might be transient
     }
   }
 
@@ -62,6 +62,41 @@ export function LocalInferenceSetup() {
     pollRef.current = setInterval(checkStatus, 2000)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [])
+
+  // Navigation guard — warn when model is downloading / deps installing
+  const isActive = installing || status === 'starting'
+  useEffect(() => {
+    if (!isActive) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isActive])
+
+  // Intercept in-app link clicks when download/install is active
+  useEffect(() => {
+    if (!isActive) return
+    const handler = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null
+      if (!anchor) return
+      const href = anchor.getAttribute('href')
+      if (!href || href.startsWith('http') || href.startsWith('#')) return
+      // It's an internal navigation — confirm before allowing
+      const ok = window.confirm(
+        'The inference server is still setting up (downloading model / installing dependencies). ' +
+        'It will continue in the background, but you won\'t be able to see progress.\n\n' +
+        'Leave this page?'
+      )
+      if (!ok) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    // Use capture phase to intercept before Next.js router handles it
+    document.addEventListener('click', handler, true)
+    return () => document.removeEventListener('click', handler, true)
+  }, [isActive])
 
   async function handleInstall() {
     setInstalling(true)

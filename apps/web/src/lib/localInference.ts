@@ -1,24 +1,39 @@
-import { ChildProcess, spawn, execSync } from 'child_process'
-import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from 'fs'
-import { join } from 'path'
+import { type ChildProcess, spawn, execSync } from 'child_process'
+import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync, openSync, closeSync } from 'fs'
+import { join, dirname } from 'path'
 import { homedir } from 'os'
 
 function resolveScriptPath(): string {
-  // In packaged Electron app: process.resourcesPath points to .app/Contents/Resources/
-  // where extraResources are copied. In dev: fall back to repo structure.
+  const scriptName = join('scripts', 'z_image_turbo_server.py')
+
+  // 1. Electron's process.resourcesPath (set when running inside Electron binary)
   if (process.resourcesPath) {
-    const packaged = join(process.resourcesPath, 'scripts', 'z_image_turbo_server.py')
-    if (existsSync(packaged)) return packaged
+    const p = join(process.resourcesPath, scriptName)
+    if (existsSync(p)) return p
   }
-  // Dev fallback: repo root relative to apps/web/
+
+  // 2. Standalone server: derive Resources dir from the server.js path.
+  //    server.js lives at: .app/Contents/Resources/apps/web/.next/standalone/apps/web/server.js
+  //    scripts live at:    .app/Contents/Resources/scripts/z_image_turbo_server.py
+  if (process.argv[1]) {
+    const serverDir = dirname(process.argv[1])
+    // Walk up from apps/web/ to the standalone root, then up to Resources
+    const resourcesDir = join(serverDir, '..', '..', '..', '..', '..', '..')
+    const p = join(resourcesDir, scriptName)
+    if (existsSync(p)) return p
+  }
+
+  // 3. Dev fallback: repo root relative to apps/web/
   return join(process.cwd(), '../../scripts/z_image_turbo_server.py')
 }
 
 function killPort(port: number): void {
-  // macOS uses lsof, Linux uses fuser
+  // Kill only processes LISTENING on this port — never connections in TIME_WAIT
+  // or ESTABLISHED, which could match the Node.js server itself (if it recently
+  // made a health-check fetch to this port).
   try {
     if (process.platform === 'darwin') {
-      const pids = execSync(`lsof -ti :${port}`, { encoding: 'utf-8' }).trim()
+      const pids = execSync(`lsof -ti TCP:${port} -sTCP:LISTEN`, { encoding: 'utf-8' }).trim()
       if (pids) execSync(`kill -9 ${pids.split('\n').join(' ')}`, { stdio: 'ignore' })
     } else {
       execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' })
@@ -35,34 +50,28 @@ const MAX_LOG_LINES = 300
 // Ensure the directory exists on module load
 try { mkdirSync(INFERENCE_DIR, { recursive: true }) } catch { /* ignore */ }
 
-// Module-level ref — survives across requests in the same process
-let _proc: ChildProcess | null = null
-
-function appendLog(chunk: Buffer) {
-  // tqdm uses \r — split on both \r and \n, update progress lines in place
-  const segments = chunk.toString().split(/\r|\n/)
-  let lines: string[] = []
-  try {
-    const existing = readFileSync(LOG_FILE, 'utf-8').split('\n').filter(Boolean)
-    lines = existing
-  } catch { /* first write */ }
-
-  for (const seg of segments) {
-    const line = seg.trim()
-    if (!line) continue
-    const last = lines[lines.length - 1] ?? ''
-    if (last.includes('%|') && line.includes('%|')) {
-      lines[lines.length - 1] = line // update progress bar in place
-    } else {
-      lines.push(line)
-    }
-  }
-  if (lines.length > MAX_LOG_LINES) lines.splice(0, lines.length - MAX_LOG_LINES)
-  try { writeFileSync(LOG_FILE, lines.join('\n') + '\n', 'utf-8') } catch { /* ignore */ }
-}
-
 export function getServerLogs(): string[] {
-  try { return readFileSync(LOG_FILE, 'utf-8').split('\n').filter(Boolean) } catch { return [] }
+  try {
+    const raw = readFileSync(LOG_FILE, 'utf-8')
+    // Python writes directly to the log file — collapse \r-separated progress
+    // lines so only the latest progress bar is shown.
+    const segments = raw.split(/\r|\n/).filter(Boolean)
+    const lines: string[] = []
+    for (const seg of segments) {
+      const line = seg.trim()
+      if (!line) continue
+      // Filter out noisy health-check access logs
+      if (line.includes('/health') && line.includes('200')) continue
+      const last = lines[lines.length - 1] ?? ''
+      if (last.includes('%|') && line.includes('%|')) {
+        lines[lines.length - 1] = line // keep latest progress bar only
+      } else {
+        lines.push(line)
+      }
+    }
+    // Return only the last MAX_LOG_LINES
+    return lines.slice(-MAX_LOG_LINES)
+  } catch { return [] }
 }
 
 export function clearServerLogs() {
@@ -85,6 +94,21 @@ function isAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true } catch { return false }
 }
 
+/** Check if a PID is actually a Python process (our inference server), not a recycled PID. */
+function isPythonProcess(pid: number): boolean {
+  try {
+    const cmd = execSync(
+      process.platform === 'darwin'
+        ? `ps -p ${pid} -o command=`
+        : `ps -p ${pid} -o cmd=`,
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }
+    ).trim()
+    return cmd.includes('python') || cmd.includes('z_image_turbo_server')
+  } catch {
+    return false
+  }
+}
+
 export async function isServerRunning(): Promise<boolean> {
   try {
     const res = await fetch(`http://127.0.0.1:${LOCAL_INFERENCE_PORT}/health`, {
@@ -94,6 +118,28 @@ export async function isServerRunning(): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/** Check if the Python process is alive (PID file + process check). */
+export function isProcessAlive(): boolean {
+  const pid = storedPid()
+  if (!pid) return false
+  return isAlive(pid) && isPythonProcess(pid)
+}
+
+export type ServerStatus = 'running' | 'starting' | 'stopped'
+
+/**
+ * Returns granular server status:
+ * - `running`: health check passes (model loaded, ready)
+ * - `starting`: process alive but health check fails (downloading/loading)
+ * - `stopped`: no process alive
+ */
+export async function getServerStatus(): Promise<ServerStatus> {
+  const healthy = await isServerRunning()
+  if (healthy) return 'running'
+  if (isProcessAlive()) return 'starting'
+  return 'stopped'
 }
 
 function detectGpuType(): 'rocm' | 'cuda' | 'cpu' {
@@ -150,40 +196,57 @@ export function spawnInstall(python: string): ChildProcess {
 }
 
 /**
- * Spawn the inference server in the background and return immediately.
- * The caller should poll isServerRunning() to detect readiness —
- * first run may take many minutes due to model download.
+ * Spawn the inference server as a fully detached background process.
+ * It writes stdout/stderr directly to the log file so it survives
+ * independently of the Node.js server lifecycle (page navigations,
+ * server restarts, etc.). The caller should poll isServerRunning()
+ * to detect readiness.
  */
 export function spawnServer(python: string): void {
-  // Kill stale process if alive
+  // Kill stale process if alive — but ONLY if it's actually a Python process.
+  // PIDs get recycled by the OS; a stale PID file could point to the Node.js
+  // standalone server itself, and killing it would crash the app.
   const pid = storedPid()
-  if (pid && isAlive(pid)) { try { process.kill(pid, 'SIGKILL') } catch { /* ignore */ } clearPid() }
-  if (_proc) { try { _proc.kill('SIGKILL') } catch { /* ignore */ } _proc = null }
+  if (pid && isAlive(pid)) {
+    if (isPythonProcess(pid)) {
+      try { process.kill(pid, 'SIGKILL') } catch { /* ignore */ }
+    }
+    clearPid()
+  }
   // Force-free the port in case a zombie thread pool is still holding it
   killPort(LOCAL_INFERENCE_PORT)
 
   const scriptPath = resolveScriptPath()
+  clearServerLogs()
+
+  // Open the log file for direct writing — the detached process writes here
+  // instead of via pipes, so it survives even if the Node.js server restarts.
+  const logFd = openSync(LOG_FILE, 'w')
+
   const proc = spawn(python, ['-u', scriptPath, '--port', String(LOCAL_INFERENCE_PORT)], {
-    stdio: 'pipe',
-    detached: false,
+    stdio: ['ignore', logFd, logFd],
+    detached: true,
     env: { ...process.env, PYTHONUNBUFFERED: '1' },
   })
 
-  if (!proc.pid) throw new Error('Failed to spawn inference server')
+  if (!proc.pid) {
+    closeSync(logFd)
+    throw new Error('Failed to spawn inference server')
+  }
 
-  _proc = proc
   writePid(proc.pid)
-  clearServerLogs()
-  proc.stdout?.on('data', appendLog)
-  proc.stderr?.on('data', appendLog)
-  proc.on('exit', () => { _proc = null; clearPid() })
+  closeSync(logFd)
+
+  // Detach: let the Python process run independently of this Node.js process
+  proc.unref()
 }
 
 export function stopServer(): boolean {
   let stopped = false
-  if (_proc) { try { _proc.kill('SIGKILL'); stopped = true } catch { /* ignore */ } _proc = null }
   const pid = storedPid()
-  if (pid && isAlive(pid)) { try { process.kill(pid, 'SIGKILL'); stopped = true } catch { /* ignore */ } }
+  if (pid && isAlive(pid) && isPythonProcess(pid)) {
+    try { process.kill(pid, 'SIGKILL'); stopped = true } catch { /* ignore */ }
+  }
   clearPid()
   // Also kill anything still occupying the port (e.g. a thread-pool zombie)
   killPort(LOCAL_INFERENCE_PORT)

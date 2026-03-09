@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
-import { isServerRunning } from '@/lib/localInference'
+import { getServerStatus } from '@/lib/localInference'
 
 export async function GET() {
-  const running = await isServerRunning()
-  return NextResponse.json({ running })
+  const status = await getServerStatus()
+  return NextResponse.json({ status, running: status === 'running' })
 }
