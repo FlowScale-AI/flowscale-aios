@@ -189,8 +189,13 @@ function startNextServer(port: number): void {
   nextServer.stdout?.on('data', (data: Buffer) => log.info('[next]', data.toString().trim()))
   nextServer.stderr?.on('data', (data: Buffer) => log.warn('[next]', data.toString().trim()))
 
-  nextServer.on('exit', (code) => {
-    log.warn('[server] Next.js server exited with code', code)
+  nextServer.on('exit', (code, signal) => {
+    log.warn('[server] Next.js server exited with code', code, 'signal', signal)
+    // Auto-restart if killed unexpectedly while app is still running
+    if (code !== 0 || signal) {
+      log.info('[server] Restarting Next.js server…')
+      setTimeout(() => startNextServer(port), 1000)
+    }
   })
 }
 
