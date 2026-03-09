@@ -8,6 +8,8 @@ directories:
 
 files:
   - dist/**/*
+  - assets/splash.html
+  - assets/icon.png
   - package.json
 
 extraResources:

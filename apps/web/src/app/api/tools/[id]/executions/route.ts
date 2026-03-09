@@ -69,7 +69,7 @@ async function runApiInference(
         guidance_scale: inputs?.['api__guidance_scale'] ?? 0,
         seed,
       }),
-      signal: AbortSignal.any([signal, AbortSignal.timeout(600_000)]),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(1_800_000)]),
     })
 
     if (!inferRes.ok) {

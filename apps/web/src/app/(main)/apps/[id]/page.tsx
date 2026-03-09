@@ -693,6 +693,20 @@ export default function ToolPage() {
   const [latestOutputs, setLatestOutputs] = useState<OutputItem[]>([])
   const sseRef = useRef<EventSource | null>(null)
 
+  // On mount / when executions load, resume tracking any in-flight execution.
+  // This handles page navigation away and back, or server restarts where
+  // the client-side runningId was lost but the DB still has a 'running' row.
+  const resumedRef = useRef(false)
+  useEffect(() => {
+    if (resumedRef.current || runningId) return
+    if (!tool || executions.length === 0) return
+    const running = executions.find((e) => e.status === 'running')
+    if (running) {
+      resumedRef.current = true
+      setRunningId(running.id)
+    }
+  }, [executions, runningId, tool])
+
   const runMutation = useMutation<ExecResult, Error>({
     mutationFn: async () => {
       const res = await fetch(`/api/tools/${id}/executions`, {

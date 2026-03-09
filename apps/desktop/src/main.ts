@@ -211,6 +211,8 @@ function createWindow(port: number): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     title: 'FlowScale AI OS',
+    backgroundColor: '#09090b',
+    show: false,
     icon: nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'icon.png')),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -220,20 +222,19 @@ function createWindow(port: number): BrowserWindow {
     },
   })
 
-  const url = `http://127.0.0.1:${port}`
+  // Show splash screen immediately, then swap to real app when server is ready
+  const splashPath = path.join(__dirname, '..', 'assets', 'splash.html')
+  win.loadFile(splashPath).then(() => win.show())
 
-  if (isDev) {
-    waitForServer(url)
-      .then(() => win.loadURL(url))
-      .catch((err) => {
-        log.error('[window] Dev server not ready:', err)
-        win.loadURL(url)
-      })
-  } else {
-    waitForServer(url, 60_000)
-      .then(() => win.loadURL(url))
-      .catch(() => win.loadURL(url))
-  }
+  const url = `http://127.0.0.1:${port}`
+  const timeout = isDev ? 30_000 : 60_000
+
+  waitForServer(url, timeout)
+    .then(() => win.loadURL(url))
+    .catch((err) => {
+      log.error('[window] Server not ready:', err)
+      win.loadURL(url)
+    })
 
   // Open external URLs (window.open / <a target="_blank">) in the system browser
   win.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
