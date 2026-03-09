@@ -158,9 +158,7 @@ async def load_model():
             pipe = pipe.to("cuda")
             print("Using CUDA.")
         except torch.OutOfMemoryError:
-            print("GPU OOM — moving model back to CPU then enabling sequential CPU offload.")
-            torch.cuda.empty_cache()
-            pipe.to("cpu")
+            print("GPU OOM — enabling sequential CPU offload (layers streamed to GPU one at a time).")
             torch.cuda.empty_cache()
             pipe.enable_sequential_cpu_offload()
     elif use_mps:
