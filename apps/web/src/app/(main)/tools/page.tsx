@@ -201,9 +201,10 @@ export default function ToolsPage() {
       e.name.toLowerCase().includes(search.toLowerCase()) ||
       e.description.toLowerCase().includes(search.toLowerCase()),
   )
-          
+
+
   // Poll inference server status — shown on api-engine tool cards
-  const hasApiTools = customTools.some((t) => t.engine === 'api')
+  const hasApiTools = myTools.some((t) => t.engine === 'api')
   const { data: inferenceStatus } = useQuery<'running' | 'starting' | 'stopped'>({
     queryKey: ['inference-status'],
     queryFn: async () => {
@@ -214,12 +215,6 @@ export default function ToolsPage() {
     enabled: hasApiTools,
     refetchInterval: 3000,
   })
-
-  const filteredTools = customTools.filter((t) =>
-    !search.trim() ||
-    t.name.toLowerCase().includes(search.toLowerCase()) ||
-    (t.description ?? '').toLowerCase().includes(search.toLowerCase())
-  )
 
   async function confirmDelete() {
     if (!pendingDelete) return
