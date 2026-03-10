@@ -159,7 +159,8 @@ pnpm install --frozen-lockfile --reporter=append-only
 
 # ─── 6. build all packages (turbo respects dependency order) ──────────────────
 info "Building all packages…"
-pnpm build
+# Disable turbo's interactive TUI — it crashes when piped from curl (no TTY).
+TURBO_UI=0 pnpm build
 
 # ─── 8. platform-specific launch ─────────────────────────────────────────────
 OS="$(uname -s)"
