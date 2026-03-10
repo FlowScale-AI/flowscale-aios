@@ -186,7 +186,7 @@ export default function AppsPage() {
           </FadeIn>
 
           {/* Apps Grid */}
-          <section>
+          <section className="mb-5">
             <FadeIn delay={0.15}>
               <div className="flex items-center justify-between mb-6">
                 <h2 className="font-tech text-2xl font-semibold text-white">
