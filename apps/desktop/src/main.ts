@@ -15,6 +15,12 @@ log.initialize()
 const isDev = !app.isPackaged
 const AIOS_PORT_START = 14173
 
+// Give dev a separate userData directory so it gets its own single-instance
+// lock and can run alongside the installed production app simultaneously.
+if (isDev) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'flowscale-aios-dev'))
+}
+
 /** Try ports starting at `start` until one is free, then return it. */
 function findAvailablePort(start: number): Promise<number> {
   return new Promise((resolve) => {
