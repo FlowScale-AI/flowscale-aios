@@ -1,17 +1,29 @@
-'use client'
+"use client";
 
-import Link from 'next/link'
-import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
-import { ArrowUpRight, Warning, MagnifyingGlass, Palette, Cube } from 'phosphor-react'
-import { PageTransition, FadeIn, StaggerGrid, StaggerItem, SkeletonCard } from '@/components/ui'
-import type { AppManifest } from '@/lib/appManifest'
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import {
+  ArrowUpRight,
+  Warning,
+  MagnifyingGlass,
+  Palette,
+  Cube,
+} from "phosphor-react";
+import {
+  PageTransition,
+  FadeIn,
+  StaggerGrid,
+  StaggerItem,
+  SkeletonCard,
+} from "@/components/ui";
+import type { AppManifest } from "@/lib/appManifest";
 
 interface InstalledApp {
-  id: string
-  displayName: string
-  source: string
-  manifest: AppManifest | null
+  id: string;
+  displayName: string;
+  source: string;
+  manifest: AppManifest | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -28,8 +40,12 @@ function CanvasCard() {
               <Palette size={20} weight="duotone" />
             </div>
             <div className="space-y-1.5">
-              <h3 className="font-tech text-base font-medium text-zinc-100 group-hover:text-white transition-colors">Canvas</h3>
-              <p className="text-sm text-zinc-500 line-clamp-2 leading-relaxed">Visual boards for building and arranging your AI workflows.</p>
+              <h3 className="font-tech text-base font-medium text-zinc-100 group-hover:text-white transition-colors">
+                Canvas
+              </h3>
+              <p className="text-sm text-zinc-500 line-clamp-2 leading-relaxed">
+                Visual boards for building and arranging your AI workflows.
+              </p>
             </div>
           </div>
           <div className="absolute top-5 right-5 opacity-0 -translate-x-2 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0">
@@ -38,7 +54,7 @@ function CanvasCard() {
         </div>
       </Link>
     </div>
-  )
+  );
 }
 
 function AppCard({ app }: { app: InstalledApp }) {
@@ -55,12 +71,14 @@ function AppCard({ app }: { app: InstalledApp }) {
                 {app.displayName}
               </h3>
               <p className="text-sm text-zinc-500 line-clamp-2 leading-relaxed">
-                {app.manifest?.description || 'No description'}
+                {app.manifest?.description || "No description"}
               </p>
             </div>
           </div>
-          {app.source === 'sideloaded' && (
-            <span className="absolute top-3 right-3 text-[9px] font-semibold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">dev</span>
+          {app.source === "sideloaded" && (
+            <span className="absolute top-3 right-3 text-[9px] font-semibold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
+              dev
+            </span>
           )}
           <div className="absolute top-5 right-5 opacity-0 -translate-x-2 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0">
             <ArrowUpRight size={16} className="text-zinc-400" />
@@ -68,7 +86,7 @@ function AppCard({ app }: { app: InstalledApp }) {
         </div>
       </Link>
     </div>
-  )
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -76,27 +94,51 @@ function AppCard({ app }: { app: InstalledApp }) {
 // ---------------------------------------------------------------------------
 
 export default function AppsPage() {
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState("");
+  const normalizedQuery = searchQuery.trim().toLowerCase();
 
-  const { data: apps, isLoading, error } = useQuery<InstalledApp[]>({
-    queryKey: ['installed-apps'],
+  const {
+    data: apps,
+    isLoading,
+    error,
+  } = useQuery<InstalledApp[]>({
+    queryKey: ["installed-apps"],
     queryFn: async () => {
-      const res = await fetch('/api/apps')
-      if (!res.ok) throw new Error('Failed to fetch apps')
-      return res.json()
+      const res = await fetch("/api/apps");
+      if (!res.ok) throw new Error("Failed to fetch apps");
+      return res.json();
     },
     staleTime: 30_000,
-  })
+  });
 
-  const filteredApps = (apps ?? []).filter(
-    (app) => app.displayName.toLowerCase().includes(searchQuery.toLowerCase()),
-  )
+  const filteredApps = (apps ?? []).filter((app) => {
+    if (!normalizedQuery) return true;
+
+    const fields = [
+      app.displayName,
+      app.id,
+      app.manifest?.description ?? "",
+      app.source,
+    ];
+
+    return fields.some((field) =>
+      field.toLowerCase().includes(normalizedQuery),
+    );
+  });
+
+  const showCanvasCard =
+    !normalizedQuery ||
+    "canvas".includes(normalizedQuery) ||
+    "visual boards for building and arranging your ai workflows.".includes(
+      normalizedQuery,
+    );
+
+  const hasAnyVisibleResults = showCanvasCard || filteredApps.length > 0;
 
   return (
     <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
       <div className="flex-1 px-8">
         <div className="space-y-12">
-
           {/* Hero Section */}
           <FadeIn from="bottom" duration={0.5}>
             <section className="relative flex flex-col items-center justify-center space-y-6 text-center py-16 md:py-24">
@@ -112,21 +154,25 @@ export default function AppsPage() {
                 </div>
 
                 <h1 className="font-tech text-4xl md:text-6xl font-bold tracking-tight text-white">
-                  Access Your{' '}
+                  Access Your{" "}
                   <span className="bg-gradient-to-r from-emerald-400 to-emerald-200 bg-clip-text text-transparent">
                     Creative Intelligence
                   </span>
                 </h1>
 
                 <p className="text-zinc-400 text-lg md:text-xl max-w-xl mx-auto">
-                  A unified operating system for all your AI tools. Create, analyze, and build faster than ever.
+                  A unified operating system for all your AI tools. Create,
+                  analyze, and build faster than ever.
                 </p>
               </div>
 
               <div className="relative max-w-md mx-auto w-full mt-8 group">
                 <div className="absolute inset-0 bg-emerald-500/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                 <div className="relative flex items-center bg-[var(--color-background-panel)] border border-white/10 rounded-xl px-4 py-3 shadow-lg focus-within:border-emerald-500/50 transition-colors">
-                  <MagnifyingGlass size={20} className="text-zinc-500 shrink-0" />
+                  <MagnifyingGlass
+                    size={20}
+                    className="text-zinc-500 shrink-0"
+                  />
                   <input
                     type="text"
                     placeholder="Search apps..."
@@ -143,11 +189,17 @@ export default function AppsPage() {
           <section>
             <FadeIn delay={0.15}>
               <div className="flex items-center justify-between mb-6">
-                <h2 className="font-tech text-2xl font-semibold text-white">Installed Apps</h2>
+                <h2 className="font-tech text-2xl font-semibold text-white">
+                  Installed Apps
+                </h2>
                 <div className="flex items-center gap-4">
                   {!isLoading && !error && (
                     <div className="text-sm text-zinc-500">
-                      {filteredApps.length + 1} {filteredApps.length + 1 === 1 ? 'app' : 'apps'} available
+                      {(showCanvasCard ? 1 : 0) + filteredApps.length}{" "}
+                      {(showCanvasCard ? 1 : 0) + filteredApps.length === 1
+                        ? "app"
+                        : "apps"}{" "}
+                      available
                     </div>
                   )}
                   <div className="relative group/install">
@@ -181,7 +233,7 @@ export default function AppsPage() {
               </div>
             )}
 
-            {!isLoading && !error && apps && apps.length > 0 && filteredApps.length === 0 && (
+            {!isLoading && !error && !hasAnyVisibleResults && (
               <FadeIn>
                 <div className="text-center py-12 text-zinc-500">
                   No apps found matching &lsquo;{searchQuery}&rsquo;
@@ -189,11 +241,13 @@ export default function AppsPage() {
               </FadeIn>
             )}
 
-            {!isLoading && !error && (
+            {!isLoading && !error && hasAnyVisibleResults && (
               <StaggerGrid className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                <StaggerItem key="canvas">
-                  <CanvasCard />
-                </StaggerItem>
+                {showCanvasCard && (
+                  <StaggerItem key="canvas">
+                    <CanvasCard />
+                  </StaggerItem>
+                )}
                 {filteredApps.map((app) => (
                   <StaggerItem key={app.id}>
                     <AppCard app={app} />
@@ -202,9 +256,8 @@ export default function AppsPage() {
               </StaggerGrid>
             )}
           </section>
-
         </div>
       </div>
     </PageTransition>
-  )
+  );
 }
