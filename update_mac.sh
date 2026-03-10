@@ -15,7 +15,7 @@ echo "────────────────────────�
 echo ""
 
 info "Step 1/2: Uninstalling current version…"
-bash <(curl -fsSL https://flowscale.ai/uninstall_mac.sh)
+bash <(sudo curl -fsSL https://flowscale.ai/uninstall_mac.sh)
 
 info "Step 2/2: Installing latest version…"
-bash <(curl -fsSL https://flowscale.ai/install_mac.sh)
+bash <(sudo curl -fsSL https://flowscale.ai/install_mac.sh)
