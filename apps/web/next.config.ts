@@ -9,7 +9,7 @@ const desktopPkg = JSON.parse(
 const nextConfig: NextConfig = {
   output: 'standalone',
   // Allow server-side access to home dir for SQLite
-  serverExternalPackages: ['better-sqlite3'],
+  serverExternalPackages: ['better-sqlite3', 'ws'],
   env: {
     NEXT_PUBLIC_APP_VERSION: desktopPkg.version,
   },
