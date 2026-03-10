@@ -139,15 +139,17 @@ fi
 
 # ─── 4. clone ─────────────────────────────────────────────────────────────────
 if [[ -d "$REPO_DIR/.git" ]]; then
-  warn "Repository already exists at './$REPO_DIR' — skipping clone."
+  warn "Repository already exists at './$REPO_DIR' — pulling latest."
   cd "$REPO_DIR"
-  info "Pulling latest changes…"
-  git pull --ff-only || warn "Could not pull latest changes (uncommitted local changes?)."
+  git checkout main 2>/dev/null || true
+  git reset --hard origin/main 2>/dev/null || true
+  git pull --ff-only || warn "Could not pull latest changes."
 else
   info "Cloning $REPO_URL → ./$REPO_DIR"
   git clone --branch main "$REPO_URL" "$REPO_DIR"
   cd "$REPO_DIR"
 fi
+CLONE_DIR="$(pwd)"
 
 # ─── 5. install node_modules ──────────────────────────────────────────────────
 info "Installing Node.js dependencies…"
@@ -187,11 +189,12 @@ if [[ "$OS" == "Darwin" ]]; then
   fi
 
   # Clean up: the cloned repo is no longer needed — the .app is self-contained.
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if [[ -d "$SCRIPT_DIR/.git" ]]; then
-    info "Cleaning up build files…"
+  if [[ -n "$CLONE_DIR" && -d "$CLONE_DIR" ]]; then
+    info "Cleaning up build files ($CLONE_DIR)…"
     cd /
-    rm -rf "$SCRIPT_DIR"
+    # Always use sudo — the repo may contain root-owned files from a previous
+    # sudo install, and rm -rf silently skips files it can't delete.
+    sudo rm -rf "$CLONE_DIR"
     success "Removed cloned repository (no longer needed)."
   fi
 
