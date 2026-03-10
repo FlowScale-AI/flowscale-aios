@@ -29,7 +29,7 @@ success "Processes stopped."
 # Remove the app bundle
 if [[ -d "/Applications/FlowScale AI OS.app" ]]; then
   info "Removing /Applications/FlowScale AI OS.app…"
-  rm -rf "/Applications/FlowScale AI OS.app"
+  sudo rm -rf "/Applications/FlowScale AI OS.app"
   success "App removed."
 else
   warn "App not found in /Applications — skipping."
