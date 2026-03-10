@@ -17,17 +17,20 @@ export function ComfyLogsPanel({ port }: { port: number }) {
   }
 
   useEffect(() => {
+    let cancelled = false
+
+    // Fetch historical logs
     fetch(`/api/comfy/${port}/internal/logs/raw`)
       .then((r) => r.json())
       .then((d: { entries: { t: string; m: string }[] }) => appendEntries(d.entries))
       .catch(() => {})
 
+    // Connect via server-side SSE proxy (avoids ComfyUI's origin check for direct WS)
     const controller = new AbortController()
-    setConnected(false)
 
     ;(async () => {
       try {
-        const res = await fetch(`/api/comfy/${port}/ws`, { signal: controller.signal })
+        const res = await fetch(`/api/comfy/${port}/logs-stream`, { signal: controller.signal })
         if (!res.ok || !res.body) return
         setConnected(true)
         const reader = res.body.getReader()
@@ -55,13 +58,16 @@ export function ComfyLogsPanel({ port }: { port: number }) {
           }
         }
       } catch {
-        // aborted
+        // aborted or error
       } finally {
-        setConnected(false)
+        if (!cancelled) setConnected(false)
       }
     })()
 
-    return () => { controller.abort() }
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
   }, [port])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {

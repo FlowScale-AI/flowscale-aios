@@ -230,10 +230,10 @@ function createWindow(port: number): BrowserWindow {
   const timeout = isDev ? 30_000 : 60_000
 
   waitForServer(url, timeout)
-    .then(() => win.loadURL(url))
+    .then(() => win.loadURL(url).then(() => { if (!win.isVisible()) win.show() }))
     .catch((err) => {
       log.error('[window] Server not ready:', err)
-      win.loadURL(url)
+      win.loadURL(url).then(() => { if (!win.isVisible()) win.show() })
     })
 
   // Open external URLs (window.open / <a target="_blank">) in the system browser
