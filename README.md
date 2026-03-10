@@ -1,4 +1,18 @@
-# FlowScale AIOS — Beta
+<div align="center">
+  <h1>FlowScale AIOS — Beta</h1>
+
+  <video src="launch-video.mp4" width="100%" controls autoplay loop muted></video>
+
+  <br />
+
+  <h2>
+    <a href="https://flowscale.ai/download">⬇️ Download FlowScale AIOS</a>
+  </h2>
+  
+  <p>
+    <a href="https://flowscale.ai/blog/introducing-flowscale-aios"><strong>📖 Read the Launch Blog: Introducing FlowScale AIOS</strong></a>
+  </p>
+</div>
 
 > **This project is currently in beta.** Expect rough edges and breaking changes as we iterate.
 
