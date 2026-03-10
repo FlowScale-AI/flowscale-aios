@@ -3,7 +3,8 @@
 import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Infinity as InfinityIcon, Copy, CheckCircle } from 'phosphor-react'
+import Image from 'next/image'
+import { Copy, CheckCircle } from 'phosphor-react'
 
 export default function LoginForm({ initialPassword }: { initialPassword?: string }) {
   const router = useRouter()
@@ -50,11 +51,8 @@ export default function LoginForm({ initialPassword }: { initialPassword?: strin
     <div className="min-h-screen flex items-center justify-center bg-[var(--color-background)] p-4">
       <div className="w-full max-w-sm">
         {/* Logo */}
-        <div className="flex items-center justify-center gap-3 mb-8">
-          <div className="size-10 rounded-xl bg-emerald-600/10 border border-emerald-500/20 flex items-center justify-center">
-            <InfinityIcon size={24} weight="bold" className="text-emerald-500" />
-          </div>
-          <span className="font-tech text-xl font-bold text-white tracking-tight">FlowScale</span>
+        <div className="flex items-center justify-center mb-8">
+          <Image src="/flowscale-logo-full.png" alt="FlowScale AI" width={200} height={48} priority />
         </div>
 
         {initialPassword && (

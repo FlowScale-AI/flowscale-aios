@@ -1551,8 +1551,9 @@ export default function CanvasSurface({
           return null;
         })()}
 
-      {/* Back Button */}
-      <div className="absolute top-4 left-4 z-20">
+      {/* Scale Indicator & Zoom Controls */}
+      <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+        {/* Back Button */}
         <Tooltip content="Back to Canvases" side="bottom" delay={600}>
           <button
             onClick={() => router.push("/canvas")}
@@ -1561,10 +1562,6 @@ export default function CanvasSurface({
             <ArrowLeft width={18} />
           </button>
         </Tooltip>
-      </div>
-
-      {/* Scale Indicator & Zoom Controls */}
-      <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
         <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md border border-white/5 rounded-full p-1 shadow-lg">
           <Tooltip content="Zoom Out" side="bottom" delay={600}>
             <button
