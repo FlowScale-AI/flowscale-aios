@@ -44,9 +44,13 @@ pnpm --filter @flowscale/aios-desktop build
 apps/desktop/node_modules/.bin/electron apps/desktop/dist/main.js
 ```
 
-### Linux AppImage
+### Linux Install
 
-Download the latest `FlowScale AI OS-x.x.x.AppImage` from the [Releases](https://github.com/FlowScale-AI/flowscale-aios/releases) page.
+```bash
+sudo bash install_linux.sh
+```
+
+To run manually after installing:
 
 ```bash
 # Make it executable
@@ -75,6 +79,12 @@ chmod +x "FlowScale AI OS-*.AppImage"
 ```
 
 **ComfyUI** must be running on any port between 6188–16188 before launching the app. The app will auto-discover it.
+
+**To uninstall:**
+```bash
+sudo bash uninstall_linux.sh
+```
+Your data in `~/.flowscale/` is preserved. See [LINUX_INSTALL.md](LINUX_INSTALL.md) for details.
 
 ## Building External Apps with the SDK
 

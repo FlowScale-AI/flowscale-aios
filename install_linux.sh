@@ -90,6 +90,7 @@ if [[ "$(uname -s)" == "Linux" ]]; then
 fi
 
 # --- 4. clone -----------------------------------------------------------------
+PARENT_DIR="$(pwd)"
 if [[ -d "$REPO_DIR/.git" ]]; then
   warn "Repository already exists at './${REPO_DIR}' -- skipping clone."
   cd "$REPO_DIR"
@@ -162,6 +163,15 @@ if grep -qiE "microsoft|wsl" /proc/version 2>/dev/null; then
   if [[ -z "${DISPLAY:-}" ]] && [[ -z "${WAYLAND_DISPLAY:-}" ]]; then
     die "WSL detected but no display found.\nOn Windows 11 WSL2, WSLg provides a display automatically.\nOn Windows 10, install VcXsrv and run: export DISPLAY=:0"
   fi
+fi
+
+# --- 11. clean up source dir --------------------------------------------------
+# The AppImage is self-contained; the cloned repo is no longer needed.
+cd "$PARENT_DIR"
+if [[ -d "$REPO_DIR" ]]; then
+  info "Removing cloned source directory (${REPO_DIR})..."
+  rm -rf "$REPO_DIR"
+  success "Source directory removed."
 fi
 
 echo ""

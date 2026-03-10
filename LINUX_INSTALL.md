@@ -58,8 +58,15 @@ Find **FlowScale AI OS** in your application launcher (e.g. KDE app menu, GNOME 
 
 ## Uninstalling
 
+Run the uninstall script (works with or without `sudo`):
+
 ```bash
-rm -rf ~/.local/share/flowscale-aios
-rm ~/.local/share/applications/flowscale-aios.desktop
-rm ~/.local/share/icons/hicolor/256x256/apps/flowscale-aios.png
+sudo bash uninstall_linux.sh
 ```
+
+This removes:
+- The AppImage and install directory (`~/.local/share/flowscale-aios/`)
+- The desktop entry and icon
+- Electron config and cache (`~/.config/flowscale-aios/`, `~/.cache/flowscale-aios/`)
+
+Your app data in `~/.flowscale/` (database, outputs, installed apps) is **kept**.
