@@ -8,6 +8,10 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Allow .ps1 scripts (e.g. pnpm.ps1) to run in this process without requiring
+# the user to change their system-wide execution policy.
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+
 # ─── colours ──────────────────────────────────────────────────────────────────
 function Write-Info    { param($msg) Write-Host "[flowscale] $msg" -ForegroundColor Cyan }
 function Write-Success { param($msg) Write-Host "[v] $msg"         -ForegroundColor Green }
@@ -57,11 +61,11 @@ Write-Host ""
 Write-Info "Checking system requirements..."
 
 Require-Cmd git  "Install git: https://git-scm.com/downloads"
-Require-Cmd node "Install Node.js >= $NODE_MIN: https://nodejs.org/"
+Require-Cmd node "Install Node.js >= ${NODE_MIN}: https://nodejs.org/"
 
 $NODE_VER = (node -e 'process.stdout.write(process.versions.node)' 2>&1)
 if (-not (Version-Gte $NODE_VER "$NODE_MIN.0.0")) {
-    Write-Die "Node.js $NODE_MIN+ required, found $NODE_VER. Upgrade at https://nodejs.org/"
+    Write-Die "Node.js ${NODE_MIN}+ required, found $NODE_VER. Upgrade at https://nodejs.org/"
 }
 Write-Success "Node.js $NODE_VER"
 
