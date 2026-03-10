@@ -1,9 +1,7 @@
 <div align="center">
   <h1>FlowScale AIOS — Beta</h1>
 
-  <a href="https://youtu.be/F8kRteErxRE">
-    <img src="https://img.youtube.com/vi/F8kRteErxRE/maxresdefault.jpg" alt="FlowScale AIOS Launch Video" width="100%" />
-  </a>
+  <video src="https://github.com/FlowScale-AI/flowscale-aios/raw/main/apps/web/public/launch-video.mp4" width="100%" controls autoplay loop muted></video>
 
   <br />
 
