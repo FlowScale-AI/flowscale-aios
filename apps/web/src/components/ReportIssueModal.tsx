@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Modal } from '@/components/ui'
 
-const REPORT_URL = process.env.NEXT_PUBLIC_REPORT_ISSUE_URL ?? 'https://flowscale.ai/api/report-issue'
+const REPORT_URL = '/api/report-issue'
 
 type State = 'idle' | 'submitting' | 'success' | 'error'
 
