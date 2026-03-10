@@ -35,15 +35,6 @@ else
   warn "App not found in /Applications — skipping."
 fi
 
-# Remove app data
-if [[ -d "$HOME/.flowscale" ]]; then
-  info "Removing app data (~/.flowscale)…"
-  rm -rf "$HOME/.flowscale"
-  success "App data removed."
-else
-  warn "No app data found — skipping."
-fi
-
 # Remove Launch Services registration (removes Spotlight / "Open With" entries)
 info "Clearing Launch Services registration…"
 # lsregister -u unregisters the app so Spotlight forgets it immediately

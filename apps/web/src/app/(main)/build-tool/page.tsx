@@ -1460,10 +1460,10 @@ function StepDeploy({ tool, onBack }: { tool: Tool; onBack: () => void }) {
           </div>
           <div className="flex gap-3">
             <button
-              onClick={() => router.push('/apps')}
+              onClick={() => router.push('/tools')}
               className="flex items-center gap-2 px-5 py-2.5 bg-zinc-100 hover:bg-white text-black text-sm font-semibold rounded-md transition-colors"
             >
-              View in Apps Dashboard
+              View in Tools Dashboard
               <ArrowRight size={14} />
             </button>
           </div>

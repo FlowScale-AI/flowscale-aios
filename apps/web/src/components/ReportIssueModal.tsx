@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Modal } from '@/components/ui'
 
-const REPORT_URL = process.env.NEXT_PUBLIC_REPORT_ISSUE_URL ?? 'https://flowscale.ai/api/report-issue'
+const REPORT_URL = '/api/report-issue'
 
 type State = 'idle' | 'submitting' | 'success' | 'error'
 
@@ -15,6 +15,7 @@ export default function ReportIssueModal({
   onClose: () => void
 }) {
   const [description, setDescription] = useState('')
+  const [email, setEmail] = useState('')
   const [state, setState] = useState<State>('idle')
   const [errorMsg, setErrorMsg] = useState('')
 
@@ -41,7 +42,7 @@ export default function ReportIssueModal({
       const res = await fetch(REPORT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description, version, platform, logs }),
+        body: JSON.stringify({ description, email: email.trim() || undefined, version, platform, logs }),
       })
 
       if (!res.ok) {
@@ -51,6 +52,7 @@ export default function ReportIssueModal({
 
       setState('success')
       setDescription('')
+      setEmail('')
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Something went wrong')
       setState('error')
@@ -62,6 +64,7 @@ export default function ReportIssueModal({
     setState('idle')
     setErrorMsg('')
     setDescription('')
+    setEmail('')
     onClose()
   }
 
@@ -88,6 +91,14 @@ export default function ReportIssueModal({
           <p className="text-xs text-zinc-500">
             Describe what happened. App version, OS info, and recent logs will be attached automatically.
           </p>
+
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="your@email.com (optional)"
+            className="w-full rounded-lg bg-zinc-900 border border-zinc-800 focus:border-emerald-500/50 focus:outline-none px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 transition-colors"
+          />
 
           <textarea
             value={description}

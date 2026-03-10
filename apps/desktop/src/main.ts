@@ -15,6 +15,12 @@ log.initialize()
 const isDev = !app.isPackaged
 const AIOS_PORT_START = 14173
 
+// Give dev a separate userData directory so it gets its own single-instance
+// lock and can run alongside the installed production app simultaneously.
+if (isDev) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'flowscale-aios-dev'))
+}
+
 /** Try ports starting at `start` until one is free, then return it. */
 function findAvailablePort(start: number): Promise<number> {
   return new Promise((resolve) => {
@@ -230,10 +236,10 @@ function createWindow(port: number): BrowserWindow {
   const timeout = isDev ? 30_000 : 60_000
 
   waitForServer(url, timeout)
-    .then(() => win.loadURL(url))
+    .then(() => win.loadURL(url).then(() => { if (!win.isVisible()) win.show() }))
     .catch((err) => {
       log.error('[window] Server not ready:', err)
-      win.loadURL(url)
+      win.loadURL(url).then(() => { if (!win.isVisible()) win.show() })
     })
 
   // Open external URLs (window.open / <a target="_blank">) in the system browser
