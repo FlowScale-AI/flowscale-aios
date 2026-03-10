@@ -3,6 +3,12 @@
 # Clones the repo, installs all dependencies, builds, and starts the app.
 set -euo pipefail
 
+# If run as root (e.g. sudo bash install_linux.sh), re-exec as the real user
+# so that $HOME paths resolve correctly. sudo is still available for chattr.
+if [[ $EUID -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]]; then
+  exec sudo -u "$SUDO_USER" env SUDO_AVAILABLE=1 bash "$0" "$@"
+fi
+
 # --- colours ------------------------------------------------------------------
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
@@ -144,17 +150,25 @@ mkdir -p "$APPS_DIR"
 cat > "${APPS_DIR}/${APP_ID}.desktop" <<DESKTOP
 [Desktop Entry]
 Name=${APP_NAME}
-Exec=${APPIMAGE_DEST} %u
+Exec=env DESKTOPINTEGRATION=disable "${APPIMAGE_DEST}" %u
 Icon=${APP_ID}
 StartupWMClass=${APP_ID}
 StartupNotify=false
 Terminal=false
 Type=Application
 Categories=Development;
+X-AppImage-Integrate=false
 DESKTOP
 
 command -v update-desktop-database &>/dev/null \
   && update-desktop-database "$APPS_DIR" 2>/dev/null || true
+# Lock the desktop entry so appimaged / AppImageLauncher cannot overwrite it
+# with a stale /tmp/.mount_* path. The uninstall script removes this flag.
+if [[ "${SUDO_AVAILABLE:-}" == "1" ]]; then
+  sudo chattr +i "${APPS_DIR}/${APP_ID}.desktop" 2>/dev/null || true
+else
+  chattr +i "${APPS_DIR}/${APP_ID}.desktop" 2>/dev/null || true
+fi
 success "App registered in launcher -- ${APP_NAME} will appear in your app menu."
 
 # --- 10. launch ---------------------------------------------------------------
@@ -177,5 +191,5 @@ fi
 echo ""
 success "All set. Launching FlowScale AI OS..."
 echo ""
-nohup "$APPIMAGE_DEST" &>/dev/null &
+nohup env DESKTOPINTEGRATION=disable "$APPIMAGE_DEST" &>/dev/null &
 disown
