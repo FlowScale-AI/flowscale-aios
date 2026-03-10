@@ -298,7 +298,7 @@ export default function SettingsPage() {
 
 // ─── Updates Section ──────────────────────────────────────────────────────────
 
-const UPDATE_COMMAND = 'sudo curl -fsSL https://flowscale.ai/update_mac.sh | bash'
+const UPDATE_COMMAND = 'curl -fsSL https://flowscale.ai/update_mac.sh | sudo bash'
 
 function UpdatesSection() {
   const { status, version, progress, error, setChecking } = useUpdateStore()
