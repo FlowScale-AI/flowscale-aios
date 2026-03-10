@@ -14,13 +14,13 @@ import {
   useGetCanvas,
   CanvasItem,
 } from "@/features/canvases/api";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCanvasState } from "./CanvasStateContext";
 import { Tooltip } from "@flowscale/ui";
 import ExportModal from "@/features/canvases/components/ExportModal";
 import { useToolExecution } from "@/features/canvases/hooks/useToolExecution";
 import ExecutionMenu from "./ExecutionMenu";
-import { Minus, Plus } from "phosphor-react";
+import { ArrowLeft, Minus, Plus } from "phosphor-react";
 import { useCanvasTools } from "@/features/canvases/api/getCanvasTools";
 import type { ToolConfig } from "@/features/canvases/types";
 import type { ToolInputConfig } from "@/features/canvases/types";
@@ -222,6 +222,7 @@ export default function CanvasSurface({
   }, [activeToolId]);
 
   const params = useParams();
+  const router = useRouter();
   const canvasId = params?.id as string;
 
   const handleShare = useCallback(async () => {
@@ -1549,6 +1550,18 @@ export default function CanvasSurface({
           }
           return null;
         })()}
+
+      {/* Back Button */}
+      <div className="absolute top-4 left-4 z-20">
+        <Tooltip content="Back to Canvases" side="bottom" delay={600}>
+          <button
+            onClick={() => router.push("/canvas")}
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-black/60 backdrop-blur-md border border-white/5 shadow-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <ArrowLeft width={18} />
+          </button>
+        </Tooltip>
+      </div>
 
       {/* Scale Indicator & Zoom Controls */}
       <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
