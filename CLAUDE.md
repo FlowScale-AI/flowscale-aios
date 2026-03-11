@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Environment requirements
+
+- **Node.js** ≥ 20
+- **pnpm** ≥ 9 (pinned to 9.15.0 in root `package.json`)
+
 ## Commands
 
 ```bash
@@ -15,6 +20,13 @@ pnpm typecheck
 pnpm --filter @flowscale/aios-web test
 pnpm --filter @flowscale/workflow test
 
+# Run tests with coverage
+pnpm test:coverage
+
+# E2E tests (Cypress — requires web running on port 14173)
+# Set CYPRESS_ADMIN_PASSWORD env var first
+pnpm --filter @flowscale/aios-web e2e
+
 # Build all workspaces (turbo, respects dependency order)
 pnpm build
 
@@ -25,6 +37,11 @@ pnpm --filter @flowscale/aios-web build
 # Start Electron desktop (must build first, and web must be running on 14173)
 pnpm --filter @flowscale/aios-desktop build
 apps/desktop/node_modules/.bin/electron apps/desktop/dist/main.js
+
+# Release builds (electron-builder)
+pnpm release:mac      # macOS DMG
+pnpm release:linux    # Linux AppImage
+pnpm release:win      # Windows NSIS installer
 ```
 
 Typecheck is the primary correctness tool — always run after changes. `packages/workflow` also has vitest tests.
@@ -38,6 +55,7 @@ Turborepo + pnpm workspaces with five packages:
 - **`packages/workflow`** (`@flowscale/workflow`) — zero-dependency library for ComfyUI workflow analysis; used by `apps/web`
 - **`packages/sdk`** (`@flowscale/sdk`) — SDK for app developers building on top of tools
 - **`packages/create-app`** — CLI scaffolding tool (`create-flowscale-aios-app`)
+- **`example-apps/`** — sample app bundles for reference
 
 ## Architecture
 
@@ -154,9 +172,10 @@ In **production**, Electron spawns the Next.js standalone server from `process.r
 - **`apps/web/src/lib/platform.ts`** — `isDesktop()` check; `getComfyUIUrl()` / `setComfyUIUrl()` and `getComfyOrgApiKey()` / `setComfyOrgApiKey()` backed by localStorage
 - **`apps/web/src/store/notificationStore.ts`** — Zustand store for UI toast/snackbar notifications
 
-### Local ComfyUI
+### Path aliases (`apps/web`)
 
-ComfyUI is installed at `/home/silverion/projects/flowscale/ComfyUI/`.
+- `@/*` → `./src/*`
+- `@flowscale/ui` → `./src/components/ui/index.ts`
 
 ### Log file paths (electron-log)
 
@@ -195,6 +214,12 @@ From `DESIGN.md` — cyber-tech aesthetic, dark-mode-first:
 - Tooltips required for icon-only buttons (`delay={600}`)
 - Inputs: `border-zinc-800`, focus `border-emerald-500/50`
 - Buttons: Primary (`bg-zinc-100 text-black`), Secondary (`bg-zinc-900`), Ghost (transparent)
+
+### CI/CD
+
+GitHub Actions (`.github/workflows/`):
+- **`test.yml`** — runs on push to `main`/`dev` and all PRs: typecheck → vitest → coverage → Cypress E2E
+- **`release.yml`** — triggered by `v*` tags or manual dispatch: builds web standalone, rebuilds `better-sqlite3` for Electron ABI, packages with electron-builder for macOS/Linux/Windows, creates GitHub Release draft
 
 ## Product concepts
 
