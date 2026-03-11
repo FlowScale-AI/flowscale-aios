@@ -43,6 +43,7 @@ interface Tool {
   description: string | null
   engine: string
   schemaJson: string
+  workflowJson: string
   comfyPort: number | null
   status: string
   version: number | null
@@ -596,24 +597,10 @@ console.log(outputs)`
   )
 }
 
-function ServerLogsPanel() {
-  const [logs, setLogs] = useState<string[]>([])
+function LogsDisplay({ logs, emptyMessage }: { logs: string[]; emptyMessage: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const userScrolledUp = useRef(false)
-
-  useEffect(() => {
-    async function poll() {
-      try {
-        const res = await fetch('/api/local-inference/logs')
-        const { logs: l } = await res.json() as { logs: string[] }
-        setLogs(l)
-      } catch { /* ignore */ }
-    }
-    poll()
-    const t = setInterval(poll, 2000)
-    return () => clearInterval(t)
-  }, [])
 
   useEffect(() => {
     if (!userScrolledUp.current) {
@@ -624,11 +611,10 @@ function ServerLogsPanel() {
   function handleScroll() {
     const el = containerRef.current
     if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-    userScrolledUp.current = !atBottom
+    userScrolledUp.current = el.scrollHeight - el.scrollTop - el.clientHeight >= 40
   }
 
-  if (logs.length === 0) return <p className="text-xs text-zinc-600 pt-2">No server logs yet.</p>
+  if (logs.length === 0) return <p className="text-xs text-zinc-600 pt-2">{emptyMessage}</p>
 
   return (
     <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-y-auto font-mono text-[11px] text-zinc-400 leading-relaxed">
@@ -636,6 +622,46 @@ function ServerLogsPanel() {
       <div ref={bottomRef} />
     </div>
   )
+}
+
+function ApiLogsPanel({ tool }: { tool: Tool }) {
+  const [logs, setLogs] = useState<string[]>([])
+
+  // Check if a Modal endpoint with an appName is configured for this tool's model
+  const modelId = (() => {
+    try { return (JSON.parse(tool.workflowJson) as { model?: string }).model ?? null } catch { return null }
+  })()
+
+  const { data: modalEndpoints = [] } = useQuery<Array<{ modelId: string; url: string; appName?: string }>>({
+    queryKey: ['modal-endpoints'],
+    queryFn: async () => {
+      const res = await fetch('/api/settings/modal-endpoints')
+      if (!res.ok) return []
+      return res.json()
+    },
+    staleTime: 30_000,
+  })
+
+  const modalEndpoint = modelId ? modalEndpoints.find((e) => e.modelId === modelId) : undefined
+  const appName = modalEndpoint?.appName
+
+  useEffect(() => {
+    const url = appName ? `/api/modal-logs?appName=${encodeURIComponent(appName)}` : '/api/local-inference/logs'
+
+    async function poll() {
+      try {
+        const res = await fetch(url)
+        const { logs: l } = await res.json() as { logs: string[] }
+        setLogs(l)
+      } catch { /* ignore */ }
+    }
+    poll()
+    const t = setInterval(poll, appName ? 5000 : 2000)
+    return () => clearInterval(t)
+  }, [appName])
+
+  const source = appName ? 'Modal' : 'local server'
+  return <LogsDisplay logs={logs} emptyMessage={`No ${source} logs yet.`} />
 }
 
 function BottomTabs({
@@ -702,7 +728,7 @@ function BottomTabs({
           </div>
         )}
 
-        {tab === 'logs' && tool.engine === 'api' && <ServerLogsPanel />}
+        {tab === 'logs' && tool.engine === 'api' && <ApiLogsPanel tool={tool} />}
         {tab === 'logs' && tool.engine !== 'api' && tool.comfyPort && (
           <ComfyLogsPanel port={tool.comfyPort} />
         )}
@@ -726,6 +752,21 @@ export default function ToolPage() {
       return res.json()
     },
   })
+
+  const { data: modalEndpoints = [] } = useQuery<Array<{ modelId: string }>>({
+    queryKey: ['modal-endpoints'],
+    queryFn: async () => {
+      const res = await fetch('/api/settings/modal-endpoints')
+      if (!res.ok) return []
+      return res.json()
+    },
+    staleTime: 30_000,
+    enabled: tool?.engine === 'api',
+  })
+  const toolModelId = (() => {
+    try { return tool ? (JSON.parse(tool.workflowJson) as { model?: string }).model ?? null : null } catch { return null }
+  })()
+  const hasModalEndpoint = toolModelId ? modalEndpoints.some((e) => e.modelId === toolModelId) : false
 
   // Poll executions — faster (2s) when a generation is in-flight, slower (5s) otherwise
   const hasRunningExec = useRef(false)
@@ -999,8 +1040,8 @@ export default function ToolPage() {
         </div>
       )}
 
-      {/* Local inference setup (API tools) */}
-      {tool.engine === 'api' && <LocalInferenceSetup />}
+      {/* Local inference setup (API tools — hidden when Modal endpoint is configured) */}
+      {tool.engine === 'api' && !hasModalEndpoint && <LocalInferenceSetup />}
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">

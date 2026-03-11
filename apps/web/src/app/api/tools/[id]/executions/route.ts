@@ -5,13 +5,14 @@ import { eq, desc } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@flowscale/workflow'
 import { getRequestUser } from '@/lib/auth'
-import { mkdirSync, writeFileSync, mkdirSync as mkdirSyncFs, writeFileSync as writeFileSyncFs } from 'fs'
+import { mkdirSync, writeFileSync } from 'fs'
 import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { inFlightControllers } from '@/lib/inferenceRegistry'
 import { getHistory } from '@/lib/comfyui-client'
 import { getComfyOrgApiKey as getComfyOrgApiKeyServer } from '@/lib/providerSettings'
+import { getModalEndpointConfig, callModalEndpoint, type ModalOutput } from '@/lib/modalInference'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
 
@@ -99,6 +100,40 @@ function inferencePost(
   })
 }
 
+/**
+ * Save ModalOutput[] (or a single local image) to disk and mark the execution
+ * completed. This is the shared final step for both Modal and local inference.
+ */
+async function saveApiOutputsAndComplete(
+  db: ReturnType<typeof getDb>,
+  executionId: string,
+  outputs: ModalOutput[],
+): Promise<void> {
+  const outDir = join(API_OUTPUTS_DIR, executionId)
+  await mkdir(outDir, { recursive: true })
+
+  const savedOutputs = await Promise.all(
+    outputs.map(async (out) => {
+      const buf = Buffer.from(out.data, 'base64')
+      await writeFile(join(outDir, out.filename), buf)
+      return { kind: out.kind, filename: out.filename, path: `/api/executions/${executionId}/outputs/${out.filename}` }
+    }),
+  )
+
+  await db.update(executions).set({
+    status: 'completed',
+    outputsJson: JSON.stringify(savedOutputs),
+    completedAt: Date.now(),
+  }).where(eq(executions.id, executionId))
+}
+
+/**
+ * Run inference for an API-engine tool in the background.
+ *
+ * Dispatch order:
+ *   1. Modal endpoint (if one is registered for this model ID)
+ *   2. Local inference server (model-specific fallback)
+ */
 async function runApiInference(
   executionId: string,
   model: string,
@@ -107,39 +142,43 @@ async function runApiInference(
   signal: AbortSignal,
 ) {
   const db = getDb()
-  const LOCAL_INFERENCE_PORT = 8765
+  const combinedSignal = AbortSignal.any([signal, AbortSignal.timeout(1_800_000)])
 
   try {
-    const inferRes = await inferencePost(LOCAL_INFERENCE_PORT, {
-      prompt: inputs?.['api__prompt'] ?? '',
-      negative_prompt: inputs?.['api__negative_prompt'] ?? '',
-      width: inputs?.['api__width'] ?? 1024,
-      height: inputs?.['api__height'] ?? 1024,
-      num_inference_steps: inputs?.['api__num_inference_steps'] ?? 4,
-      guidance_scale: inputs?.['api__guidance_scale'] ?? 0,
-      seed,
-    }, AbortSignal.any([signal, AbortSignal.timeout(1_800_000)]))
-
-    if (!inferRes.ok) {
-      await db.update(executions).set({ status: 'error', errorMessage: inferRes.body, completedAt: Date.now() })
-        .where(eq(executions.id, executionId))
+    // ── 1. Modal endpoint ────────────────────────────────────────────────────
+    const modalConfig = getModalEndpointConfig(model)
+    if (modalConfig) {
+      const modalOutputs = await callModalEndpoint(modalConfig, inputs, seed, combinedSignal)
+      await saveApiOutputsAndComplete(db, executionId, modalOutputs)
       return
     }
 
-    const { image: imageB64 } = JSON.parse(inferRes.body) as { image: string }
-    const imgBuffer = Buffer.from(imageB64, 'base64')
-    const filename = 'output.png'
-    const outDir = join(API_OUTPUTS_DIR, executionId)
-    mkdirSync(outDir, { recursive: true })
-    writeFileSync(join(outDir, filename), imgBuffer)
+    // ── 2. Local inference (model-specific) ──────────────────────────────────
+    if (model === 'Tongyi-MAI/Z-Image-Turbo') {
+      const LOCAL_INFERENCE_PORT = 8765
+      const inferRes = await inferencePost(LOCAL_INFERENCE_PORT, {
+        prompt: inputs?.['api__prompt'] ?? '',
+        negative_prompt: inputs?.['api__negative_prompt'] ?? '',
+        width: inputs?.['api__width'] ?? 1024,
+        height: inputs?.['api__height'] ?? 1024,
+        num_inference_steps: inputs?.['api__num_inference_steps'] ?? 4,
+        guidance_scale: inputs?.['api__guidance_scale'] ?? 0,
+        seed,
+      }, combinedSignal)
 
-    const outputPath = `/api/executions/${executionId}/outputs/${filename}`
-    const outputItems = [{ kind: 'image', filename, path: outputPath }]
-    await db.update(executions).set({
-      status: 'completed',
-      outputsJson: JSON.stringify(outputItems),
-      completedAt: Date.now(),
-    }).where(eq(executions.id, executionId))
+      if (!inferRes.ok) {
+        await db.update(executions).set({ status: 'error', errorMessage: inferRes.body, completedAt: Date.now() })
+          .where(eq(executions.id, executionId))
+        return
+      }
+
+      const { image: imageB64 } = JSON.parse(inferRes.body) as { image: string }
+      await saveApiOutputsAndComplete(db, executionId, [{ kind: 'image', filename: 'output.png', data: imageB64 }])
+      return
+    }
+
+    await db.update(executions).set({ status: 'error', errorMessage: 'Unknown API model', completedAt: Date.now() })
+      .where(eq(executions.id, executionId))
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error'
     const isCancel = msg === 'AbortError' || (err instanceof Error && err.name === 'AbortError')
@@ -199,28 +238,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const config = JSON.parse(tool.workflowJson) as { engine: string; model: string }
 
-    if (config.model === 'Tongyi-MAI/Z-Image-Turbo') {
-      const LOCAL_INFERENCE_PORT = 8765
-
-      try {
-        // Check the server is up first (fast timeout)
-        await fetch(`http://127.0.0.1:${LOCAL_INFERENCE_PORT}/health`, { signal: AbortSignal.timeout(2000) })
-      } catch {
-        const msg = `Z-Image Turbo inference server is not running. Use the Install & Start button to launch it.`
-        await db.update(executions).set({ status: 'error', errorMessage: msg, completedAt: Date.now() }).where(eq(executions.id, executionId))
-        return NextResponse.json({ error: msg }, { status: 503 })
+    // If no Modal endpoint is configured for this model, run a local health check
+    // before firing the background job so we can fail fast with a useful error.
+    const modalConfig = getModalEndpointConfig(config.model)
+    if (!modalConfig) {
+      if (config.model === 'Tongyi-MAI/Z-Image-Turbo') {
+        try {
+          await fetch(`http://127.0.0.1:8765/health`, { signal: AbortSignal.timeout(2000) })
+        } catch {
+          const msg = `Z-Image Turbo inference server is not running. Use the Install & Start button to launch it.`
+          await db.update(executions).set({ status: 'error', errorMessage: msg, completedAt: Date.now() }).where(eq(executions.id, executionId))
+          return NextResponse.json({ error: msg }, { status: 503 })
+        }
+      } else {
+        await db.update(executions).set({ status: 'error', errorMessage: 'Unknown API model', completedAt: Date.now() }).where(eq(executions.id, executionId))
+        return NextResponse.json({ error: 'Unknown API model' }, { status: 400 })
       }
-
-      // Fire inference in background — return immediately so the HTTP connection doesn't time out
-      const controller = new AbortController()
-      inFlightControllers.set(executionId, controller)
-      runApiInference(executionId, config.model, inputs, seed, controller.signal)
-
-      return NextResponse.json({ executionId, type: 'api', status: 'running', seed }, { status: 202 })
     }
 
-    await db.update(executions).set({ status: 'error', errorMessage: 'Unknown API model', completedAt: Date.now() }).where(eq(executions.id, executionId))
-    return NextResponse.json({ error: 'Unknown API model' }, { status: 400 })
+    // Fire inference in background — return immediately so the HTTP connection doesn't time out
+    const controller = new AbortController()
+    inFlightControllers.set(executionId, controller)
+    runApiInference(executionId, config.model, inputs, seed, controller.signal)
+
+    return NextResponse.json({ executionId, type: 'api', status: 'running', seed }, { status: 202 })
   }
 
   // ── ComfyUI-engine tools ─────────────────────────────────────────────────────
