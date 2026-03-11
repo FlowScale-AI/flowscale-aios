@@ -2,21 +2,40 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import Database from 'better-sqlite3'
 import { join } from 'path'
 import { homedir } from 'os'
-import { mkdirSync } from 'fs'
+import { mkdirSync, appendFileSync } from 'fs'
 import crypto from 'crypto'
 import * as schema from './schema'
 
 const DB_DIR = join(homedir(), '.flowscale')
 const DB_PATH = join(DB_DIR, 'aios.db')
+const LOG_FILE = join(DB_DIR, 'server-error.log')
+
+function logError(context: string, err: unknown) {
+  try {
+    const msg = err instanceof Error ? err.stack || err.message : String(err)
+    appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${context}:\n${msg}\n\n`)
+  } catch { /* ignore */ }
+}
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null
 
 export function getDb() {
   if (_db) return _db
 
-  mkdirSync(DB_DIR, { recursive: true })
+  try {
+    mkdirSync(DB_DIR, { recursive: true })
+  } catch (err) {
+    logError('Failed to create DB_DIR', err)
+    throw err
+  }
 
-  const sqlite = new Database(DB_PATH)
+  let sqlite: InstanceType<typeof Database>
+  try {
+    sqlite = new Database(DB_PATH)
+  } catch (err) {
+    logError('Failed to open SQLite database', err)
+    throw err
+  }
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
 
@@ -113,9 +132,50 @@ export function getDb() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+
+    CREATE TABLE IF NOT EXISTS installed_apps (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      bundle_path TEXT NOT NULL,
+      entry_path TEXT NOT NULL,
+      manifest_json TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'sideloaded',
+      status TEXT NOT NULL DEFAULT 'active',
+      installed_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE TABLE IF NOT EXISTS app_storage (
+      app_id TEXT NOT NULL REFERENCES installed_apps(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      PRIMARY KEY (app_id, key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_installed_apps_status ON installed_apps(status);
+    CREATE INDEX IF NOT EXISTS idx_app_storage_app_id ON app_storage(app_id);
+
+    CREATE TABLE IF NOT EXISTS models (
+      id TEXT PRIMARY KEY,
+      filename TEXT NOT NULL,
+      path TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL DEFAULT 'other',
+      size_bytes INTEGER,
+      comfy_port INTEGER NOT NULL,
+      scanned_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_models_type ON models(type);
+    CREATE INDEX IF NOT EXISTS idx_models_comfy_port ON models(comfy_port);
   `)
 
   // Migrations for existing DBs
+  const toolColumns = sqlite.prepare('PRAGMA table_info(tools)').all() as { name: string }[]
+  if (!toolColumns.some((col) => col.name === 'engine')) {
+    sqlite.exec("ALTER TABLE tools ADD COLUMN engine TEXT NOT NULL DEFAULT 'comfyui'")
+  }
+
   const canvasColumns = sqlite.prepare('PRAGMA table_info(canvases)').all() as { name: string }[]
   const hasIsSharedColumn = canvasColumns.some((col) => col.name === 'is_shared')
   if (!hasIsSharedColumn) {
@@ -127,9 +187,11 @@ export function getDb() {
     sqlite.exec('ALTER TABLE executions ADD COLUMN user_id TEXT')
   }
 
-  // First-run: seed admin user if no users exist
-  const userCount = sqlite.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }
-  if (userCount.count === 0) {
+  // First-run: seed admin user if no users exist.
+  // Uses a transaction with INSERT OR IGNORE to be fully idempotent — safe
+  // even if next build prerenders the login page across multiple workers.
+  const adminExists = sqlite.prepare("SELECT 1 FROM users WHERE username = 'admin'").get()
+  if (!adminExists) {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
     const bytes = crypto.randomBytes(12)
     let password = ''
@@ -143,7 +205,7 @@ export function getDb() {
     const now = Date.now()
     sqlite
       .prepare(
-        'INSERT INTO users (id, username, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT OR IGNORE INTO users (id, username, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       )
       .run(id, 'admin', passwordHash, 'admin', 'active', now)
     sqlite.prepare('INSERT OR REPLACE INTO setup (id, initial_password) VALUES (1, ?)').run(password)

@@ -1,4 +1,22 @@
-# FlowScale AIOS
+<div align="center">
+  <h1>FlowScale AIOS — Beta</h1>
+
+  <a href="https://youtu.be/F8kRteErxRE">
+    <img src="./apps/web/public/readme-banner-video.png" alt="Play FlowScale AIOS Video" width="100%" />
+  </a>
+
+  <br />
+
+  <h2>
+    <a href="https://flowscale.ai/download">⬇️ Download FlowScale AIOS</a>
+  </h2>
+  
+  <p>
+    <a href="https://flowscale.ai/blog/introducing-flowscale-aios"><strong>📖 Read the Launch Blog: Introducing FlowScale AIOS</strong></a>
+  </p>
+</div>
+
+> **This project is currently in beta.** Expect rough edges and breaking changes as we iterate.
 
 An open-source platform to build, test, and deploy AI workflows powered by ComfyUI — available as a web app and native desktop app.
 
@@ -42,9 +60,13 @@ pnpm --filter @flowscale/aios-desktop build
 apps/desktop/node_modules/.bin/electron apps/desktop/dist/main.js
 ```
 
-### Linux AppImage
+### Linux Install
 
-Download the latest `FlowScale AI OS-x.x.x.AppImage` from the [Releases](https://github.com/FlowScale-AI/flowscale-aios/releases) page.
+```bash
+sudo bash install_linux.sh
+```
+
+To run manually after installing:
 
 ```bash
 # Make it executable
@@ -73,6 +95,38 @@ chmod +x "FlowScale AI OS-*.AppImage"
 ```
 
 **ComfyUI** must be running on any port between 6188–16188 before launching the app. The app will auto-discover it.
+
+**To uninstall:**
+```bash
+sudo bash uninstall_linux.sh
+```
+Your data in `~/.flowscale/` is preserved. See [LINUX_INSTALL.md](LINUX_INSTALL.md) for details.
+
+## Building External Apps with the SDK
+
+The `@flowscale/sdk` package lets you build apps that run **outside** FlowScale — Node.js scripts, Express servers, Next.js apps, or anything that can make HTTP requests.
+
+See **[packages/sdk/README.md](packages/sdk/README.md)** for the full guide, including authentication, listing tools, running tools, handling image inputs, and complete working examples.
+
+Quick start:
+
+```bash
+npm install @flowscale/sdk
+```
+
+```ts
+import { login, createClient } from '@flowscale/sdk'
+
+const token = await login({ baseUrl: 'http://localhost:14173', username: 'admin', password: 'your-password' })
+const client = createClient({ baseUrl: 'http://localhost:14173', sessionToken: token })
+
+const result = await client.tools.run('your-tool-id', {
+  '6__text': 'a photorealistic cat on the moon',
+})
+console.log(result.outputs)
+```
+
+---
 
 ## Project Structure
 

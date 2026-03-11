@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
@@ -71,6 +72,7 @@ const TABS: { id: Tab; label: string }[] = [
 ]
 
 export default function ComfyUIIntegrationPage() {
+  const router = useRouter()
   const [instance, setInstance] = useState<ComfyInstance | null>(null)
   const [scanning, setScanning] = useState(false)
   const [tab, setTab] = useState<Tab>('overview')
@@ -94,6 +96,13 @@ export default function ComfyUIIntegrationPage() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 shrink-0">
+        <button
+          onClick={() => router.back()}
+          className="text-zinc-500 hover:text-zinc-200 transition-colors shrink-0"
+          title="Go back"
+        >
+          <ArrowLeft size={16} />
+        </button>
         {scanning ? (
           <div className="flex items-center gap-2 text-zinc-500 text-sm">
             <ArrowClockwise size={14} className="animate-spin" />
@@ -103,7 +112,8 @@ export default function ComfyUIIntegrationPage() {
           <>
             <div className="flex items-center gap-2">
               <CheckCircle size={16} weight="fill" className="text-emerald-400" />
-              <span className="text-white font-medium">127.0.0.1:{instance.port}</span>
+              <span className="text-white font-medium">ComfyUI</span>
+              <span className="text-zinc-500 text-sm">127.0.0.1:{instance.port}</span>
             </div>
             <span className="text-zinc-600 text-sm">
               {stats?.system?.comfyui_version ?? ''}
@@ -191,6 +201,7 @@ type ToolRow = {
   name: string
   description: string | null
   status: string
+  engine: string
   createdAt: number
 }
 
@@ -218,8 +229,10 @@ function ToolsTab() {
     try {
       const r = await fetch('/api/tools')
       const data: ToolRow[] = await r.json()
-      setTools(data)
-      if (!selectedId && !creating && data.length > 0) setSelectedId(data[0].id)
+      const filtered = data.filter((t) => t.engine === 'comfyui')
+      setTools(filtered)
+      if (selectedId && !filtered.find((t) => t.id === selectedId)) setSelectedId(null)
+      else if (!selectedId && !creating && filtered.length > 0) setSelectedId(filtered[0].id)
     } catch {
       setError('Failed to load tools')
     } finally {
@@ -1216,17 +1229,44 @@ function ComfyOrgApiKeySection() {
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    setKey(getComfyOrgApiKey())
+    // Load from server-side storage; fall back to localStorage for backwards compat
+    fetch('/api/settings/comfyorg-key')
+      .then((r) => r.json())
+      .then((data: { configured?: boolean }) => {
+        if (!data.configured) {
+          // Migrate from localStorage if present
+          const local = getComfyOrgApiKey()
+          if (local) {
+            setKey(local)
+          }
+        }
+      })
+      .catch(() => {
+        setKey(getComfyOrgApiKey())
+      })
   }, [])
 
-  const handleSave = () => {
-    setComfyOrgApiKey(key.trim())
+  const handleSave = async () => {
+    const trimmed = key.trim()
+    // Save server-side (used by SDK / API routes)
+    await fetch('/api/settings/comfyorg-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: trimmed }),
+    })
+    // Also keep localStorage in sync (used by browser tool runner)
+    setComfyOrgApiKey(trimmed)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
 
-  const handleClear = () => {
+  const handleClear = async () => {
     setKey('')
+    await fetch('/api/settings/comfyorg-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: '' }),
+    })
     setComfyOrgApiKey('')
     setSaved(false)
   }
@@ -1262,7 +1302,7 @@ function ComfyOrgApiKeySection() {
                 </button>
               </div>
               <button
-                onClick={handleSave}
+                onClick={() => void handleSave()}
                 disabled={!key.trim()}
                 className="px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg transition-colors shrink-0"
               >

@@ -25,6 +25,8 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef(false);
   const wsRef = useRef<EventSource | null>(null);
+  const executionIdRef = useRef<string | null>(null);
+  const comfyPortRef = useRef<number | null>(null);
 
   const clearPoll = () => {
     if (pollTimerRef.current) {
@@ -87,6 +89,8 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
         }
 
         ({ executionId, promptId, comfyPort, seed, clientId } = await res.json());
+        executionIdRef.current = executionId;
+        comfyPortRef.current = comfyPort;
 
         // Connect to server-side SSE proxy for live progress updates
         // (avoids direct WS to ComfyUI which triggers CORS host/origin mismatch)
@@ -264,6 +268,22 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
     clearPoll();
     wsRef.current?.close();
     wsRef.current = null;
+
+    const execId = executionIdRef.current;
+    const port = comfyPortRef.current;
+
+    // Cancel the server-side execution record
+    if (execId) {
+      fetch(`/api/executions/${execId}/cancel`, { method: "POST" }).catch(() => {});
+    }
+    // Tell ComfyUI to stop the running prompt
+    if (port) {
+      fetch(`/api/comfy/${port}/interrupt`, { method: "POST" }).catch(() => {});
+    }
+
+    executionIdRef.current = null;
+    comfyPortRef.current = null;
+
     setExecutionState((prev) => ({
       ...prev,
       status: "error",
@@ -277,6 +297,8 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
     clearPoll();
     wsRef.current?.close();
     wsRef.current = null;
+    executionIdRef.current = null;
+    comfyPortRef.current = null;
     setExecutionState({
       status: "idle",
       progress: 0,

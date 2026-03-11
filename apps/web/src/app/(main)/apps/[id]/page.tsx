@@ -14,16 +14,15 @@ import {
   DownloadSimple,
   Spinner,
   ArrowCounterClockwise,
-  Terminal,
   Copy,
   Check,
-  X,
+  Stop,
 } from 'phosphor-react'
-import Link from 'next/link'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
 import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
+import { LocalInferenceSetup, useInferenceStatus } from '@/components/LocalInferenceSetup'
 
 interface WorkflowIO {
   nodeId: string
@@ -42,6 +41,7 @@ interface Tool {
   id: string
   name: string
   description: string | null
+  engine: string
   schemaJson: string
   comfyPort: number | null
   status: string
@@ -61,10 +61,14 @@ interface Execution {
 
 interface ExecResult {
   executionId: string
-  promptId: string
-  clientId: string
-  comfyPort: number
+  type?: 'api' | 'comfyui'
+  status?: 'running' | 'completed' | 'error'
+  outputs?: OutputItem[]
   seed: number
+  // ComfyUI only:
+  promptId?: string
+  clientId?: string
+  comfyPort?: number
 }
 
 // ─── Output renderers ─────────────────────────────────────────────────────────
@@ -167,61 +171,139 @@ function inferKind(filename: string): 'image' | 'video' | 'audio' | 'model' | 'f
   return 'file'
 }
 
-function OutputGrid({ outputs, comfyPort }: { outputs: OutputItem[]; comfyPort: number }) {
-  const cardClass = "group flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50 hover:border-emerald-500/30 transition-all duration-200"
+function resolveOutputUrl(out: Exclude<OutputItem, { kind: 'text' }>, comfyPort?: number | null): string {
+  if (out.path.startsWith('/')) return out.path
+  const subfolder = out.path.includes('/') ? out.path.substring(0, out.path.lastIndexOf('/')) : ''
+  return `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}${subfolder ? `&subfolder=${encodeURIComponent(subfolder)}` : ''}&type=output`
+}
+
+function OutputLightbox({
+  item,
+  url,
+  onClose,
+}: {
+  item: Exclude<OutputItem, { kind: 'text' }>
+  url: string
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onClose])
+
+  const kind = item.kind || inferKind(item.filename)
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-      {outputs.map((out, i) => {
-        if (out.kind === 'text') {
-          return (
-            <div key={i} className="col-span-2 sm:col-span-3 rounded-xl border border-white/5 bg-zinc-900/50 px-4 py-3">
-              <p className="text-sm text-zinc-300 whitespace-pre-wrap font-mono-custom">{out.text}</p>
+    <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-8" onClick={onClose}>
+      <div className="relative flex flex-col bg-zinc-900 rounded-xl overflow-hidden max-w-[90vw] max-h-[90vh] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        {/* Content */}
+        <div className="flex-1 min-w-0 flex items-center justify-center bg-black p-4 overflow-hidden">
+          {kind === 'image' && (
+            <img src={url} alt={item.filename} className="max-w-full max-h-[80vh] object-contain rounded" />
+          )}
+          {kind === 'video' && (
+            <video src={url} controls autoPlay className="max-w-full max-h-[80vh] rounded" />
+          )}
+          {kind === 'audio' && (
+            <div className="w-full max-w-md p-4">
+              <audio controls src={url} className="w-full" autoPlay />
+            </div>
+          )}
+          {kind === 'model' && (
+            <div className="w-[600px] h-[400px]">
+              <ModelPreview src={url} filename={item.filename} />
+            </div>
+          )}
+          {kind === 'file' && (
+            <span className="text-zinc-500 text-sm">No preview available</span>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-4 py-3 border-t border-white/5 flex items-center justify-between shrink-0">
+          <p className="text-xs text-zinc-400 truncate">{item.filename}</p>
+          <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={url}
+              download={item.filename}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-md transition-colors"
+            >
+              <DownloadSimple size={12} />
+              Download
+            </a>
+            <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors p-1.5" title="Close">
+              <XCircle size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function OutputGrid({ outputs, comfyPort }: { outputs: OutputItem[]; comfyPort?: number | null }) {
+  const [lightbox, setLightbox] = useState<{ item: Exclude<OutputItem, { kind: 'text' }>; url: string } | null>(null)
+  const cardClass = "group flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50 hover:border-emerald-500/30 transition-all duration-200 cursor-pointer"
+
+  return (
+    <>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {outputs.map((out, i) => {
+          if (out.kind === 'text') {
+            return (
+              <div key={i} className="col-span-2 sm:col-span-3 rounded-xl border border-white/5 bg-zinc-900/50 px-4 py-3">
+                <p className="text-sm text-zinc-300 whitespace-pre-wrap font-mono-custom">{out.text}</p>
+              </div>
+            )
+          }
+          const url = resolveOutputUrl(out, comfyPort)
+          const open = () => setLightbox({ item: out, url })
+          if (out.kind === 'image') return (
+            <div key={i} className={cardClass} onClick={open}>
+              <div className="h-36 bg-zinc-950 overflow-hidden">
+                <BlurRevealImage src={url} alt={out.filename} />
+              </div>
+              <div className="px-3 py-2 border-t border-white/5">
+                <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
+              </div>
             </div>
           )
-        }
-        const subfolder = out.path.includes('/') ? out.path.substring(0, out.path.lastIndexOf('/')) : ''
-        const url = `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}${subfolder ? `&subfolder=${encodeURIComponent(subfolder)}` : ''}&type=output`
-        if (out.kind === 'image') return (
-          <div key={i} className={cardClass}>
-            <div className="h-36 bg-zinc-950 overflow-hidden">
-              <BlurRevealImage src={url} alt={out.filename} />
+          if (out.kind === 'video') return (
+            <div key={i} className={cardClass} onClick={open}>
+              <video src={url} className="w-full aspect-video bg-zinc-950" />
+              <div className="px-3 py-2 border-t border-white/5">
+                <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
+              </div>
             </div>
-            <div className="px-3 py-2 border-t border-white/5">
-              <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
+          )
+          if (out.kind === 'audio') return (
+            <div key={i} className={cardClass} onClick={open}>
+              <div className="px-4 py-4 bg-zinc-950">
+                <audio src={url} className="w-full" />
+              </div>
+              <div className="px-3 py-2 border-t border-white/5">
+                <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
+              </div>
             </div>
-          </div>
-        )
-        if (out.kind === 'video') return (
-          <div key={i} className={cardClass}>
-            <video src={url} controls className="w-full aspect-video bg-zinc-950" />
-            <div className="px-3 py-2 border-t border-white/5">
-              <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
+          )
+          return (
+            <div key={i} className={cardClass} onClick={open}>
+              <div className="h-36 bg-zinc-950 overflow-hidden">
+                <ModelPreview src={url} filename={out.filename} />
+              </div>
+              <div className="px-3 py-2 border-t border-white/5">
+                <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
+              </div>
             </div>
-          </div>
-        )
-        if (out.kind === 'audio') return (
-          <div key={i} className={cardClass}>
-            <div className="px-4 py-4 bg-zinc-950">
-              <audio controls src={url} className="w-full" />
-            </div>
-            <div className="px-3 py-2 border-t border-white/5">
-              <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
-            </div>
-          </div>
-        )
-        // model / file fallback
-        return (
-          <div key={i} className={cardClass}>
-            <div className="h-36 bg-zinc-950 overflow-hidden">
-              <ModelPreview src={url} filename={out.filename} />
-            </div>
-            <div className="px-3 py-2 border-t border-white/5">
-              <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
-            </div>
-          </div>
-        )
-      })}
-    </div>
+          )
+        })}
+      </div>
+
+      {lightbox && (
+        <OutputLightbox item={lightbox.item} url={lightbox.url} onClose={() => setLightbox(null)} />
+      )}
+    </>
   )
 }
 
@@ -370,7 +452,7 @@ function ExecutionHistoryItem({
           {outputs.map((out) => (
             <a
               key={out.filename}
-              href={`/api/comfy/output?path=${encodeURIComponent(out.path)}`}
+              href={out.path.startsWith('/') ? out.path : `/api/comfy/output?path=${encodeURIComponent(out.path)}`}
               download={out.filename}
               className="flex items-center gap-1 px-2 py-1 bg-zinc-800 rounded text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
             >
@@ -389,85 +471,169 @@ function ExecutionHistoryItem({
 }
 
 // ---------------------------------------------------------------------------
-// cURL modal — uses live input values from the form
+// Node.js tab — install + fetch snippet using live input values
 // ---------------------------------------------------------------------------
 
-function buildCurlCommand(toolId: string, inputs: Record<string, unknown>): string {
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:14173'
-  const body = JSON.stringify({ inputs }, null, 2)
-  return `curl -X POST ${origin}/api/tools/${toolId}/executions \\\n  -H "Content-Type: application/json" \\\n  -d '${body}'`
-}
-
-function CurlModal({
-  toolId,
-  toolName,
-  inputs,
-  onClose,
-}: {
-  toolId: string
-  toolName: string
-  inputs: Record<string, unknown>
-  onClose: () => void
-}) {
+function CopyBlock({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
-  const curl = buildCurlCommand(toolId, inputs)
-
   const handleCopy = () => {
-    navigator.clipboard.writeText(curl).then(() => {
+    navigator.clipboard.writeText(code).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
   }
+  return (
+    <div className="relative">
+      <pre className="bg-zinc-950 border border-white/5 rounded-lg p-3 text-xs text-zinc-300 font-mono-custom overflow-x-auto whitespace-pre leading-relaxed">
+        {code}
+      </pre>
+      <button
+        onClick={handleCopy}
+        className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-[11px] font-medium transition-colors"
+      >
+        {copied ? (
+          <><Check size={11} className="text-emerald-400" /><span className="text-emerald-400">Copied!</span></>
+        ) : (
+          <><Copy size={11} />Copy</>
+        )}
+      </button>
+    </div>
+  )
+}
+
+function NodeJsTab({ toolId, inputs }: { toolId: string; inputs: Record<string, unknown> }) {
+  const inputsStr = Object.keys(inputs).length === 0
+    ? '{}'
+    : '{\n' + Object.entries(inputs).map(([k, v]) => `  "${k}": ${JSON.stringify(v)}`).join(',\n') + '\n}'
+
+  const installSnippet = `npm install @flowscale/sdk`
+
+  const snippet =
+    `import { createClient, login } from '@flowscale/sdk'
+
+const token = await login({
+  baseUrl: 'http://localhost:14173',
+  username: 'admin',
+  password: '<your-password>',
+})
+
+const client = createClient({ baseUrl: 'http://localhost:14173', sessionToken: token })
+
+const result = await client.tools.run('${toolId}', ${inputsStr})
+
+// Output paths are relative — prepend baseUrl for direct access:
+// client.resolveUrl(result.outputs[0].path)
+console.log(result.outputs)`
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-      <div
-        className="relative z-10 w-full max-w-2xl bg-zinc-950 border border-white/10 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-          <div className="flex items-center gap-2.5">
-            <Terminal size={16} className="text-zinc-400" />
-            <span className="text-sm font-medium text-zinc-100">cURL — {toolName}</span>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* Note */}
-        <p className="px-5 pt-4 text-xs text-zinc-500">
-          Reflects the current input values in the form. Paste directly into a terminal or import into Postman.
-        </p>
-
-        {/* Code block */}
-        <div className="relative mx-5 mt-3 mb-5">
-          <pre className="bg-zinc-900 border border-white/5 rounded-xl p-4 text-xs text-zinc-300 font-mono-custom overflow-x-auto whitespace-pre leading-relaxed">
-            {curl}
-          </pre>
-          <button
-            onClick={handleCopy}
-            className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-colors"
-          >
-            {copied ? (
-              <>
-                <Check size={12} className="text-emerald-400" />
-                <span className="text-emerald-400">Copied!</span>
-              </>
-            ) : (
-              <>
-                <Copy size={12} />
-                Copy
-              </>
-            )}
-          </button>
-        </div>
+    <div className="flex flex-col gap-5">
+      <div>
+        <p className="text-xs text-zinc-500 mb-2">Install</p>
+        <CopyBlock code={installSnippet} />
       </div>
+      <div>
+        <p className="text-xs text-zinc-500 mb-2">Run — values reflect the current form inputs</p>
+        <CopyBlock code={snippet} />
+      </div>
+    </div>
+  )
+}
+
+function HttpTab({ toolId, inputs }: { toolId: string; inputs: Record<string, unknown> }) {
+  const inputsBody = Object.keys(inputs).length === 0
+    ? '  "inputs": {}'
+    : '  "inputs": {\n' + Object.entries(inputs).map(([k, v]) => `    "${k}": ${JSON.stringify(v)}`).join(',\n') + '\n  }'
+
+  const runSnippet =
+    `const BASE = 'http://localhost:14173'
+
+// 1. Execute the tool
+const res = await fetch(\`\${BASE}/api/tools/${toolId}/executions\`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Cookie': 'fs_session=<your-session-token>',
+  },
+  body: JSON.stringify({
+${inputsBody}
+  }),
+})
+
+const { executionId, promptId, comfyPort } = await res.json()
+
+// 2. Poll history until complete (ComfyUI tools)
+let outputs = []
+while (true) {
+  await new Promise(r => setTimeout(r, 2000))
+  const hist = await fetch(
+    \`\${BASE}/api/comfy/\${comfyPort}/history/\${promptId}\`,
+    { headers: { 'Cookie': 'fs_session=<your-session-token>' } }
+  ).then(r => r.json())
+  const entry = hist[promptId]
+  if (!entry?.status?.completed) continue
+  for (const node of Object.values(entry.outputs ?? {})) {
+    for (const img of node.images ?? []) {
+      outputs.push(\`\${BASE}/api/comfy/\${comfyPort}/view?filename=\${img.filename}&type=output\`)
+    }
+  }
+  break
+}
+
+console.log(outputs)`
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5">
+        <p className="text-xs text-amber-400 leading-relaxed">
+          Update <code className="bg-amber-500/10 px-1 rounded">BASE</code> if your AIOS instance is not running locally. Session tokens are obtained by logging in via <code className="bg-amber-500/10 px-1 rounded">POST /api/auth/login</code>.
+        </p>
+      </div>
+      <div>
+        <p className="text-xs text-zinc-500 mb-2">Run &amp; poll — inputs reflect current form values</p>
+        <CopyBlock code={runSnippet} />
+      </div>
+    </div>
+  )
+}
+
+function ServerLogsPanel() {
+  const [logs, setLogs] = useState<string[]>([])
+  const containerRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const userScrolledUp = useRef(false)
+
+  useEffect(() => {
+    async function poll() {
+      try {
+        const res = await fetch('/api/local-inference/logs')
+        const { logs: l } = await res.json() as { logs: string[] }
+        setLogs(l)
+      } catch { /* ignore */ }
+    }
+    poll()
+    const t = setInterval(poll, 2000)
+    return () => clearInterval(t)
+  }, [])
+
+  useEffect(() => {
+    if (!userScrolledUp.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [logs])
+
+  function handleScroll() {
+    const el = containerRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    userScrolledUp.current = !atBottom
+  }
+
+  if (logs.length === 0) return <p className="text-xs text-zinc-600 pt-2">No server logs yet.</p>
+
+  return (
+    <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-y-auto font-mono text-[11px] text-zinc-400 leading-relaxed">
+      {logs.map((line, i) => <div key={i} className="whitespace-pre-wrap">{line}</div>)}
+      <div ref={bottomRef} />
     </div>
   )
 }
@@ -483,13 +649,23 @@ function BottomTabs({
   execLoading: boolean
   onRestore: (inputs: Record<string, unknown>) => void
 }) {
-  const [tab, setTab] = useState<'history' | 'logs'>('logs')
+  const inferenceStatus = useInferenceStatus()
+  const availableTabs = (['logs', 'history'] as const)
+  const defaultTab = tool.engine === 'api' ? 'logs' : 'logs'
+  const [tab, setTab] = useState<'history' | 'logs'>(defaultTab)
+
+  // Auto-switch to logs when server is starting
+  useEffect(() => {
+    if (tool.engine === 'api' && (inferenceStatus === 'starting' || inferenceStatus === 'running')) {
+      setTab('logs')
+    }
+  }, [inferenceStatus, tool.engine])
 
   return (
     <div className="h-64 flex flex-col border-t border-white/5">
       {/* Tab bar */}
       <div className="flex items-center gap-1 px-4 pt-2 shrink-0">
-        {(['logs', 'history'] as const).map((t) => (
+        {availableTabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -526,10 +702,11 @@ function BottomTabs({
           </div>
         )}
 
-        {tab === 'logs' && tool.comfyPort && (
+        {tab === 'logs' && tool.engine === 'api' && <ServerLogsPanel />}
+        {tab === 'logs' && tool.engine !== 'api' && tool.comfyPort && (
           <ComfyLogsPanel port={tool.comfyPort} />
         )}
-        {tab === 'logs' && !tool.comfyPort && (
+        {tab === 'logs' && tool.engine !== 'api' && !tool.comfyPort && (
           <p className="text-xs text-zinc-600 pt-2">No ComfyUI instance configured.</p>
         )}
       </div>
@@ -550,6 +727,8 @@ export default function ToolPage() {
     },
   })
 
+  // Poll executions — faster (2s) when a generation is in-flight, slower (5s) otherwise
+  const hasRunningExec = useRef(false)
   const { data: executions = [], isLoading: execLoading } = useQuery<Execution[]>({
     queryKey: ['executions', id],
     queryFn: async () => {
@@ -557,7 +736,7 @@ export default function ToolPage() {
       if (!res.ok) return []
       return res.json()
     },
-    refetchInterval: 5000,
+    refetchInterval: () => hasRunningExec.current ? 2000 : 5000,
   })
 
   const allSchema: WorkflowIO[] = tool?.schemaJson ? JSON.parse(tool.schemaJson) : []
@@ -581,13 +760,38 @@ export default function ToolPage() {
       }
       return defaults
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool?.schemaJson])
 
-  const [showCurl, setShowCurl] = useState(false)
-  const [runningId, setRunningId] = useState<string | null>(null)
+  const [leftTab, setLeftTab] = useState<'form' | 'nodejs' | 'http'>('form')
   const [latestOutputs, setLatestOutputs] = useState<OutputItem[]>([])
   const sseRef = useRef<EventSource | null>(null)
+  // Track the execution we kicked off (for ComfyUI SSE/polling only)
+  const comfyRunRef = useRef<{ executionId: string; promptId: string; comfyPort: number; done: boolean; pollInterval?: ReturnType<typeof setInterval> | undefined } | null>(null)
+
+  // ── Derive running state from actual DB data ──────────────────────────────────
+  // This is the single source of truth — survives navigation, remounts, server restarts.
+  const runningExecution = executions.find((e) => e.status === 'running') ?? null
+  hasRunningExec.current = !!runningExecution
+
+  // When a running execution transitions to completed, surface its outputs
+  const prevRunningIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const curId = runningExecution?.id ?? null
+    const prevId = prevRunningIdRef.current
+    prevRunningIdRef.current = curId
+
+    // Was running, now done → check if it completed with outputs
+    if (prevId && !curId) {
+      const finished = executions.find((e) => e.id === prevId)
+      if (finished?.status === 'completed' && finished.outputsJson) {
+        try {
+          const items = JSON.parse(finished.outputsJson) as OutputItem[]
+          setLatestOutputs(items)
+        } catch { /* ignore */ }
+      }
+    }
+  }, [runningExecution, executions])
 
   const runMutation = useMutation<ExecResult, Error>({
     mutationFn: async () => {
@@ -603,20 +807,33 @@ export default function ToolPage() {
       return res.json()
     },
     onSuccess: (result) => {
-      setRunningId(result.executionId)
       setLatestOutputs([])
 
-      let done = false
+      // API tools: fire-and-forget. The executions poll (every 2s while running)
+      // detects completion/error from the DB — no client-side tracking needed.
+      if (result.type === 'api') {
+        qc.invalidateQueries({ queryKey: ['executions', id] })
+        return
+      }
+
+      // ── ComfyUI tools: SSE + fallback polling for real-time completion ────
+      const run: { executionId: string; promptId: string; comfyPort: number; done: boolean; pollInterval?: ReturnType<typeof setInterval> } = {
+        executionId: result.executionId,
+        promptId: result.promptId!,
+        comfyPort: result.comfyPort!,
+        done: false,
+      }
+      comfyRunRef.current = run
 
       const finish = async () => {
-        if (done) return
-        done = true
+        if (run.done) return
+        run.done = true
         sseRef.current?.close()
         sseRef.current = null
-        clearInterval(pollInterval)
+        if (run.pollInterval) clearInterval(run.pollInterval)
 
         try {
-          const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
+          const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
           if (histRes.ok) {
             const hist = await histRes.json() as Record<string, {
               status?: { status_str?: string }
@@ -629,7 +846,7 @@ export default function ToolPage() {
                 string?: string[]
               }>
             }>
-            const entry = hist[result.promptId]
+            const entry = hist[run.promptId]
             const items: OutputItem[] = []
             for (const nodeOut of Object.values(entry?.outputs ?? {})) {
               for (const f of nodeOut.images ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
@@ -645,7 +862,7 @@ export default function ToolPage() {
               }
             }
             setLatestOutputs(items)
-            await fetch(`/api/executions/${result.executionId}`, {
+            await fetch(`/api/executions/${run.executionId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -657,17 +874,15 @@ export default function ToolPage() {
             qc.invalidateQueries({ queryKey: ['executions', id] })
           }
         } catch { /* ignore */ }
-
-        setRunningId(null)
       }
 
       // SSE proxy for completion detection (avoids CORS on direct WS)
-      const sse = new EventSource(`/api/comfy/${result.comfyPort}/ws`)
+      const sse = new EventSource(`/api/comfy/${run.comfyPort}/ws`)
       sseRef.current = sse
       sse.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data) as { type: string; data?: Record<string, unknown> }
-          if (msg.data?.prompt_id !== result.promptId) return
+          if (msg.data?.prompt_id !== run.promptId) return
           if (msg.type === 'executing' && msg.data?.node === null) { sse.close(); finish() }
           else if (msg.type === 'execution_error') { sse.close(); finish() }
         } catch { /* ignore */ }
@@ -675,27 +890,41 @@ export default function ToolPage() {
       sse.onerror = () => { sse.close() }
 
       // Fallback poll
-      const pollInterval = setInterval(async () => {
-        if (done) { clearInterval(pollInterval); return }
+      run.pollInterval = setInterval(async () => {
+        if (run.done) { clearInterval(run.pollInterval); return }
         try {
-          const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
+          const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
           if (!histRes.ok) return
-          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean } }>
-          if (hist[result.promptId]?.status?.completed) finish()
+          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
+          const s = hist[run.promptId]?.status
+          if (s?.completed || s?.status_str === 'error') finish()
         } catch { /* ignore */ }
       }, 3000)
 
       setTimeout(() => {
-        if (!done) { done = true; sseRef.current?.close(); sseRef.current = null; clearInterval(pollInterval); setRunningId(null) }
+        if (!run.done) { run.done = true; sseRef.current?.close(); sseRef.current = null; if (run.pollInterval) clearInterval(run.pollInterval) }
       }, 300_000)
     },
   })
+
+  const [stopping, setStopping] = useState(false)
+
+  async function handleStopInference() {
+    const execId = runningExecution?.id
+    if (!execId) return
+    setStopping(true)
+    try {
+      await fetch(`/api/executions/${execId}/cancel`, { method: 'POST' })
+    } finally {
+      setStopping(false)
+    }
+  }
 
   const handleRestore = useCallback((restored: Record<string, unknown>) => {
     setInputs(restored)
   }, [])
 
-  const isRunning = runMutation.isPending || runningId !== null
+  const isRunning = runMutation.isPending || !!runningExecution
 
   if (toolLoading) {
     return (
@@ -717,25 +946,28 @@ export default function ToolPage() {
     <FadeIn from="none" duration={0.3} className="h-full flex flex-col">
       {/* Topbar */}
       <div className="flex items-center gap-4 px-6 py-4 border-b border-white/5 shrink-0">
-        <Link href="/apps" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+        <button onClick={() => window.history.back()} className="text-zinc-500 hover:text-zinc-300 transition-colors">
           <ArrowLeft size={18} />
-        </Link>
+        </button>
         <div className="flex-1">
           <h1 className="text-sm font-semibold text-zinc-100">{tool.name}</h1>
           {tool.description && (
             <p className="text-xs text-zinc-500 mt-0.5">{tool.description}</p>
           )}
         </div>
-        <button
-          onClick={() => setShowCurl(true)}
-          className="flex items-center gap-2 px-3 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white text-sm font-medium rounded-md transition-colors border border-zinc-800 hover:border-zinc-600"
-        >
-          <Terminal size={14} />
-          cURL
-        </button>
+        {isRunning && (
+          <button
+            onClick={handleStopInference}
+            disabled={stopping}
+            className="flex items-center gap-2 px-3 py-2 text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 disabled:opacity-50 text-sm font-medium rounded-md transition-colors"
+          >
+            <Stop size={14} weight="fill" />
+            {stopping ? 'Stopping…' : 'Stop'}
+          </button>
+        )}
         <button
           onClick={() => runMutation.mutate()}
-          disabled={isRunning || !tool.comfyPort}
+          disabled={isRunning || (tool.engine === 'comfyui' && !tool.comfyPort)}
           className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
         >
           {isRunning ? (
@@ -761,51 +993,70 @@ export default function ToolPage() {
       )}
 
       {/* No ComfyUI warning */}
-      {!tool.comfyPort && (
+      {tool.engine === 'comfyui' && !tool.comfyPort && (
         <div className="px-6 py-2.5 bg-amber-950/30 border-b border-amber-900/50 text-amber-400 text-sm">
           No ComfyUI instance configured for this tool. Re-deploy via Build Tool to assign one.
         </div>
       )}
 
-      {/* cURL modal */}
-      {showCurl && (
-        <CurlModal
-          toolId={tool.id}
-          toolName={tool.name}
-          inputs={inputs}
-          onClose={() => setShowCurl(false)}
-        />
-      )}
+      {/* Local inference setup (API tools) */}
+      {tool.engine === 'api' && <LocalInferenceSetup />}
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         <PanelGroup orientation="horizontal">
-          {/* Left: Inputs */}
+          {/* Left: Form / Node.js tabs */}
           <Panel defaultSize={40} minSize={25}>
-            <div className="h-full overflow-y-auto px-6 py-5">
-              <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
-                Inputs
-              </h2>
-              {schema.length === 0 ? (
-                <p className="text-sm text-zinc-600">No configurable inputs detected.</p>
-              ) : (
-                <div className="flex flex-col gap-4">
-                  {schema.map((field) => (
-                    <InputField
-                      key={`${field.nodeId}__${field.paramName}`}
-                      field={field}
-                      value={inputs[`${field.nodeId}__${field.paramName}`]}
-                      comfyPort={tool.comfyPort}
-                      onChange={(v) =>
-                        setInputs((prev) => ({
-                          ...prev,
-                          [`${field.nodeId}__${field.paramName}`]: v,
-                        }))
-                      }
-                    />
-                  ))}
-                </div>
-              )}
+            <div className="h-full flex flex-col">
+              {/* Tab bar */}
+              <div className="flex items-center gap-1 px-4 pt-3 pb-0 shrink-0 border-b border-white/5">
+                {(['form', 'nodejs', 'http'] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setLeftTab(t)}
+                    className={[
+                      'px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors',
+                      leftTab === t
+                        ? 'border-emerald-500 text-emerald-400'
+                        : 'border-transparent text-zinc-500 hover:text-zinc-300',
+                    ].join(' ')}
+                  >
+                    {t === 'form' ? 'Form' : t === 'nodejs' ? 'Node.js' : 'HTTP'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              <div className="flex-1 overflow-y-auto px-6 py-5">
+                {leftTab === 'form' && (
+                  schema.length === 0 ? (
+                    <p className="text-sm text-zinc-600">No configurable inputs detected.</p>
+                  ) : (
+                    <div className="flex flex-col gap-4">
+                      {schema.map((field) => (
+                        <InputField
+                          key={`${field.nodeId}__${field.paramName}`}
+                          field={field}
+                          value={inputs[`${field.nodeId}__${field.paramName}`]}
+                          comfyPort={tool.comfyPort}
+                          onChange={(v) =>
+                            setInputs((prev) => ({
+                              ...prev,
+                              [`${field.nodeId}__${field.paramName}`]: v,
+                            }))
+                          }
+                        />
+                      ))}
+                    </div>
+                  )
+                )}
+                {leftTab === 'nodejs' && (
+                  <NodeJsTab toolId={tool.id} inputs={inputs} />
+                )}
+                {leftTab === 'http' && (
+                  <HttpTab toolId={tool.id} inputs={inputs} />
+                )}
+              </div>
             </div>
           </Panel>
 
@@ -828,7 +1079,7 @@ export default function ToolPage() {
                   </div>
                 )}
 
-                {latestOutputs.length > 0 && tool.comfyPort && (
+                {latestOutputs.length > 0 && (
                   <OutputGrid outputs={latestOutputs} comfyPort={tool.comfyPort} />
                 )}
 

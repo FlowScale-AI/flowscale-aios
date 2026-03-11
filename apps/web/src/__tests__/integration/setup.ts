@@ -14,6 +14,7 @@ const DDL = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
+    engine TEXT NOT NULL DEFAULT 'comfyui',
     workflow_json TEXT NOT NULL,
     workflow_hash TEXT NOT NULL,
     schema_json TEXT NOT NULL,
@@ -137,7 +138,11 @@ export function makeRequest(
   url: string,
   init?: RequestInit & { cookies?: Record<string, string> },
 ) {
-  const req = new NextRequest(new URL(url, 'http://localhost'), init)
+  const { signal, ...restInit } = init ?? {}
+  const req = new NextRequest(new URL(url, 'http://localhost'), {
+    ...restInit,
+    ...(signal != null ? { signal } : {}),
+  })
   if (init?.cookies) {
     for (const [name, value] of Object.entries(init.cookies)) {
       req.cookies.set(name, value)

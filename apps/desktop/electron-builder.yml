@@ -4,10 +4,12 @@ copyright: Copyright © 2025 FlowScale
 
 directories:
   output: release
-  buildResources: build
+  buildResources: assets
 
 files:
   - dist/**/*
+  - assets/splash.html
+  - assets/icon.png
   - package.json
 
 extraResources:
@@ -23,23 +25,37 @@ extraResources:
     to: apps/web/.next/standalone/apps/web/public
     filter:
       - '**/*'
+  - from: ../../scripts
+    to: scripts
+    filter:
+      - '**/*.py'
 
 linux:
+  executableName: flowscale-aios
   target:
     - AppImage
-  icon: build/icon.png
+  icon: assets/icon.png
   category: Development
+
+publish:
+  provider: generic
+  url: https://flowscale-aios.s3.us-east-1.amazonaws.com
 
 mac:
   target:
     - dmg
-  icon: build/icon.png
+    - zip
+  icon: assets/icon.png
   category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: assets/entitlements.mac.plist
+  entitlementsInherit: assets/entitlements.mac.plist
 
 win:
   target:
     - nsis
-  icon: build/icon.png
+  icon: assets/icon.png
 
 nsis:
   oneClick: false

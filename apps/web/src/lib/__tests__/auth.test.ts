@@ -158,8 +158,8 @@ describe('ROLE_NAV', () => {
     expect(ROLE_NAV.dev).not.toContain('/users')
   })
 
-  it('artist only has /apps and /canvas', () => {
-    expect(ROLE_NAV.artist).toEqual(['/apps', '/canvas'])
+  it('artist has /home, /canvas, /explore, /outputs, and /apps', () => {
+    expect(ROLE_NAV.artist).toEqual(['/home', '/canvas', '/explore', '/outputs', '/apps'])
   })
 
   it('admin and pipeline_td have the same routes', () => {
