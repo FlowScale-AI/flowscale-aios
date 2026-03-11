@@ -13,22 +13,14 @@ files:
   - package.json
 
 extraResources:
-  - from: ../web/.next/standalone
+  - from: standalone-build/standalone
     to: apps/web/.next/standalone
     filter:
-      - '**/*'
-  - from: ../web/.next/static
-    to: apps/web/.next/standalone/apps/web/.next/static
-    filter:
-      - '**/*'
-  - from: ../web/public
-    to: apps/web/.next/standalone/apps/web/public
-    filter:
-      - '**/*'
+      - "**/*"
   - from: ../../scripts
     to: scripts
     filter:
-      - '**/*.py'
+      - "**/*.py"
 
 linux:
   executableName: flowscale-aios

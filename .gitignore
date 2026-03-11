@@ -64,3 +64,4 @@ packages/workflow/node_modules/
 apps/desktop/release/
 TODO.md
 apps/desktop/releases/
+apps/desktop/standalone-build/standalone/

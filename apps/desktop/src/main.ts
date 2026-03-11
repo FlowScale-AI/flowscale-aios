@@ -140,8 +140,19 @@ function waitForServer(url: string, timeoutMs = 30_000): Promise<void> {
 
 /** Locate the system `node` binary. Returns null if not found. */
 function findSystemNode(): string | null {
-  const candidates =
-    process.platform === 'darwin'
+  const isWin = process.platform === 'win32'
+
+  const candidates: string[] = isWin
+    ? [
+        // nvm-windows (nvm4w) — symlinked active version
+        path.join(process.env.NVM_SYMLINK || 'C:\\nvm4w\\nodejs', 'node.exe'),
+        // Common Windows install paths
+        'C:\\Program Files\\nodejs\\node.exe',
+        'C:\\Program Files (x86)\\nodejs\\node.exe',
+        // fnm (Fast Node Manager) on Windows
+        path.join(process.env.FNM_DIR || '', 'aliases', 'default', 'node.exe'),
+      ]
+    : process.platform === 'darwin'
       ? ['/opt/homebrew/bin/node', '/usr/local/bin/node']
       : ['/usr/bin/node', '/usr/local/bin/node']
 
@@ -149,13 +160,18 @@ function findSystemNode(): string | null {
   // we check common locations first then fall back to a shell lookup)
   for (const p of candidates) {
     try {
-      if (existsSync(p)) return p
+      if (p && existsSync(p)) return p
     } catch { /* skip */ }
   }
 
   // Shell lookup as last resort
   try {
-    return execSync('which node', { encoding: 'utf-8' }).trim() || null
+    const cmd = isWin ? 'where node' : 'which node'
+    const result = execSync(cmd, { encoding: 'utf-8' }).trim()
+    // `where` on Windows may return multiple lines; take the first
+    const firstLine = result.split(/\r?\n/)[0]?.trim()
+    if (firstLine && existsSync(firstLine)) return firstLine
+    return null
   } catch {
     return null
   }
