@@ -48,7 +48,7 @@ Typecheck is the primary correctness tool — always run after changes. `package
 
 ## Repo Structure
 
-Turborepo + pnpm workspaces with five packages:
+Turborepo + pnpm workspaces:
 
 - **`apps/web`** (`@flowscale/aios-web`) — Next.js 15 App Router, the entire UI and API surface
 - **`apps/desktop`** (`@flowscale/aios-desktop`) — Electron 39 shell that loads `apps/web` on port 14173
@@ -80,7 +80,7 @@ Eleven tables (see `apps/web/src/lib/db/schema.ts` for Drizzle types):
 - **`users`** — auth; `role` is `'admin' | 'pipeline_td' | 'dev' | 'artist'`; `status` is `'active' | 'pending' | 'disabled'`
 - **`sessions`** — session tokens; FK → users
 - **`setup`** — one-time initial admin password (seeded on first run)
-- **`installed_apps`** — sideloaded or registry apps; `source` is `'sideloaded' | 'registry'`; `status` is `'active' | 'disabled'`; `bundlePath` points to `~/.flowscale/apps/[id]/`
+- **`installed_apps`** — optional metadata for installed apps; `source` is `'sideloaded' | 'registry' | 'github' | 'local'`; the filesystem (`~/.flowscale/apps/`) is the source of truth for what apps exist
 - **`app_storage`** — per-app key-value storage; FK → installed_apps
 - **`models`** — scanned local model files; `type` is `'checkpoint' | 'lora' | 'vae' | 'controlnet' | 'upscaler' | 'other'`
 
@@ -90,11 +90,14 @@ All tool execution outputs (both ComfyUI-engine and API-engine) are saved to `~/
 
 When a ComfyUI-engine execution completes (`PATCH /api/executions/[id]` with `status: 'completed'`), `saveOutputsToDisk` downloads files from ComfyUI, writes them to disk, and re-writes `outputsJson` with updated `path` fields.
 
-### App bundle system
+### App bundle system (filesystem-first)
 
-Apps live in `~/.flowscale/apps/[id]/` — each directory must contain a `flowscale.app.json` manifest. The DB `installed_apps` table is the installation record; `GET /api/apps` filters out any rows whose `bundlePath` no longer exists on disk (deleted folder = silently removed from the grid, DB record preserved).
+Apps live in `~/.flowscale/apps/[id]/` — each directory must contain a `flowscale.app.json` manifest. **The filesystem is the source of truth**: `GET /api/apps` scans `~/.flowscale/apps/` and returns every directory with a valid manifest. No DB record is needed for an app to appear on the `/apps` page. The DB `installed_apps` table is optional metadata (source tracking, timestamps) and hosts `app_storage` FK references.
 
-**App registry** (`apps/web/src/lib/registry/appRegistry.ts`) is filesystem-driven — it scans `~/.flowscale/apps/` at call time and builds `AppRegistryEntry` objects from each `flowscale.app.json`. There is no static registry JSON file.
+**Installation methods:**
+- **GitHub URL** — `POST /api/apps/install-github` downloads a repo tarball, builds if `package.json` has a build script, copies bundle to `~/.flowscale/apps/[name]/`
+- **Local folder** — `POST /api/apps/install-local` validates, builds if needed, copies to `~/.flowscale/apps/[name]/`
+- **Manual** — drop a folder with `flowscale.app.json` + built assets into `~/.flowscale/apps/`
 
 ### App bridge protocol
 
@@ -224,5 +227,5 @@ GitHub Actions (`.github/workflows/`):
 ## Product concepts
 
 - **Tools** — single-model/workflow endpoints (e.g. Z-Image-Turbo). Built via the Build Tool wizard, stored in the `tools` table, run via `/api/tools/[id]/executions`.
-- **Apps** — full-fledged HTML bundles that orchestrate tools via the bridge protocol. Installed apps live in `~/.flowscale/apps/[id]/`; their DB record is in `installed_apps`; per-app state goes in `app_storage`.
+- **Apps** — full-fledged HTML bundles that orchestrate tools via the bridge protocol. Apps live in `~/.flowscale/apps/[id]/` and are auto-detected from the filesystem. Install via GitHub URL, local folder, or manual drop. Per-app state in `app_storage`.
 - **Models** — local model files scanned from ComfyUI paths; listed via `/api/models`.

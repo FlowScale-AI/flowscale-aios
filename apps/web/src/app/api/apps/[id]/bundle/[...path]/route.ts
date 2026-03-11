@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
-import { installedApps } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
 import fs from 'fs'
 import path from 'path'
+import os from 'os'
+
+const APPS_DIR = path.join(os.homedir(), '.flowscale', 'apps')
+
 const MIME: Record<string, string> = {
   '.html': 'text/html',
   '.js': 'application/javascript',
@@ -33,9 +34,10 @@ type Params = { params: Promise<{ id: string; path: string[] }> }
 export async function GET(_req: NextRequest, { params }: Params) {
   const { id, path: pathSegments } = await params
 
-  const db = getDb()
-  const [app] = await db.select().from(installedApps).where(eq(installedApps.id, id))
-  if (!app) return NextResponse.json({ error: 'App not found' }, { status: 404 })
+  const bundlePath = path.join(APPS_DIR, id)
+  if (!fs.existsSync(bundlePath)) {
+    return NextResponse.json({ error: 'App not found' }, { status: 404 })
+  }
 
   // Prevent path traversal
   const requestedPath = pathSegments.join('/')
@@ -43,9 +45,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const filePath = path.resolve(app.bundlePath, requestedPath)
+  const filePath = path.resolve(bundlePath, requestedPath)
   // Double-check resolved path is still inside bundlePath
-  if (!filePath.startsWith(path.resolve(app.bundlePath))) {
+  if (!filePath.startsWith(path.resolve(bundlePath))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -54,13 +56,12 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 
   const content = fs.readFileSync(filePath)
-  const mimeType = mimeLookup(filePath) || 'application/octet-stream'
-  const cacheControl = app.source === 'sideloaded' ? 'no-store, no-cache' : 'max-age=3600'
+  const mimeType = mimeLookup(filePath)
 
   return new NextResponse(content, {
     headers: {
       'Content-Type': mimeType,
-      'Cache-Control': cacheControl,
+      'Cache-Control': 'no-store',
     },
   })
 }
