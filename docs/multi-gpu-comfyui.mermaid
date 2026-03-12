@@ -1,0 +1,146 @@
+%% ============================================================
+%% Diagram 1: Single Machine (1 GPU)
+%% Current state — user runs ComfyUI externally, AIOS proxies to it
+%% ============================================================
+
+---
+title: "1. Single Machine — One GPU"
+---
+
+flowchart LR
+    User([User]) --> AIOS["FlowScale AIOS\n(localhost:14173)"]
+    AIOS -->|"proxy via\n/api/comfy/[port]"| ComfyUI["ComfyUI\n(user-started)\n:6188"]
+    ComfyUI --> GPU0["GPU 0"]
+
+    subgraph machine ["Single Machine"]
+        AIOS
+        ComfyUI
+        GPU0
+    end
+
+    style GPU0 fill:#059669,color:#fff
+    style machine fill:#18181b,color:#d4d4d8,stroke:#27272a
+
+
+%% ============================================================
+%% Diagram 2: Workstation (Multi-GPU, Single Machine)
+%% Future state — AIOS manages ComfyUI lifecycle per GPU
+%% ============================================================
+
+---
+title: "2. Workstation — Multi-GPU"
+---
+
+flowchart TD
+    User([User]) --> AIOS["FlowScale AIOS\n(localhost:14173)"]
+    AIOS --> SetPath["Configure ComfyUI\ninstall path"]
+    SetPath --> GPUMgr["GPU Manager\n(scans GPUs, manages instances)"]
+
+    GPUMgr --> |"start on GPU 0"| C0["ComfyUI :6188\n(AIOS-managed)"]
+    GPUMgr --> |"start on GPU 1"| C1["ComfyUI :6189\n(AIOS-managed)"]
+    GPUMgr --> |"detected external\nprocess → skip"| C2["ComfyUI :8188\n(external) ⛔"]
+    GPUMgr --> |"no process\n→ available"| G3["GPU 3 🟢\n(free)"]
+
+    C0 --> GPU0["GPU 0"]
+    C1 --> GPU1["GPU 1"]
+    C2 --> GPU2["GPU 2"]
+
+    AIOS --> Router["Tool Router"]
+    Router -->|"route job"| C0
+    Router -->|"route job"| C1
+    Router -.->|"cannot route"| C2
+
+    subgraph workstation ["Workstation (e.g. 4× RTX 4090)"]
+        GPUMgr
+        C0
+        C1
+        C2
+        G3
+        GPU0
+        GPU1
+        GPU2
+        Router
+    end
+
+    subgraph rules ["Rules"]
+        direction TB
+        R1["1 ComfyUI per GPU"]
+        R2["Only AIOS instances routable"]
+        R3["External ComfyUI → GPU ignored"]
+    end
+
+    style GPU0 fill:#059669,color:#fff
+    style GPU1 fill:#059669,color:#fff
+    style GPU2 fill:#dc2626,color:#fff
+    style G3 fill:#059669,color:#fff,stroke-dasharray: 5 5
+    style workstation fill:#18181b,color:#d4d4d8,stroke:#27272a
+
+
+%% ============================================================
+%% Diagram 3: Multi-Node Cluster
+%% Future state — AIOS orchestrates across networked machines
+%% ============================================================
+
+---
+title: "3. Cluster — Multi-Node"
+---
+
+flowchart TD
+    User([User]) --> AIOS["FlowScale AIOS\n(Control Plane)\nlocalhost:14173"]
+
+    AIOS --> Orchestrator["Cluster Orchestrator\n(discovers nodes,\nroutes jobs)"]
+
+    Orchestrator -->|"LAN / API"| Node1
+    Orchestrator -->|"LAN / API"| Node2
+    Orchestrator -->|"Cloud API"| Cloud
+
+    subgraph Node1 ["Node 1 — Workstation (2× GPU)"]
+        Agent1["AIOS Agent"]
+        C1A["ComfyUI :6188"] --> G1A["GPU 0"]
+        C1B["ComfyUI :6189"] --> G1B["GPU 1"]
+        Agent1 --> C1A
+        Agent1 --> C1B
+    end
+
+    subgraph Node2 ["Node 2 — Render Server (4× GPU)"]
+        Agent2["AIOS Agent"]
+        C2A["ComfyUI :6188"] --> G2A["GPU 0"]
+        C2B["ComfyUI :6189"] --> G2B["GPU 1"]
+        C2C["ComfyUI :6190"] --> G2C["GPU 2"]
+        C2D["ComfyUI :6191"] --> G2D["GPU 3"]
+        Agent2 --> C2A
+        Agent2 --> C2B
+        Agent2 --> C2C
+        Agent2 --> C2D
+    end
+
+    subgraph Cloud ["Cloud — Modal.com (Serverless)"]
+        Modal["Modal Endpoints"]
+        Modal --> MGPU1["A100-80GB\n(on demand)"]
+        Modal --> MGPU2["H200\n(on demand)"]
+    end
+
+    Orchestrator -->|"job routing\n(least loaded)"| Router2["Load Balancer"]
+    Router2 --> Agent1
+    Router2 --> Agent2
+    Router2 --> Modal
+
+    subgraph legend ["Scaling Path"]
+        direction TB
+        S1["Single GPU → add GPUs to machine"]
+        S2["Multi-GPU → add machines to cluster"]
+        S3["Cluster → burst to cloud (Modal)"]
+        S1 --> S2 --> S3
+    end
+
+    style G1A fill:#059669,color:#fff
+    style G1B fill:#059669,color:#fff
+    style G2A fill:#059669,color:#fff
+    style G2B fill:#059669,color:#fff
+    style G2C fill:#059669,color:#fff
+    style G2D fill:#059669,color:#fff
+    style MGPU1 fill:#6366f1,color:#fff
+    style MGPU2 fill:#6366f1,color:#fff
+    style Node1 fill:#18181b,color:#d4d4d8,stroke:#27272a
+    style Node2 fill:#18181b,color:#d4d4d8,stroke:#27272a
+    style Cloud fill:#1e1b4b,color:#c7d2fe,stroke:#4338ca
