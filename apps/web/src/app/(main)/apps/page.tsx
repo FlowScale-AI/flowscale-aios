@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   ArrowUpRight,
@@ -9,6 +9,11 @@ import {
   MagnifyingGlass,
   Palette,
   Cube,
+  Plus,
+  GithubLogo,
+  FolderOpen,
+  X,
+  CircleNotch,
 } from "phosphor-react";
 import {
   PageTransition,
@@ -90,11 +95,234 @@ function AppCard({ app }: { app: InstalledApp }) {
 }
 
 // ---------------------------------------------------------------------------
+// Install modal
+// ---------------------------------------------------------------------------
+
+function InstallAppModal({
+  onClose,
+  onInstalled,
+}: {
+  onClose: () => void;
+  onInstalled: () => void;
+}) {
+  const [githubUrl, setGithubUrl] = useState("");
+  const [localPath, setLocalPath] = useState("");
+  const [installing, setInstalling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  async function handleGitHubInstall() {
+    if (!githubUrl.trim()) return;
+    setInstalling(true);
+    setError(null);
+    setStatus("Downloading from GitHub...");
+
+    try {
+      const res = await fetch("/api/apps/install-github", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: githubUrl.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Install failed");
+        return;
+      }
+      onInstalled();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Install failed");
+    } finally {
+      setInstalling(false);
+      setStatus(null);
+    }
+  }
+
+  async function handleLocalPathInstall() {
+    if (!localPath.trim()) return;
+    setInstalling(true);
+    setError(null);
+    setStatus("Installing from local folder...");
+
+    try {
+      const res = await fetch("/api/apps/install-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: localPath.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Install failed");
+        return;
+      }
+      onInstalled();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Install failed");
+    } finally {
+      setInstalling(false);
+      setStatus(null);
+    }
+  }
+
+  async function handleBrowseFolder() {
+    const desktop = (window as unknown as { desktop?: { dialog: { openDirectory: () => Promise<string> } } }).desktop;
+    if (!desktop) return;
+
+    setError(null);
+    const result = await desktop.dialog.openDirectory();
+    if (!result) return;
+
+    let folderPath: string;
+    try {
+      const parsed = JSON.parse(result);
+      if (parsed.canceled) return;
+      folderPath = Array.isArray(parsed.filePaths) ? parsed.filePaths[0] : parsed;
+    } catch {
+      // result is a plain path string
+      folderPath = result;
+    }
+    if (!folderPath) return;
+
+    setInstalling(true);
+    setStatus("Installing from local folder...");
+
+    try {
+      const res = await fetch("/api/apps/install-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: folderPath }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Install failed");
+        return;
+      }
+      onInstalled();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Install failed");
+    } finally {
+      setInstalling(false);
+      setStatus(null);
+    }
+  }
+
+  const hasDesktop = typeof window !== "undefined" && !!(window as unknown as { desktop?: unknown }).desktop;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-zinc-900 border border-white/10 rounded-xl w-[440px] shadow-2xl shadow-black/50">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-white/5">
+          <h3 className="font-tech text-base font-semibold text-zinc-100">
+            Install App
+          </h3>
+          <button
+            onClick={onClose}
+            disabled={installing}
+            className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-5">
+          {/* GitHub URL */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-zinc-300">
+              <GithubLogo size={16} />
+              GitHub Repository
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="https://github.com/user/my-app"
+                value={githubUrl}
+                onChange={(e) => setGithubUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleGitHubInstall()}
+                disabled={installing}
+                className="flex-1 px-3 py-2 text-sm bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 outline-none focus:border-emerald-500/50 transition-colors disabled:opacity-50"
+              />
+              <button
+                onClick={handleGitHubInstall}
+                disabled={installing || !githubUrl.trim()}
+                className="px-4 py-2 text-sm font-medium bg-zinc-100 text-black rounded-lg hover:bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                Install
+              </button>
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-white/5" />
+            <span className="text-xs text-zinc-600">or</span>
+            <div className="flex-1 h-px bg-white/5" />
+          </div>
+
+          {/* Local folder */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-zinc-300">
+              <FolderOpen size={16} />
+              Local Folder
+            </label>
+            {hasDesktop ? (
+              <button
+                onClick={handleBrowseFolder}
+                disabled={installing}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-zinc-300 bg-zinc-800 border border-zinc-700 rounded-lg hover:bg-zinc-700 hover:text-zinc-100 transition-colors disabled:opacity-50"
+              >
+                <FolderOpen size={16} />
+                Browse local folder
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="C:/path/to/your/app"
+                  value={localPath}
+                  onChange={(e) => setLocalPath(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleLocalPathInstall()}
+                  disabled={installing}
+                  className="flex-1 px-3 py-2 text-sm bg-zinc-950 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 outline-none focus:border-emerald-500/50 transition-colors disabled:opacity-50"
+                />
+                <button
+                  onClick={handleLocalPathInstall}
+                  disabled={installing || !localPath.trim()}
+                  className="px-4 py-2 text-sm font-medium bg-zinc-100 text-black rounded-lg hover:bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                >
+                  Install
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Status / Error */}
+          {installing && status && (
+            <div className="flex items-center gap-2 text-sm text-zinc-400">
+              <CircleNotch size={14} className="animate-spin" />
+              {status}
+            </div>
+          )}
+          {error && (
+            <div className="p-3 text-sm text-red-400 bg-red-950/30 border border-red-900/50 rounded-lg">
+              {error}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 export default function AppsPage() {
   const [searchQuery, setSearchQuery] = useState("");
+  const queryClient = useQueryClient();
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
   const {
@@ -110,6 +338,8 @@ export default function AppsPage() {
     },
     staleTime: 30_000,
   });
+
+  const [installModalOpen, setInstallModalOpen] = useState(false);
 
   const filteredApps = (apps ?? []).filter((app) => {
     if (!normalizedQuery) return true;
@@ -202,18 +432,13 @@ export default function AppsPage() {
                       available
                     </div>
                   )}
-                  <div className="relative group/install">
-                    <button
-                      disabled
-                      className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-zinc-400 bg-white/5 border border-white/10 rounded-lg cursor-not-allowed opacity-60"
-                    >
-                      <Cube size={14} />
-                      Install App
-                    </button>
-                    <div className="absolute right-0 top-full mt-1.5 px-2.5 py-1 bg-zinc-800 border border-white/10 rounded-md text-xs text-zinc-300 whitespace-nowrap opacity-0 group-hover/install:opacity-100 transition-opacity pointer-events-none z-10">
-                      Coming soon
-                    </div>
-                  </div>
+                  <button
+                    onClick={() => setInstallModalOpen(true)}
+                    className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-zinc-300 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 hover:text-zinc-100 transition-colors"
+                  >
+                    <Plus size={14} weight="bold" />
+                    Install App
+                  </button>
                 </div>
               </div>
             </FadeIn>
@@ -258,6 +483,12 @@ export default function AppsPage() {
           </section>
         </div>
       </div>
+      {installModalOpen && (
+        <InstallAppModal
+          onClose={() => setInstallModalOpen(false)}
+          onInstalled={() => queryClient.invalidateQueries({ queryKey: ["installed-apps"] })}
+        />
+      )}
     </PageTransition>
   );
 }
