@@ -11,13 +11,24 @@ function toRunItem(
   const outputs: { filename: string; url: string; content_type: string; label: string }[] = []
   if (ex.outputsJson) {
     try {
-      const raw = JSON.parse(ex.outputsJson) as { filename: string; path?: string }[]
+      const raw = JSON.parse(ex.outputsJson) as { filename: string; path?: string; kind?: string }[]
       for (const o of raw) {
-        const destName = `${ex.id.slice(0, 8)}_${o.filename}`
+        // API-engine outputs already have an absolute path (/api/executions/…);
+        // ComfyUI-engine outputs may only have a filename — construct the legacy path.
+        const url = o.path?.startsWith('/api/')
+          ? o.path
+          : `/api/outputs/${ex.toolId}/${encodeURIComponent(`${ex.id.slice(0, 8)}_${o.filename}`)}`
+
+        const ext = o.filename.split('.').pop()?.toLowerCase() ?? ''
+        let contentType = 'image/png'
+        if (o.kind === 'video' || ['mp4', 'webm', 'mov'].includes(ext)) contentType = 'video/mp4'
+        else if (o.kind === 'audio' || ['wav', 'mp3', 'flac', 'ogg', 'm4a'].includes(ext)) contentType = 'audio/mpeg'
+        else if (o.kind === 'text') contentType = 'text/plain'
+
         outputs.push({
           filename: o.filename,
-          url: `/api/outputs/${ex.toolId}/${encodeURIComponent(destName)}`,
-          content_type: 'image/png',
+          url,
+          content_type: contentType,
           label: o.filename,
         })
       }
