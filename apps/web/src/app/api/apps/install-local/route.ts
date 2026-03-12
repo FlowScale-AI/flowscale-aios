@@ -44,7 +44,11 @@ export async function POST(req: NextRequest) {
         try {
           const usePnpm = fs.existsSync(path.join(sourcePath, 'pnpm-lock.yaml'))
           const useYarn = fs.existsSync(path.join(sourcePath, 'yarn.lock'))
-          const installCmd = usePnpm ? 'pnpm install' : useYarn ? 'yarn install' : 'npm install'
+          const installCmd = usePnpm
+            ? 'pnpm install --ignore-scripts'
+            : useYarn
+              ? 'yarn install --ignore-scripts'
+              : 'npm install --ignore-scripts'
           const buildCmd = usePnpm ? 'pnpm run build' : useYarn ? 'yarn build' : 'npm run build'
 
           const opts = { cwd: sourcePath, stdio: 'pipe' as const, timeout: 120_000 }

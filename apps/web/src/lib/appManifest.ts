@@ -29,6 +29,8 @@ export interface AppManifest {
   }
 }
 
+const SAFE_NAME_RE = /^[a-zA-Z0-9_-]+$/
+
 export function parseManifest(json: unknown): AppManifest {
   if (!json || typeof json !== 'object') {
     throw new Error('Manifest must be a JSON object')
@@ -40,6 +42,16 @@ export function parseManifest(json: unknown): AppManifest {
     if (!(field in m) || m[field] === undefined || m[field] === null || m[field] === '') {
       throw new Error(`Manifest missing required field: ${field}`)
     }
+  }
+
+  if (typeof m.name !== 'string' || !SAFE_NAME_RE.test(m.name)) {
+    throw new Error(
+      'Manifest "name" must contain only alphanumeric characters, hyphens, and underscores',
+    )
+  }
+
+  if (typeof m.entry !== 'string' || m.entry.includes('..')) {
+    throw new Error('Manifest "entry" must not contain path traversal sequences')
   }
 
   if (!Array.isArray(m.permissions)) {

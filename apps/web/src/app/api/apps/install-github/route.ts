@@ -49,9 +49,16 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Extract tarball
+    // Extract tarball (limit to 200MB)
+    const MAX_TARBALL_BYTES = 200 * 1024 * 1024
     const tarballPath = path.join(tmpDir, 'repo.tar.gz')
     const buffer = Buffer.from(await res.arrayBuffer())
+    if (buffer.byteLength > MAX_TARBALL_BYTES) {
+      return NextResponse.json(
+        { error: `Tarball too large (${Math.round(buffer.byteLength / 1024 / 1024)}MB). Max: 200MB` },
+        { status: 400 },
+      )
+    }
     fs.writeFileSync(tarballPath, buffer)
 
     await extract({ file: tarballPath, cwd: tmpDir })
@@ -98,7 +105,11 @@ export async function POST(req: NextRequest) {
           const useYarn = fs.existsSync(path.join(sourceDir, 'yarn.lock'))
           const usePnpm = fs.existsSync(path.join(sourceDir, 'pnpm-lock.yaml'))
 
-          const installCmd = usePnpm ? 'pnpm install' : useYarn ? 'yarn install' : 'npm install'
+          const installCmd = usePnpm
+            ? 'pnpm install --ignore-scripts'
+            : useYarn
+              ? 'yarn install --ignore-scripts'
+              : 'npm install --ignore-scripts'
           const buildCmd = usePnpm ? 'pnpm run build' : useYarn ? 'yarn build' : 'npm run build'
 
           const opts = { cwd: sourceDir, stdio: 'pipe' as const, timeout: 120_000 }

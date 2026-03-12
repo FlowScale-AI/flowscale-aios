@@ -9,6 +9,7 @@ import path from 'path'
 import os from 'os'
 
 const APPS_DIR = path.join(os.homedir(), '.flowscale', 'apps')
+const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -17,6 +18,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await params
+  if (!SAFE_ID_RE.test(id)) {
+    return NextResponse.json({ error: 'Invalid app id' }, { status: 400 })
+  }
   const bundlePath = path.join(APPS_DIR, id)
   const manifestPath = path.join(bundlePath, 'flowscale.app.json')
 
@@ -57,6 +61,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   const { id } = await params
+  if (!SAFE_ID_RE.test(id)) {
+    return NextResponse.json({ error: 'Invalid app id' }, { status: 400 })
+  }
   const bundlePath = path.join(APPS_DIR, id)
 
   // Remove DB record if exists (cascades to app_storage)
