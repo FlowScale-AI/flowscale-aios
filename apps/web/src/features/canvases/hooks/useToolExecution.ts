@@ -75,6 +75,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
       let comfyPort: number;
       let seed: number;
       let clientId: string;
+      let responseType: string | undefined;
 
       try {
         const res = await fetch(`/api/tools/${toolId}/executions`, {
@@ -88,32 +89,15 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
           throw new Error((err as any).error || "Failed to start execution");
         }
 
-        ({ executionId, promptId, comfyPort, seed, clientId } = await res.json());
+        const result = await res.json();
+        executionId = result.executionId;
+        promptId = result.promptId;
+        comfyPort = result.comfyPort;
+        seed = result.seed;
+        clientId = result.clientId;
+        responseType = result.type;
         executionIdRef.current = executionId;
-        comfyPortRef.current = comfyPort;
-
-        // Connect to server-side SSE proxy for live progress updates
-        // (avoids direct WS to ComfyUI which triggers CORS host/origin mismatch)
-        try {
-          const sse = new EventSource(`/api/comfy/${comfyPort}/ws`);
-          wsRef.current = sse;
-          sse.onmessage = (evt) => {
-            try {
-              const msg = JSON.parse(evt.data as string);
-              if (msg.type === "progress") {
-                const pct = msg.data.max ? Math.round((msg.data.value / msg.data.max) * 100) : 0;
-                setExecutionState((prev) => ({ ...prev, status: "running", progress: pct }));
-              } else if (msg.type === "executing" && msg.data.node !== null) {
-                setExecutionState((prev) => ({
-                  ...prev,
-                  status: "running",
-                  logs: [...prev.logs, `Executing node: ${msg.data.node}`],
-                }));
-              }
-            } catch { /* ignore parse errors */ }
-          };
-          sse.onerror = () => { sse.close(); wsRef.current = null; };
-        } catch { /* SSE unavailable */ }
+        comfyPortRef.current = comfyPort ?? null;
       } catch (err: any) {
         setExecutionState({
           status: "error",
@@ -124,6 +108,121 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
         });
         return;
       }
+
+      // ── API-engine tools (Modal / local inference) ──────────────────────────
+      // The server runs inference in the background and updates the DB.
+      // We poll GET /api/executions/{id} until status changes from 'running'.
+      if (responseType === "api") {
+        setExecutionState((prev) => ({
+          ...prev,
+          status: "running",
+          logs: [...prev.logs, "Inference running…"],
+        }));
+
+        let attempts = 0;
+        const MAX_ATTEMPTS = 450; // 15 minutes at 2s intervals
+
+        pollTimerRef.current = setInterval(async () => {
+          if (abortRef.current) { clearPoll(); return; }
+          if (++attempts > MAX_ATTEMPTS) {
+            clearPoll();
+            setExecutionState((prev) => ({
+              ...prev,
+              status: "error",
+              error: "Timed out waiting for inference",
+              logs: [...prev.logs, "Timed out"],
+            }));
+            return;
+          }
+
+          try {
+            const execRes = await fetch(`/api/executions/${executionId}`);
+            if (!execRes.ok) return;
+
+            const exec = await execRes.json() as {
+              status: string;
+              outputsJson?: string;
+              errorMessage?: string;
+            };
+
+            if (exec.status === "running") return;
+
+            clearPoll();
+
+            if (exec.status === "error") {
+              setExecutionState({
+                status: "error",
+                progress: 100,
+                logs: [exec.errorMessage ?? "Execution failed"],
+                results: {},
+                error: exec.errorMessage ?? "Execution failed",
+              });
+              return;
+            }
+
+            // Build results map from persisted outputsJson
+            const resultsMap: Record<string, any> = {};
+            try {
+              const outputs = JSON.parse(exec.outputsJson ?? "[]") as Array<{
+                kind?: string; filename: string; path: string;
+              }>;
+              for (const out of outputs) {
+                const ext = out.filename.split(".").pop()?.toLowerCase() ?? "";
+                let contentType = "application/octet-stream";
+                if (out.kind === "image" || ["png", "jpg", "jpeg", "webp"].includes(ext)) contentType = "image/png";
+                else if (out.kind === "video" || ["mp4", "webm", "mov"].includes(ext)) contentType = "video/mp4";
+                else if (out.kind === "audio" || ["wav", "mp3", "flac", "ogg"].includes(ext)) contentType = "audio/mpeg";
+                else if (out.kind === "text") contentType = "text/plain";
+
+                resultsMap[out.filename] = {
+                  content_type: contentType,
+                  data: out.path,
+                  download_url: out.path,
+                  filename: out.filename,
+                  label: out.filename,
+                  run_id: executionId,
+                };
+              }
+            } catch { /* malformed outputsJson */ }
+
+            setExecutionState({
+              status: "completed",
+              progress: 100,
+              logs: ["Execution completed"],
+              results: resultsMap,
+              run_id: executionId,
+            });
+          } catch {
+            // Network hiccup — keep polling
+          }
+        }, 2000);
+
+        return;
+      }
+
+      // ── ComfyUI-engine tools ────────────────────────────────────────────────
+      // Connect to server-side SSE proxy for live progress updates
+      // (avoids direct WS to ComfyUI which triggers CORS host/origin mismatch)
+      try {
+        const sse = new EventSource(`/api/comfy/${comfyPort}/ws`);
+        wsRef.current = sse;
+        sse.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data as string);
+            if (msg.type === "progress") {
+              const pct = msg.data.max ? Math.round((msg.data.value / msg.data.max) * 100) : 0;
+              setExecutionState((prev) => ({ ...prev, status: "running", progress: pct }));
+            } else if (msg.type === "executing" && msg.data.node !== null) {
+              setExecutionState((prev) => ({
+                ...prev,
+                status: "running",
+                logs: [...prev.logs, `Executing node: ${msg.data.node}`],
+              }));
+            }
+          } catch { /* ignore parse errors */ }
+        };
+        sse.onerror = () => { sse.close(); wsRef.current = null; };
+      } catch { /* SSE unavailable */ }
 
       setExecutionState((prev) => ({
         ...prev,
