@@ -43,6 +43,12 @@ const BUILTIN_CATALOG: CatalogEntry[] = [
     description: 'Generate high-quality images locally using Z-Image Turbo. Runs on your GPU — no API key needed.',
     badge: 'Local AI',
   },
+  {
+    id: 'ltx-video-builtin',
+    name: 'LTX Video 2.3',
+    description: 'Generate videos from text prompts using the LTX-2.3 22B model. Powered by Modal cloud GPU.',
+    badge: 'Cloud AI',
+  },
 ]
 
 function CustomToolCard({

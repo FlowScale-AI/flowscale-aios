@@ -29,6 +29,21 @@ const BUILTIN_DEFINITIONS: Record<string, {
       { nodeId: 'api_output', nodeType: 'APIImageOutput', nodeTitle: 'Output', paramName: 'image', paramType: 'image', isInput: false, enabled: true },
     ],
   },
+  'ltx-video-builtin': {
+    id: 'ltx-video-builtin',
+    name: 'LTX Video 2.3',
+    description: 'Generate videos from text prompts using the LTX-2.3 22B model. Powered by Modal cloud GPU.',
+    engine: 'api',
+    workflowJson: { engine: 'api', model: 'Lightricks/LTX-2.3' },
+    schema: [
+      { nodeId: 'api', nodeType: 'LTXVideo', nodeTitle: 'LTX Video 2.3', paramName: 'prompt', paramType: 'string', defaultValue: 'A cat walking across a sunlit garden path', label: 'Prompt', isInput: true, enabled: true },
+      { nodeId: 'api', nodeType: 'LTXVideo', nodeTitle: 'LTX Video 2.3', paramName: 'width', paramType: 'number', defaultValue: 768, label: 'Width', isInput: true, enabled: true },
+      { nodeId: 'api', nodeType: 'LTXVideo', nodeTitle: 'LTX Video 2.3', paramName: 'height', paramType: 'number', defaultValue: 512, label: 'Height', isInput: true, enabled: true },
+      { nodeId: 'api', nodeType: 'LTXVideo', nodeTitle: 'LTX Video 2.3', paramName: 'num_frames', paramType: 'number', defaultValue: 65, label: 'Frames', isInput: true, enabled: true },
+      { nodeId: 'api', nodeType: 'LTXVideo', nodeTitle: 'LTX Video 2.3', paramName: 'frame_rate', paramType: 'number', defaultValue: 25, label: 'Frame Rate', isInput: true, enabled: true },
+      { nodeId: 'api_output', nodeType: 'APIVideoOutput', nodeTitle: 'Output', paramName: 'video', paramType: 'video', isInput: false, enabled: true },
+    ],
+  },
 }
 
 export async function POST(req: NextRequest) {

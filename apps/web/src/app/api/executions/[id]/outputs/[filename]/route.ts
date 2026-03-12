@@ -23,6 +23,10 @@ export async function GET(
       ext === 'png' ? 'image/png'
       : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
       : ext === 'webp' ? 'image/webp'
+      : ext === 'mp4' ? 'video/mp4'
+      : ext === 'webm' ? 'video/webm'
+      : ext === 'mp3' ? 'audio/mpeg'
+      : ext === 'wav' ? 'audio/wav'
       : 'application/octet-stream'
     return new NextResponse(data, {
       headers: { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=31536000, immutable' },
