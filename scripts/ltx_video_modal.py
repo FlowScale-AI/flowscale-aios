@@ -83,7 +83,7 @@ _secrets: list = [modal.Secret.from_name("huggingface")]
 # ── Model class ──────────────────────────────────────────────────────────────
 
 @app.cls(
-    gpu="H200",
+    gpu="A100-80GB",
     volumes={MODEL_DIR: model_volume},
     secrets=_secrets,
     scaledown_window=120,       # keep warm 2 min (video gen is slow → reduce cold starts)
