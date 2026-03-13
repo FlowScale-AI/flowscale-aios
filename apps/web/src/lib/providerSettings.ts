@@ -32,6 +32,58 @@ export function setComfyUIPath(p: string): void {
   writeSettingsFile(settings)
 }
 
+// ── ComfyUI managed instance settings ─────────────────────────────────────────
+
+export type ComfyInstallType = 'github' | 'desktop-app' | 'flowscale-managed'
+
+export function getComfyInstallType(): ComfyInstallType | undefined {
+  return readSettingsFile()['comfyInstallType'] as ComfyInstallType | undefined
+}
+
+export function setComfyInstallType(t: ComfyInstallType): void {
+  const settings = readSettingsFile()
+  settings['comfyInstallType'] = t
+  writeSettingsFile(settings)
+}
+
+/** The port AIOS will use to start/connect its managed ComfyUI instance. */
+export function getComfyManagedPort(): number {
+  const raw = readSettingsFile()['comfyManagedPort']
+  const parsed = raw ? parseInt(raw, 10) : NaN
+  return isNaN(parsed) ? 8188 : parsed
+}
+
+export function setComfyManagedPort(port: number): void {
+  const settings = readSettingsFile()
+  settings['comfyManagedPort'] = String(port)
+  writeSettingsFile(settings)
+}
+
+/** Path to the ComfyUI installation that AIOS manages (GitHub clone or .flowscale/comfyui). */
+export function getComfyManagedPath(): string | undefined {
+  // Fall back to legacy comfyuiPath if the new key isn't set
+  return readSettingsFile()['comfyManagedPath'] || readSettingsFile()['comfyuiPath'] || undefined
+}
+
+export function setComfyManagedPath(p: string): void {
+  const settings = readSettingsFile()
+  settings['comfyManagedPath'] = p
+  // Keep legacy key in sync for existing routes that read it
+  settings['comfyuiPath'] = p
+  writeSettingsFile(settings)
+}
+
+/** Path to the ComfyUI Desktop App's user-data folder (models, custom_nodes, configs). */
+export function getComfyDesktopUserDataPath(): string | undefined {
+  return readSettingsFile()['comfyDesktopUserDataPath'] || undefined
+}
+
+export function setComfyDesktopUserDataPath(p: string): void {
+  const settings = readSettingsFile()
+  settings['comfyDesktopUserDataPath'] = p
+  writeSettingsFile(settings)
+}
+
 export function getComfyOrgApiKey(): string | undefined {
   return readSettingsFile()['comfyOrgApiKey'] || undefined
 }

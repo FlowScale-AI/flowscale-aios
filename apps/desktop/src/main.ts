@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, Menu, nativeImage, session, shell } from 'electron'
 import path from 'path'
 import { spawn, type ChildProcess } from 'child_process'
-import { writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs'
+import { writeFileSync, copyFileSync, mkdirSync, existsSync, readFileSync, unlinkSync } from 'fs'
 import { execSync } from 'child_process'
 import log from 'electron-log'
 import { registerAuthIpc, handleOAuthCallback } from './ipc/auth.js'
@@ -310,6 +310,25 @@ app.on('window-all-closed', () => {
   }
 })
 
+// ─── ComfyUI process cleanup ───────────────────────────────────────────────────
+
+const COMFYUI_PID_FILE = path.join(app.getPath('home'), '.flowscale', 'aios', 'comfyui.pid')
+
+function killManagedComfyUI(): void {
+  try {
+    const pid = parseInt(readFileSync(COMFYUI_PID_FILE, 'utf-8').trim(), 10)
+    if (!isNaN(pid) && pid > 0) {
+      try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
+      setTimeout(() => {
+        try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ }
+      }, 3000)
+    }
+  } catch { /* no PID file */ }
+  try { unlinkSync(COMFYUI_PID_FILE) } catch { /* ignore */ }
+}
+
+// ─── Inference server helpers ──────────────────────────────────────────────────
+
 /** Check if the local inference server (Python) is running on port 8765. */
 function isInferenceRunning(): boolean {
   try {
@@ -350,6 +369,9 @@ app.on('before-quit', async (event) => {
     }
     return
   }
+
+  // Always kill the AIOS-managed ComfyUI instance on quit
+  killManagedComfyUI()
 
   if (isInferenceRunning()) {
     event.preventDefault()

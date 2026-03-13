@@ -7,15 +7,19 @@ import {
   ArrowCounterClockwise,
   ArrowLeft,
   CheckCircle,
+  CircleNotch,
   Eye,
   EyeSlash,
   Flask as FlaskConical,
+  Folder,
   Gear,
   Key,
   MagicWand,
   Monitor,
+  Play,
   Plus,
   RocketLaunch,
+  Stop,
   Trash,
   UploadSimple,
   Warning,
@@ -59,6 +63,414 @@ function fmt(bytes?: number) {
   return bytes + ' B'
 }
 
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+type ComfyInstallType = 'github' | 'desktop-app' | 'flowscale-managed'
+
+type ManageStatus = {
+  status: 'running' | 'starting' | 'stopped'
+  pid?: number
+  port: number
+  managedPath: string | null
+  installType: ComfyInstallType | null
+  isSetup: boolean
+}
+
+// ─── Setup Wizard ─────────────────────────────────────────────────────────────
+
+// The ComfyUI installation bundled inside the macOS Desktop App.
+const MACOS_DESKTOP_COMFYUI_PATH = '/Applications/ComfyUI.app/Contents/Resources/ComfyUI'
+
+type SetupStep = 'choose' | 'configure' | 'installing'
+
+function SetupWizard({ onComplete }: { onComplete: () => void }) {
+  const [step, setStep] = useState<SetupStep>('choose')
+  const [installType, setInstallTypeState] = useState<ComfyInstallType | null>(null)
+  const [githubPath, setGithubPath] = useState('')
+  // Desktop App: the ComfyUI app bundle path (auto-detected or user-provided)
+  const [desktopComfyPath, setDesktopComfyPath] = useState(MACOS_DESKTOP_COMFYUI_PATH)
+  const [desktopPathValid, setDesktopPathValid] = useState<boolean | null>(null)
+  const [desktopPathValidating, setDesktopPathValidating] = useState(false)
+  // Desktop App: the user-data folder (models, custom_nodes)
+  const [desktopUserDataPath, setDesktopUserDataPath] = useState('')
+  const [port, setPort] = useState('8188')
+  const [installLog, setInstallLog] = useState<string[]>([])
+  const [installError, setInstallError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const logRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [installLog])
+
+  // Auto-validate the Desktop App path whenever the configure step is shown
+  useEffect(() => {
+    if (step === 'configure' && installType === 'desktop-app') {
+      validateDesktopPath(desktopComfyPath)
+    }
+  }, [step, installType]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const validateDesktopPath = async (p: string) => {
+    if (!p.trim()) { setDesktopPathValid(false); return }
+    setDesktopPathValidating(true)
+    try {
+      const res = await fetch(`/api/comfy/setup/validate-path?path=${encodeURIComponent(p.trim())}`)
+      const data = await res.json() as { valid: boolean }
+      setDesktopPathValid(data.valid)
+    } catch {
+      setDesktopPathValid(false)
+    } finally {
+      setDesktopPathValidating(false)
+    }
+  }
+
+  const pickDir = async (): Promise<string | null> => {
+    if (typeof window !== 'undefined' && window.desktop?.dialog?.openDirectory) {
+      return window.desktop.dialog.openDirectory()
+    }
+    return null
+  }
+
+  const saveSettings = async (
+    type: ComfyInstallType,
+    managedPath: string,
+    desktopPath?: string,
+  ): Promise<void> => {
+    await fetch('/api/settings/comfyui-setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        installType: type,
+        managedPath,
+        managedPort: parseInt(port, 10) || 8188,
+        ...(desktopPath ? { desktopUserDataPath: desktopPath } : {}),
+      }),
+    })
+  }
+
+  const handleGithubSave = async () => {
+    if (!githubPath.trim()) return
+    setSaving(true)
+    await saveSettings('github', githubPath.trim())
+    setSaving(false)
+    onComplete()
+  }
+
+  const handleDesktopSave = async () => {
+    if (!desktopUserDataPath.trim()) return
+    setSaving(true)
+    setStep('installing')
+    setSaving(false)
+
+    if (desktopPathValid) {
+      // The Desktop App's bundled ComfyUI is valid — use it directly.
+      // Pass targetPath so the install route short-circuits without cloning.
+      await saveSettings('desktop-app', desktopComfyPath.trim(), desktopUserDataPath.trim())
+      await runInstall(desktopComfyPath.trim())
+    } else {
+      // Bundled ComfyUI not found — clone into ~/.flowscale/comfyui then copy assets.
+      await saveSettings('desktop-app', '', desktopUserDataPath.trim())
+      await runInstall()
+    }
+  }
+
+  const runInstall = async (targetPath?: string) => {
+    setInstallError('')
+    setInstallLog([])
+    try {
+      const res = await fetch('/api/comfy/setup/install', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(targetPath ? { targetPath } : {}),
+      })
+      if (!res.body) throw new Error('No response body')
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const payload = JSON.parse(line.slice(6)) as { msg?: string; done?: boolean; error?: string }
+          if (payload.error) { setInstallError(payload.error); return }
+          if (payload.msg) setInstallLog((prev) => [...prev, payload.msg!])
+          if (payload.done) {
+            if (installType === 'desktop-app' && desktopUserDataPath.trim()) {
+              setInstallLog((prev) => [...prev, 'Copying custom nodes and configuring model paths…'])
+              const copyRes = await fetch('/api/comfy/setup/copy-assets', { method: 'POST' })
+              const copyData = await copyRes.json() as { success?: boolean; error?: string; customNodesCopied?: number }
+              if (copyData.error) { setInstallError(copyData.error); return }
+              setInstallLog((prev) => [
+                ...prev,
+                `Custom nodes copied: ${copyData.customNodesCopied ?? 0}`,
+                'Model paths configured via extra_model_paths.yaml',
+              ])
+            }
+            onComplete()
+          }
+        }
+      }
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleFreshInstall = async () => {
+    setInstallTypeState('flowscale-managed')
+    setStep('installing')
+    await saveSettings('flowscale-managed', '')
+    await runInstall()
+  }
+
+  if (step === 'installing') {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-6 px-8">
+        <div className="w-full max-w-xl">
+          <h2 className="text-white font-medium font-tech text-lg mb-1">Installing ComfyUI</h2>
+          <p className="text-zinc-500 text-sm mb-4">This may take a few minutes. Please don't close the app.</p>
+          {installError ? (
+            <div className="bg-red-950/40 border border-red-500/20 rounded-lg p-4 text-red-400 text-sm font-mono">
+              {installError}
+            </div>
+          ) : (
+            <div
+              ref={logRef}
+              className="bg-black/40 border border-white/5 rounded-lg p-4 h-64 overflow-y-auto text-xs font-mono text-zinc-400 space-y-1"
+            >
+              {installLog.length === 0 ? (
+                <div className="flex items-center gap-2 text-zinc-500">
+                  <CircleNotch size={14} className="animate-spin" />
+                  Starting…
+                </div>
+              ) : (
+                installLog.map((line, i) => <div key={i}>{line}</div>)
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (step === 'configure') {
+    if (installType === 'github') {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-6 px-8">
+          <div className="w-full max-w-md space-y-4">
+            <div>
+              <h2 className="text-white font-medium font-tech text-lg">GitHub Clone Path</h2>
+              <p className="text-zinc-500 text-sm mt-1">
+                Point AIOS to the root of your ComfyUI GitHub clone (the folder containing <code className="text-zinc-300">main.py</code>).
+              </p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">ComfyUI directory</label>
+              <div className="flex gap-2">
+                <input
+                  className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500/50 focus:outline-none"
+                  placeholder="/home/user/ComfyUI"
+                  value={githubPath}
+                  onChange={(e) => setGithubPath(e.target.value)}
+                />
+                {window.desktop?.dialog?.openDirectory && (
+                  <button
+                    className="px-3 py-2 bg-zinc-800 rounded-lg text-zinc-300 hover:bg-zinc-700 transition-colors"
+                    onClick={async () => { const p = await pickDir(); if (p) setGithubPath(p) }}
+                  >
+                    <Folder size={15} />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Port</label>
+              <input
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500/50 focus:outline-none"
+                placeholder="8188"
+                value={port}
+                onChange={(e) => setPort(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setStep('choose')}
+                className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleGithubSave}
+                disabled={!githubPath.trim() || saving}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+              >
+                {saving ? 'Saving…' : 'Save & Continue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    if (installType === 'desktop-app') {
+      const buttonLabel = desktopPathValid ? 'Configure' : 'Clone & Configure'
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-6 px-8">
+          <div className="w-full max-w-md space-y-4">
+            <div>
+              <h2 className="text-white font-medium font-tech text-lg">ComfyUI Desktop App</h2>
+              <p className="text-zinc-500 text-sm mt-1">
+                AIOS auto-detects the bundled ComfyUI. Then point it to where the Desktop App stores
+                your models and custom nodes — the folder containing <code className="text-zinc-300">models/</code> and{' '}
+                <code className="text-zinc-300">custom_nodes/</code> (not the AppData folder).
+              </p>
+            </div>
+
+            {/* ComfyUI app path (auto-detected) */}
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">ComfyUI app path</label>
+              <div className="flex gap-2">
+                <input
+                  className={[
+                    'flex-1 bg-zinc-900 border rounded-lg px-3 py-2 text-sm text-white focus:outline-none',
+                    desktopPathValid === true
+                      ? 'border-emerald-500/50'
+                      : desktopPathValid === false
+                        ? 'border-red-500/50 focus:border-red-500/50'
+                        : 'border-zinc-800 focus:border-emerald-500/50',
+                  ].join(' ')}
+                  value={desktopComfyPath}
+                  onChange={(e) => {
+                    setDesktopComfyPath(e.target.value)
+                    setDesktopPathValid(null)
+                  }}
+                  onBlur={(e) => validateDesktopPath(e.target.value)}
+                />
+                {window.desktop?.dialog?.openDirectory && (
+                  <button
+                    className="px-3 py-2 bg-zinc-800 rounded-lg text-zinc-300 hover:bg-zinc-700 transition-colors"
+                    onClick={async () => {
+                      const p = await pickDir()
+                      if (p) { setDesktopComfyPath(p); setDesktopPathValid(null); validateDesktopPath(p) }
+                    }}
+                  >
+                    <Folder size={15} />
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 text-xs">
+                {desktopPathValidating ? (
+                  <><CircleNotch size={11} className="animate-spin text-zinc-500" /><span className="text-zinc-500">Checking…</span></>
+                ) : desktopPathValid === true ? (
+                  <><CheckCircle size={11} weight="fill" className="text-emerald-400" /><span className="text-emerald-400">ComfyUI detected — no installation needed</span></>
+                ) : desktopPathValid === false ? (
+                  <><Warning size={11} className="text-amber-400" /><span className="text-amber-400">Not found — will clone ComfyUI into ~/.flowscale/comfyui</span></>
+                ) : null}
+              </div>
+            </div>
+
+            {/* User-data folder */}
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Desktop app user-data folder (models &amp; custom nodes)</label>
+              <div className="flex gap-2">
+                <input
+                  className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500/50 focus:outline-none"
+                  placeholder="C:\Users\you\ComfyUI  or  ~/ComfyUI"
+                  value={desktopUserDataPath}
+                  onChange={(e) => setDesktopUserDataPath(e.target.value)}
+                />
+                {window.desktop?.dialog?.openDirectory && (
+                  <button
+                    className="px-3 py-2 bg-zinc-800 rounded-lg text-zinc-300 hover:bg-zinc-700 transition-colors"
+                    onClick={async () => { const p = await pickDir(); if (p) setDesktopUserDataPath(p) }}
+                  >
+                    <Folder size={15} />
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-zinc-600">
+                Custom nodes will be copied. Models are linked via extra_model_paths.yaml (no large copies).
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs text-zinc-400">Port</label>
+              <input
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500/50 focus:outline-none"
+                placeholder="8188"
+                value={port}
+                onChange={(e) => setPort(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setStep('choose')}
+                className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleDesktopSave}
+                disabled={!desktopUserDataPath.trim() || saving || desktopPathValidating}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+              >
+                {saving ? 'Saving…' : buttonLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    }
+  }
+
+  // step === 'choose'
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-8 px-8">
+      <div className="text-center">
+        <h2 className="text-white font-medium font-tech text-xl mb-2">Connect ComfyUI</h2>
+        <p className="text-zinc-500 text-sm max-w-md">
+          AIOS manages a single ComfyUI instance. Choose how you have ComfyUI installed.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 w-full max-w-sm">
+        <button
+          onClick={() => { setInstallTypeState('github'); setStep('configure') }}
+          className="flex items-start gap-4 p-4 bg-zinc-900/60 border border-white/5 rounded-xl hover:border-emerald-500/30 hover:bg-zinc-900 transition-all text-left"
+        >
+          <div className="mt-0.5 text-emerald-400"><Folder size={20} /></div>
+          <div>
+            <div className="text-white text-sm font-medium">I have a GitHub clone</div>
+            <div className="text-zinc-500 text-xs mt-0.5">Use an existing ComfyUI repo you cloned from GitHub</div>
+          </div>
+        </button>
+        <button
+          onClick={() => { setInstallTypeState('desktop-app'); setStep('configure') }}
+          className="flex items-start gap-4 p-4 bg-zinc-900/60 border border-white/5 rounded-xl hover:border-emerald-500/30 hover:bg-zinc-900 transition-all text-left"
+        >
+          <div className="mt-0.5 text-blue-400"><Monitor size={20} /></div>
+          <div>
+            <div className="text-white text-sm font-medium">ComfyUI Desktop App</div>
+            <div className="text-zinc-500 text-xs mt-0.5">You have the official ComfyUI desktop app installed — AIOS will set up its own instance and import your models & custom nodes</div>
+          </div>
+        </button>
+        <button
+          onClick={handleFreshInstall}
+          className="flex items-start gap-4 p-4 bg-zinc-900/60 border border-white/5 rounded-xl hover:border-emerald-500/30 hover:bg-zinc-900 transition-all text-left"
+        >
+          <div className="mt-0.5 text-purple-400"><RocketLaunch size={20} /></div>
+          <div>
+            <div className="text-white text-sm font-medium">Install ComfyUI for me</div>
+            <div className="text-zinc-500 text-xs mt-0.5">Clone ComfyUI from GitHub and install it automatically into ~/.flowscale/comfyui</div>
+          </div>
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 type Tab = 'overview' | 'tools' | 'models' | 'custom-nodes' | 'logs'
@@ -76,6 +488,20 @@ export default function ComfyUIIntegrationPage() {
   const [instance, setInstance] = useState<ComfyInstance | null>(null)
   const [scanning, setScanning] = useState(false)
   const [tab, setTab] = useState<Tab>('overview')
+  const [manageStatus, setManageStatus] = useState<ManageStatus | null>(null)
+  const [actionPending, setActionPending] = useState(false)
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const loadManageStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/comfy/manage')
+      const data: ManageStatus = await res.json()
+      setManageStatus(data)
+      return data
+    } catch {
+      return null
+    }
+  }, [])
 
   const scan = useCallback(async () => {
     setScanning(true)
@@ -88,9 +514,50 @@ export default function ComfyUIIntegrationPage() {
     }
   }, [])
 
-  useEffect(() => { scan() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  // Poll when starting so the UI catches when ComfyUI becomes ready
+  useEffect(() => {
+    if (manageStatus?.status === 'starting') {
+      pollTimerRef.current = setInterval(async () => {
+        const s = await loadManageStatus()
+        if (s?.status === 'running') {
+          if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+          scan()
+        }
+      }, 2000)
+    } else {
+      if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null }
+    }
+    return () => { if (pollTimerRef.current) clearInterval(pollTimerRef.current) }
+  }, [manageStatus?.status, loadManageStatus, scan])
+
+  useEffect(() => {
+    loadManageStatus().then((s) => {
+      if (s?.status === 'running') scan()
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleAction = async (action: 'start' | 'stop' | 'restart') => {
+    setActionPending(true)
+    try {
+      await fetch('/api/comfy/manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      await loadManageStatus()
+      if (action === 'stop') setInstance(null)
+    } finally {
+      setActionPending(false)
+    }
+  }
+
+  const handleSetupComplete = async () => {
+    await loadManageStatus()
+  }
 
   const stats = instance?.systemStats as SysInfo | null
+  const isSetup = manageStatus?.isSetup ?? false
+  const comfyStatus = manageStatus?.status ?? 'stopped'
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -103,10 +570,12 @@ export default function ComfyUIIntegrationPage() {
         >
           <ArrowLeft size={16} />
         </button>
-        {scanning ? (
+
+        {/* Status indicator */}
+        {scanning || comfyStatus === 'starting' ? (
           <div className="flex items-center gap-2 text-zinc-500 text-sm">
-            <ArrowClockwise size={14} className="animate-spin" />
-            Scanning for ComfyUI…
+            <CircleNotch size={14} className="animate-spin" />
+            {comfyStatus === 'starting' ? 'ComfyUI starting…' : 'Scanning…'}
           </div>
         ) : instance ? (
           <>
@@ -115,68 +584,120 @@ export default function ComfyUIIntegrationPage() {
               <span className="text-white font-medium">ComfyUI</span>
               <span className="text-zinc-500 text-sm">127.0.0.1:{instance.port}</span>
             </div>
-            <span className="text-zinc-600 text-sm">
-              {stats?.system?.comfyui_version ?? ''}
-            </span>
+            <span className="text-zinc-600 text-sm">{stats?.system?.comfyui_version ?? ''}</span>
           </>
+        ) : isSetup ? (
+          <div className="flex items-center gap-2 text-zinc-500 text-sm">
+            <Warning size={14} />
+            ComfyUI is not running
+          </div>
         ) : (
           <div className="flex items-center gap-2 text-zinc-500 text-sm">
             <Warning size={14} />
-            No running ComfyUI instance found
+            ComfyUI not configured
           </div>
         )}
-        <button
-          onClick={scan}
-          disabled={scanning}
-          className="ml-auto text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-40"
-          title="Refresh"
-        >
-          <ArrowClockwise size={15} className={scanning ? 'animate-spin' : ''} />
-        </button>
+
+        {/* Process controls — only shown once configured */}
+        {isSetup && (
+          <div className="ml-auto flex items-center gap-2">
+            {comfyStatus === 'stopped' && (
+              <button
+                onClick={() => handleAction('start')}
+                disabled={actionPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs rounded-lg transition-colors"
+                title="Start ComfyUI"
+              >
+                <Play size={12} weight="fill" />
+                Start
+              </button>
+            )}
+            {(comfyStatus === 'running' || comfyStatus === 'starting') && (
+              <>
+                <button
+                  onClick={() => handleAction('restart')}
+                  disabled={actionPending || comfyStatus === 'starting'}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-xs rounded-lg transition-colors"
+                  title="Restart ComfyUI"
+                >
+                  <ArrowCounterClockwise size={12} />
+                  Restart
+                </button>
+                <button
+                  onClick={() => handleAction('stop')}
+                  disabled={actionPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-red-900/60 hover:bg-red-800/60 disabled:opacity-40 text-red-300 text-xs rounded-lg transition-colors"
+                  title="Stop ComfyUI"
+                >
+                  <Stop size={12} weight="fill" />
+                  Stop
+                </button>
+              </>
+            )}
+            <button
+              onClick={async () => { await loadManageStatus(); if (comfyStatus === 'running') scan() }}
+              disabled={scanning}
+              className="text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-40 p-1"
+              title="Refresh"
+            >
+              <ArrowClockwise size={15} className={scanning ? 'animate-spin' : ''} />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 px-6 pt-3 shrink-0 border-b border-white/5 pb-0">
-        {TABS.map(({ id, label }) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            className={[
-              'px-3 py-2 rounded-t-lg text-sm font-medium transition-colors -mb-px border-b-2',
-              tab === id
-                ? 'text-white border-emerald-500'
-                : 'text-zinc-500 hover:text-zinc-300 border-transparent',
-            ].join(' ')}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* Setup wizard — shown until configured */}
+      {!isSetup && manageStatus !== null && (
+        <SetupWizard onComplete={handleSetupComplete} />
+      )}
 
-      {/* Tab content */}
-      <div className={['flex-1', tab === 'tools' ? 'overflow-hidden' : 'overflow-y-auto px-6 py-4'].join(' ')}>
-        {tab === 'overview' && (
-          instance
-            ? <OverviewTab stats={stats} />
-            : <NoInstance onRefresh={scan} scanning={scanning} />
-        )}
-        {tab === 'tools' && <ToolsTab />}
-        {tab === 'models' && (
-          instance
-            ? <ModelsTab port={instance.port} />
-            : <NoInstance onRefresh={scan} scanning={scanning} />
-        )}
-        {tab === 'custom-nodes' && (
-          instance
-            ? <CustomNodesTab port={instance.port} />
-            : <NoInstance onRefresh={scan} scanning={scanning} />
-        )}
-        {tab === 'logs' && (
-          instance
-            ? <LogsTab port={instance.port} />
-            : <NoInstance onRefresh={scan} scanning={scanning} />
-        )}
-      </div>
+      {/* Main content — shown once configured */}
+      {isSetup && (
+        <>
+          {/* Tabs */}
+          <div className="flex gap-1 px-6 pt-3 shrink-0 border-b border-white/5 pb-0">
+            {TABS.map(({ id, label }) => (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                className={[
+                  'px-3 py-2 rounded-t-lg text-sm font-medium transition-colors -mb-px border-b-2',
+                  tab === id
+                    ? 'text-white border-emerald-500'
+                    : 'text-zinc-500 hover:text-zinc-300 border-transparent',
+                ].join(' ')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab content */}
+          <div className={['flex-1', tab === 'tools' ? 'overflow-hidden' : 'overflow-y-auto px-6 py-4'].join(' ')}>
+            {tab === 'overview' && (
+              instance
+                ? <OverviewTab stats={stats} />
+                : <NoInstance onRefresh={() => { loadManageStatus(); scan() }} scanning={scanning} />
+            )}
+            {tab === 'tools' && <ToolsTab />}
+            {tab === 'models' && (
+              instance
+                ? <ModelsTab port={instance.port} />
+                : <NoInstance onRefresh={() => { loadManageStatus(); scan() }} scanning={scanning} />
+            )}
+            {tab === 'custom-nodes' && (
+              instance
+                ? <CustomNodesTab port={instance.port} />
+                : <NoInstance onRefresh={() => { loadManageStatus(); scan() }} scanning={scanning} />
+            )}
+            {tab === 'logs' && (
+              instance
+                ? <LogsTab port={instance.port} />
+                : <NoInstance onRefresh={() => { loadManageStatus(); scan() }} scanning={scanning} />
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }

@@ -8,11 +8,14 @@ import {
   EyeSlash,
   Trash,
   ArrowSquareOut,
+  ArrowCounterClockwise,
   CheckCircle,
   XCircle,
   CircleNotch,
   ArrowRight,
   FolderOpen,
+  Play,
+  Stop,
 } from "phosphor-react";
 import { PageTransition } from "@/components/ui";
 
@@ -27,6 +30,13 @@ interface ProviderStatus {
 interface ComfyInstance {
   port: number;
   systemStats: Record<string, unknown> | null;
+}
+
+interface ComfyManageStatus {
+  status: "running" | "starting" | "stopped";
+  pid?: number;
+  port: number;
+  isSetup: boolean;
 }
 
 const PROVIDER_ICONS: Record<string, string> = {
@@ -244,6 +254,33 @@ export default function ProvidersPage() {
     staleTime: 60_000,
   });
 
+  const { data: comfyManage, refetch: refetchManage } = useQuery<ComfyManageStatus>({
+    queryKey: ["comfy-manage"],
+    queryFn: async () => {
+      const res = await fetch("/api/comfy/manage");
+      if (!res.ok) return { status: "stopped", port: 8188, isSetup: false };
+      return res.json();
+    },
+    // Poll every 2 s while ComfyUI is starting so the badge updates automatically
+    refetchInterval: (q) => q.state.data?.status === "starting" ? 2000 : false,
+  });
+
+  const comfyActionMutation = useMutation({
+    mutationFn: async (action: "start" | "stop" | "restart") => {
+      const res = await fetch("/api/comfy/manage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!res.ok) throw new Error("Action failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchManage();
+      queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
+    },
+  });
+
   const { data: comfyPathData } = useQuery<{ comfyuiPath: string | null }>({
     queryKey: ["comfyui-path"],
     queryFn: async () => {
@@ -306,7 +343,12 @@ export default function ProvidersPage() {
                       <span className="text-sm font-semibold text-zinc-200">
                         ComfyUI
                       </span>
-                      {comfyInstances.length > 0 ? (
+                      {comfyManage?.status === "starting" ? (
+                        <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400 bg-amber-400/10 rounded-full border border-amber-400/20">
+                          <CircleNotch size={9} className="animate-spin" />
+                          Starting…
+                        </span>
+                      ) : comfyInstances.length > 0 ? (
                         <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
                           <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
                           Connected
@@ -323,27 +365,65 @@ export default function ProvidersPage() {
                       </p>
                     ) : (
                       <p className="text-xs text-zinc-600 mt-0.5">
-                        Start ComfyUI to connect
+                        {comfyManage?.isSetup ? "ComfyUI is not running" : "Setup required"}
                       </p>
                     )}
                   </div>
                 </div>
-                <Link
-                  href="/integrations/comfyui"
-                  className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-                >
-                  View details
-                  <ArrowRight size={12} />
-                </Link>
+
+                <div className="flex items-center gap-2">
+                  {/* Process controls — only shown when configured */}
+                  {comfyManage?.isSetup && (
+                    <>
+                      {comfyManage.status === "stopped" && (
+                        <button
+                          onClick={() => comfyActionMutation.mutate("start")}
+                          disabled={comfyActionMutation.isPending}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-[11px] font-medium rounded-lg transition-colors"
+                          title="Start ComfyUI"
+                        >
+                          <Play size={10} weight="fill" />
+                          Start
+                        </button>
+                      )}
+                      {(comfyManage.status === "running" || comfyManage.status === "starting") && (
+                        <>
+                          <button
+                            onClick={() => comfyActionMutation.mutate("restart")}
+                            disabled={comfyActionMutation.isPending || comfyManage.status === "starting"}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-[11px] font-medium rounded-lg transition-colors"
+                            title="Restart ComfyUI"
+                          >
+                            <ArrowCounterClockwise size={10} />
+                            Restart
+                          </button>
+                          <button
+                            onClick={() => comfyActionMutation.mutate("stop")}
+                            disabled={comfyActionMutation.isPending}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-red-900/50 hover:bg-red-800/60 disabled:opacity-40 text-red-300 text-[11px] font-medium rounded-lg transition-colors"
+                            title="Stop ComfyUI"
+                          >
+                            <Stop size={10} weight="fill" />
+                            Stop
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )}
+                  <Link
+                    href="/integrations/comfyui"
+                    className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  >
+                    View details
+                    <ArrowRight size={12} />
+                  </Link>
+                </div>
               </div>
 
               {/* ComfyUI installation path */}
               <div className="border-t border-white/5 pt-4">
                 <label className="block text-xs font-medium text-zinc-500 mb-1.5">
                   Installation path
-                  <span className="ml-1 text-zinc-600 font-normal">
-                    (required for model downloads)
-                  </span>
                 </label>
                 {savedPath && (
                   <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
