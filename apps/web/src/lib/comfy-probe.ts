@@ -3,6 +3,9 @@ import { createConnection } from 'net'
 export interface ComfyInstance {
   port: number
   systemStats: Record<string, unknown> | null
+  instanceId?: string   // e.g. 'gpu-0', 'cpu'
+  device?: string       // e.g. 'cuda:0', 'cpu'
+  label?: string        // e.g. 'GPU 0 — RTX 4090'
 }
 
 export async function probePort(port: number): Promise<ComfyInstance | null> {

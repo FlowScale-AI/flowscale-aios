@@ -16,6 +16,9 @@ import {
   FolderOpen,
   Play,
   Stop,
+  Cpu,
+  Lightning,
+  MagnifyingGlass,
 } from "phosphor-react";
 import { PageTransition } from "@/components/ui";
 
@@ -30,12 +33,24 @@ interface ProviderStatus {
 interface ComfyInstance {
   port: number;
   systemStats: Record<string, unknown> | null;
+  instanceId?: string;
+  device?: string;
+  label?: string;
 }
 
-interface ComfyManageStatus {
+interface ComfyManagedInstance {
+  id: string;
   status: "running" | "starting" | "stopped";
   pid?: number;
   port: number;
+  device: string;
+  label: string;
+}
+
+interface ComfyManageResponse {
+  instances: ComfyManagedInstance[];
+  managedPath: string | null;
+  installType: string | null;
   isSetup: boolean;
 }
 
@@ -95,7 +110,6 @@ function ProviderCard({ provider }: { provider: ProviderStatus }) {
   async function testConnection() {
     setTestState("testing");
     try {
-      // Lightweight provider-specific test call via proxy
       const res = await fetch(`/api/providers/${provider.name}/proxy/models`, {
         signal: AbortSignal.timeout(5000),
       });
@@ -230,6 +244,30 @@ function ProviderCard({ provider }: { provider: ProviderStatus }) {
   );
 }
 
+function InstanceStatusBadge({ status }: { status: string }) {
+  if (status === "starting") {
+    return (
+      <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400 bg-amber-400/10 rounded-full border border-amber-400/20">
+        <CircleNotch size={9} className="animate-spin" />
+        Starting
+      </span>
+    );
+  }
+  if (status === "running") {
+    return (
+      <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
+        <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        Running
+      </span>
+    );
+  }
+  return (
+    <span className="px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 bg-zinc-800 rounded-full">
+      Stopped
+    </span>
+  );
+}
+
 export default function ProvidersPage() {
   const queryClient = useQueryClient();
   const [pathInput, setPathInput] = useState("");
@@ -244,35 +282,57 @@ export default function ProvidersPage() {
     },
   });
 
-  const { data: comfyInstances = [] } = useQuery<ComfyInstance[]>({
-    queryKey: ["comfy-instances"],
-    queryFn: async () => {
-      const res = await fetch("/api/comfy/scan");
-      if (!res.ok) return [];
-      return res.json();
-    },
-    staleTime: 60_000,
-  });
+  const { data: comfyManage, refetch: refetchManage } =
+    useQuery<ComfyManageResponse>({
+      queryKey: ["comfy-manage"],
+      queryFn: async () => {
+        const res = await fetch("/api/comfy/manage");
+        if (!res.ok)
+          return { instances: [], managedPath: null, installType: null, isSetup: false };
+        return res.json();
+      },
+      refetchInterval: (q) => {
+        const data = q.state.data;
+        if (!data) return false;
+        // Poll while any instance is starting
+        const anyStarting = data.instances?.some(
+          (i: ComfyManagedInstance) => i.status === "starting"
+        );
+        return anyStarting ? 2000 : false;
+      },
+    });
 
-  const { data: comfyManage, refetch: refetchManage } = useQuery<ComfyManageStatus>({
-    queryKey: ["comfy-manage"],
-    queryFn: async () => {
-      const res = await fetch("/api/comfy/manage");
-      if (!res.ok) return { status: "stopped", port: 8188, isSetup: false };
-      return res.json();
-    },
-    // Poll every 2 s while ComfyUI is starting so the badge updates automatically
-    refetchInterval: (q) => q.state.data?.status === "starting" ? 2000 : false,
-  });
+  const managedInstances = comfyManage?.instances ?? [];
+  const anyRunning = managedInstances.some((i) => i.status === "running");
+  const anyStopped = managedInstances.some((i) => i.status === "stopped");
+  const anyStarting = managedInstances.some((i) => i.status === "starting");
 
   const comfyActionMutation = useMutation({
-    mutationFn: async (action: "start" | "stop" | "restart") => {
+    mutationFn: async ({
+      action,
+      instanceId,
+    }: {
+      action: "start" | "stop" | "restart";
+      instanceId?: string;
+    }) => {
       const res = await fetch("/api/comfy/manage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, instanceId }),
       });
       if (!res.ok) throw new Error("Action failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchManage();
+      queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
+    },
+  });
+
+  const detectGpusMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/comfy/instances/detect", { method: "POST" });
+      if (!res.ok) throw new Error("Detection failed");
       return res.json();
     },
     onSuccess: () => {
@@ -329,6 +389,7 @@ export default function ProvidersPage() {
               Local Inference
             </h2>
             <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+              {/* Header row */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <div className="size-9 rounded-lg border border-white/10 bg-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
@@ -343,70 +404,65 @@ export default function ProvidersPage() {
                       <span className="text-sm font-semibold text-zinc-200">
                         ComfyUI
                       </span>
-                      {comfyManage?.status === "starting" ? (
-                        <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400 bg-amber-400/10 rounded-full border border-amber-400/20">
-                          <CircleNotch size={9} className="animate-spin" />
-                          Starting…
-                        </span>
-                      ) : comfyInstances.length > 0 ? (
-                        <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
-                          <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          Connected
-                        </span>
-                      ) : (
-                        <span className="px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 bg-zinc-800 rounded-full">
-                          Not running
+                      {managedInstances.length > 0 && (
+                        <span className="text-[10px] font-mono text-zinc-600">
+                          {managedInstances.length} instance{managedInstances.length !== 1 ? "s" : ""}
                         </span>
                       )}
                     </div>
-                    {comfyInstances.length > 0 ? (
-                      <p className="text-xs text-zinc-500 mt-0.5">
-                        {comfyInstances.map((i) => `port ${i.port}`).join(", ")}
-                      </p>
-                    ) : (
+                    {!comfyManage?.isSetup && (
                       <p className="text-xs text-zinc-600 mt-0.5">
-                        {comfyManage?.isSetup ? "ComfyUI is not running" : "Setup required"}
+                        Setup required
                       </p>
                     )}
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {/* Process controls — only shown when configured */}
+                  {/* Detect GPUs */}
                   {comfyManage?.isSetup && (
+                    <button
+                      onClick={() => detectGpusMutation.mutate()}
+                      disabled={detectGpusMutation.isPending}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-[11px] font-medium rounded-lg transition-colors"
+                      title="Detect available GPUs and create instances"
+                    >
+                      {detectGpusMutation.isPending ? (
+                        <CircleNotch size={10} className="animate-spin" />
+                      ) : (
+                        <MagnifyingGlass size={10} />
+                      )}
+                      Detect GPUs
+                    </button>
+                  )}
+                  {/* Bulk controls */}
+                  {comfyManage?.isSetup && managedInstances.length > 0 && (
                     <>
-                      {comfyManage.status === "stopped" && (
+                      {anyStopped && (
                         <button
-                          onClick={() => comfyActionMutation.mutate("start")}
+                          onClick={() =>
+                            comfyActionMutation.mutate({ action: "start" })
+                          }
                           disabled={comfyActionMutation.isPending}
                           className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-[11px] font-medium rounded-lg transition-colors"
-                          title="Start ComfyUI"
+                          title="Start all instances"
                         >
                           <Play size={10} weight="fill" />
-                          Start
+                          Start All
                         </button>
                       )}
-                      {(comfyManage.status === "running" || comfyManage.status === "starting") && (
-                        <>
-                          <button
-                            onClick={() => comfyActionMutation.mutate("restart")}
-                            disabled={comfyActionMutation.isPending || comfyManage.status === "starting"}
-                            className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-[11px] font-medium rounded-lg transition-colors"
-                            title="Restart ComfyUI"
-                          >
-                            <ArrowCounterClockwise size={10} />
-                            Restart
-                          </button>
-                          <button
-                            onClick={() => comfyActionMutation.mutate("stop")}
-                            disabled={comfyActionMutation.isPending}
-                            className="flex items-center gap-1 px-2.5 py-1.5 bg-red-900/50 hover:bg-red-800/60 disabled:opacity-40 text-red-300 text-[11px] font-medium rounded-lg transition-colors"
-                            title="Stop ComfyUI"
-                          >
-                            <Stop size={10} weight="fill" />
-                            Stop
-                          </button>
-                        </>
+                      {(anyRunning || anyStarting) && (
+                        <button
+                          onClick={() =>
+                            comfyActionMutation.mutate({ action: "stop" })
+                          }
+                          disabled={comfyActionMutation.isPending}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-red-900/50 hover:bg-red-800/60 disabled:opacity-40 text-red-300 text-[11px] font-medium rounded-lg transition-colors"
+                          title="Stop all instances"
+                        >
+                          <Stop size={10} weight="fill" />
+                          Stop All
+                        </button>
                       )}
                     </>
                   )}
@@ -419,6 +475,84 @@ export default function ProvidersPage() {
                   </Link>
                 </div>
               </div>
+
+              {/* Instance list */}
+              {managedInstances.length > 0 && (
+                <div className="space-y-2 mb-4">
+                  {managedInstances.map((inst) => (
+                    <div
+                      key={inst.id}
+                      className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        {inst.device === "cpu" ? (
+                          <Cpu size={14} className="text-zinc-500" />
+                        ) : (
+                          <Lightning size={14} className="text-zinc-500" />
+                        )}
+                        <span className="text-xs font-medium text-zinc-300">
+                          {inst.label}
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-600">
+                          :{inst.port}
+                        </span>
+                        <InstanceStatusBadge status={inst.status} />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {inst.status === "stopped" && (
+                          <button
+                            onClick={() =>
+                              comfyActionMutation.mutate({
+                                action: "start",
+                                instanceId: inst.id,
+                              })
+                            }
+                            disabled={comfyActionMutation.isPending}
+                            className="p-1 text-zinc-600 hover:text-emerald-400 transition-colors disabled:opacity-40"
+                            title={`Start ${inst.label}`}
+                          >
+                            <Play size={12} weight="fill" />
+                          </button>
+                        )}
+                        {(inst.status === "running" ||
+                          inst.status === "starting") && (
+                          <>
+                            <button
+                              onClick={() =>
+                                comfyActionMutation.mutate({
+                                  action: "restart",
+                                  instanceId: inst.id,
+                                })
+                              }
+                              disabled={
+                                comfyActionMutation.isPending ||
+                                inst.status === "starting"
+                              }
+                              className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors disabled:opacity-40"
+                              title={`Restart ${inst.label}`}
+                            >
+                              <ArrowCounterClockwise size={12} />
+                            </button>
+                            <button
+                              onClick={() =>
+                                comfyActionMutation.mutate({
+                                  action: "stop",
+                                  instanceId: inst.id,
+                                })
+                              }
+                              disabled={comfyActionMutation.isPending}
+                              className="p-1 text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-40"
+                              title={`Stop ${inst.label}`}
+                            >
+                              <Stop size={12} weight="fill" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* ComfyUI installation path */}
               <div className="border-t border-white/5 pt-4">

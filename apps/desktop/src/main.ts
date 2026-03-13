@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, Menu, nativeImage, session, shell } from 'electron'
 import path from 'path'
 import { spawn, type ChildProcess } from 'child_process'
-import { writeFileSync, copyFileSync, mkdirSync, existsSync, readFileSync, unlinkSync } from 'fs'
+import { writeFileSync, copyFileSync, mkdirSync, existsSync, readFileSync, unlinkSync, readdirSync } from 'fs'
 import { execSync } from 'child_process'
 import log from 'electron-log'
 import { registerAuthIpc, handleOAuthCallback } from './ipc/auth.js'
@@ -312,19 +312,37 @@ app.on('window-all-closed', () => {
 
 // ─── ComfyUI process cleanup ───────────────────────────────────────────────────
 
-const COMFYUI_PID_FILE = path.join(app.getPath('home'), '.flowscale', 'aios', 'comfyui.pid')
+const AIOS_DIR = path.join(app.getPath('home'), '.flowscale', 'aios')
 
 function killManagedComfyUI(): void {
   try {
-    const pid = parseInt(readFileSync(COMFYUI_PID_FILE, 'utf-8').trim(), 10)
-    if (!isNaN(pid) && pid > 0) {
-      try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
-      setTimeout(() => {
-        try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ }
-      }, 3000)
+    // Kill all ComfyUI instances (multi-instance PID files: comfyui-*.pid)
+    const files = readdirSync(AIOS_DIR).filter(
+      (f) => f.startsWith('comfyui-') && f.endsWith('.pid'),
+    )
+    for (const f of files) {
+      const fullPath = path.join(AIOS_DIR, f)
+      try {
+        const pid = parseInt(readFileSync(fullPath, 'utf-8').trim(), 10)
+        if (!isNaN(pid) && pid > 0) {
+          try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
+          setTimeout(() => {
+            try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ }
+          }, 3000)
+        }
+      } catch { /* ignore */ }
+      try { unlinkSync(fullPath) } catch { /* ignore */ }
     }
-  } catch { /* no PID file */ }
-  try { unlinkSync(COMFYUI_PID_FILE) } catch { /* ignore */ }
+    // Also clean up legacy single PID file
+    const legacyPid = path.join(AIOS_DIR, 'comfyui.pid')
+    try {
+      const pid = parseInt(readFileSync(legacyPid, 'utf-8').trim(), 10)
+      if (!isNaN(pid) && pid > 0) {
+        try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
+      }
+    } catch { /* ignore */ }
+    try { unlinkSync(legacyPid) } catch { /* ignore */ }
+  } catch { /* AIOS_DIR may not exist */ }
 }
 
 // ─── Inference server helpers ──────────────────────────────────────────────────

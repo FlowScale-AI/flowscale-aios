@@ -1,22 +1,32 @@
 import { NextResponse } from 'next/server'
-import { getComfyManagedPort } from '@/lib/providerSettings'
+import { getComfyInstances } from '@/lib/providerSettings'
 import { probePort } from '@/lib/comfy-probe'
 
 export type { ComfyInstance } from '@/lib/comfy-probe'
 
 export async function GET() {
-  // Only probe the AIOS-managed port — externally started instances are ignored.
-  const managedPort = getComfyManagedPort()
-  const instance = await probePort(managedPort)
+  const instances = getComfyInstances()
 
-  if (!instance) return NextResponse.json([])
+  // Probe all configured instance ports in parallel
+  const results = await Promise.all(
+    instances.map(async (cfg) => {
+      const probe = await probePort(cfg.port)
+      if (!probe) return null
+      return { ...probe, instanceId: cfg.id, device: cfg.device, label: cfg.label }
+    }),
+  )
 
-  // Fire-and-forget model scan for the discovered instance
-  fetch('http://localhost:14173/api/models/scan', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ comfyPort: instance.port }),
-  }).catch(() => { /* background — ignore errors */ })
+  const alive = results.filter(Boolean)
 
-  return NextResponse.json([instance])
+  // Fire-and-forget model scan for each discovered instance
+  for (const inst of alive) {
+    if (!inst) continue
+    fetch('http://localhost:14173/api/models/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comfyPort: inst.port }),
+    }).catch(() => { /* background — ignore errors */ })
+  }
+
+  return NextResponse.json(alive)
 }

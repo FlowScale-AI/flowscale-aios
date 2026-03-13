@@ -176,7 +176,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!tool) return NextResponse.json({ error: 'Tool not found' }, { status: 404 })
 
   const body = await req.json()
-  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody } = body
+  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride } = body
   const comfyOrgApiKey = comfyOrgApiKeyFromBody || getComfyOrgApiKeyServer()
 
   // ── API-engine tools (non-ComfyUI) ──────────────────────────────────────────
@@ -224,7 +224,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   // ── ComfyUI-engine tools ─────────────────────────────────────────────────────
-  if (!tool.comfyPort) return NextResponse.json({ error: 'No ComfyUI port configured for this tool' }, { status: 400 })
+  const comfyPort = comfyPortOverride ?? tool.comfyPort
+  if (!comfyPort) return NextResponse.json({ error: 'No ComfyUI port configured for this tool' }, { status: 400 })
 
   // Generate a random seed if not provided in inputs
   const seed = inputs?.seed ?? Math.floor(Math.random() * 2 ** 32)
@@ -244,7 +245,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   let objectInfoMap: ObjectInfoMap | undefined
   try {
-    const infoRes = await fetch(`http://localhost:${tool.comfyPort}/object_info`, {
+    const infoRes = await fetch(`http://localhost:${comfyPort}/object_info`, {
       signal: AbortSignal.timeout(3000),
     })
     if (infoRes.ok) objectInfoMap = await infoRes.json() as ObjectInfoMap
@@ -294,7 +295,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (comfyOrgApiKey) {
     promptPayload.extra_data = { api_key_comfy_org: comfyOrgApiKey }
   }
-  const queueRes = await fetch(`http://localhost:${tool.comfyPort}/prompt`, {
+  const queueRes = await fetch(`http://localhost:${comfyPort}/prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(promptPayload),
@@ -331,7 +332,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // external apps don't need a browser watching a WebSocket.
   const waitMode = req.nextUrl.searchParams.get('wait') === 'true'
   if (waitMode) {
-    const baseUrl = `http://localhost:${tool.comfyPort}`
+    const baseUrl = `http://localhost:${comfyPort}`
     const maxWait = 300_000
     const started = Date.now()
 
@@ -362,7 +363,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         return NextResponse.json({ error: 'ComfyUI reported an error' }, { status: 500 })
       }
 
-      const savedOutputs = await saveComfyOutputsToDisk(rawOutputs, tool.comfyPort, toolId, executionId)
+      const savedOutputs = await saveComfyOutputsToDisk(rawOutputs, comfyPort, toolId, executionId)
       await db.update(executions)
         .set({ status: 'completed', outputsJson: JSON.stringify(savedOutputs), completedAt: Date.now() })
         .where(eq(executions.id, executionId))
@@ -381,7 +382,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     executionId,
     promptId,
     clientId,
-    comfyPort: tool.comfyPort,
+    comfyPort,
     seed,
   }, { status: 202 })
 }

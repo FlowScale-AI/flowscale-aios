@@ -643,11 +643,13 @@ function BottomTabs({
   executions,
   execLoading,
   onRestore,
+  effectiveComfyPort,
 }: {
   tool: Tool
   executions: Execution[]
   execLoading: boolean
   onRestore: (inputs: Record<string, unknown>) => void
+  effectiveComfyPort?: number | null
 }) {
   const inferenceStatus = useInferenceStatus()
   const availableTabs = (['logs', 'history'] as const)
@@ -703,10 +705,10 @@ function BottomTabs({
         )}
 
         {tab === 'logs' && tool.engine === 'api' && <ServerLogsPanel />}
-        {tab === 'logs' && tool.engine !== 'api' && tool.comfyPort && (
-          <ComfyLogsPanel port={tool.comfyPort} />
+        {tab === 'logs' && tool.engine !== 'api' && (effectiveComfyPort ?? tool.comfyPort) && (
+          <ComfyLogsPanel port={(effectiveComfyPort ?? tool.comfyPort)!} />
         )}
-        {tab === 'logs' && tool.engine !== 'api' && !tool.comfyPort && (
+        {tab === 'logs' && tool.engine !== 'api' && !(effectiveComfyPort ?? tool.comfyPort) && (
           <p className="text-xs text-zinc-600 pt-2">No ComfyUI instance configured.</p>
         )}
       </div>
@@ -763,6 +765,22 @@ export default function ToolPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool?.schemaJson])
 
+  // ── ComfyUI instance selection ──────────────────────────────────────────────
+  const { data: comfyManageData } = useQuery<{ instances: Array<{ id: string; status: string; port: number; device: string; label: string }> }>({
+    queryKey: ['comfy-manage'],
+    queryFn: async () => {
+      const res = await fetch('/api/comfy/manage')
+      if (!res.ok) return { instances: [] }
+      return res.json()
+    },
+    enabled: tool?.engine === 'comfyui',
+  })
+  const comfyInstances = comfyManageData?.instances ?? []
+  const runningInstances = comfyInstances.filter((i) => i.status === 'running')
+  const [selectedComfyPort, setSelectedComfyPort] = useState<number | null>(null)
+  // Default to tool's configured port or first running instance
+  const effectiveComfyPort = selectedComfyPort ?? tool?.comfyPort ?? runningInstances[0]?.port ?? null
+
   const [leftTab, setLeftTab] = useState<'form' | 'nodejs' | 'http'>('form')
   const [latestOutputs, setLatestOutputs] = useState<OutputItem[]>([])
   const sseRef = useRef<EventSource | null>(null)
@@ -798,7 +816,7 @@ export default function ToolPage() {
       const res = await fetch(`/api/tools/${id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
+        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, comfyPort: effectiveComfyPort }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -965,9 +983,23 @@ export default function ToolPage() {
             {stopping ? 'Stopping…' : 'Stop'}
           </button>
         )}
+        {/* Instance selector for ComfyUI tools */}
+        {tool.engine === 'comfyui' && comfyInstances.length > 0 && (
+          <select
+            value={effectiveComfyPort ?? ''}
+            onChange={(e) => setSelectedComfyPort(Number(e.target.value))}
+            className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
+          >
+            {comfyInstances.map((inst) => (
+              <option key={inst.id} value={inst.port} disabled={inst.status !== 'running'}>
+                {inst.label} (:{inst.port}) {inst.status !== 'running' ? `— ${inst.status}` : ''}
+              </option>
+            ))}
+          </select>
+        )}
         <button
           onClick={() => runMutation.mutate()}
-          disabled={isRunning || (tool.engine === 'comfyui' && !tool.comfyPort)}
+          disabled={isRunning || (tool.engine === 'comfyui' && !effectiveComfyPort)}
           className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
         >
           {isRunning ? (
@@ -993,9 +1025,9 @@ export default function ToolPage() {
       )}
 
       {/* No ComfyUI warning */}
-      {tool.engine === 'comfyui' && !tool.comfyPort && (
+      {tool.engine === 'comfyui' && !effectiveComfyPort && (
         <div className="px-6 py-2.5 bg-amber-950/30 border-b border-amber-900/50 text-amber-400 text-sm">
-          No ComfyUI instance configured for this tool. Re-deploy via Build Tool to assign one.
+          No running ComfyUI instance available. Start one from the Providers page.
         </div>
       )}
 
@@ -1097,6 +1129,7 @@ export default function ToolPage() {
                 executions={executions}
                 execLoading={execLoading}
                 onRestore={handleRestore}
+                effectiveComfyPort={effectiveComfyPort}
               />
             </div>
           </Panel>

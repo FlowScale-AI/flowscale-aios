@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Play, Warning, Monitor, ImageSquare } from 'phosphor-react'
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import { LottieSpinner } from '@/components/ui'
@@ -138,6 +139,20 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
     return defaults
   })
 
+  // ── ComfyUI instance selection ──────────────────────────────────────────────
+  const { data: comfyManageData } = useQuery<{ instances: Array<{ id: string; status: string; port: number; device: string; label: string }> }>({
+    queryKey: ['comfy-manage'],
+    queryFn: async () => {
+      const res = await fetch('/api/comfy/manage')
+      if (!res.ok) return { instances: [] }
+      return res.json()
+    },
+  })
+  const comfyInstances = comfyManageData?.instances ?? []
+  const runningInstances = comfyInstances.filter((i) => i.status === 'running')
+  const [selectedComfyPort, setSelectedComfyPort] = useState<number | null>(null)
+  const effectiveComfyPort = selectedComfyPort ?? tool.comfyPort ?? runningInstances[0]?.port ?? null
+
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
   type OutputFile = { filename: string; subfolder?: string; kind: 'image' | 'video' | 'audio' | 'model' | 'file' }
@@ -160,7 +175,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
       const res = await fetch(`/api/tools/${tool.id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
+        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, comfyPort: effectiveComfyPort }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -300,7 +315,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
       setError(['Failed to start execution'])
       setRunning(false)
     }
-  }, [inputs, tool.id, tool.comfyPort])
+  }, [inputs, tool.id, effectiveComfyPort])
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -309,15 +324,29 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
         <div className="flex-1">
           <p className="text-xs text-zinc-500">Run the tool with test inputs before deploying.</p>
         </div>
-        {!tool.comfyPort && (
+        {!effectiveComfyPort && (
           <div className="flex items-center gap-2 text-amber-400 text-xs">
             <Monitor size={13} weight="duotone" />
             No ComfyUI connected
           </div>
         )}
+        {/* Instance selector */}
+        {comfyInstances.length > 0 && (
+          <select
+            value={effectiveComfyPort ?? ''}
+            onChange={(e) => setSelectedComfyPort(Number(e.target.value))}
+            className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
+          >
+            {comfyInstances.map((inst) => (
+              <option key={inst.id} value={inst.port} disabled={inst.status !== 'running'}>
+                {inst.label} (:{inst.port}) {inst.status !== 'running' ? `— ${inst.status}` : ''}
+              </option>
+            ))}
+          </select>
+        )}
         <button
           onClick={handleRun}
-          disabled={running || !tool.comfyPort}
+          disabled={running || !effectiveComfyPort}
           className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
         >
           {running ? (
@@ -371,7 +400,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                               <FileUploadInput
                                 kind={uploadKind}
                                 value={String(inputs[key] ?? '')}
-                                comfyPort={tool.comfyPort}
+                                comfyPort={effectiveComfyPort}
                                 onChange={(filename) => setInputs((prev) => ({ ...prev, [key]: filename }))}
                               />
                             )
@@ -425,7 +454,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                           </div>
                         )
                       }
-                      const url = `/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}${out.subfolder ? `&subfolder=${encodeURIComponent(out.subfolder)}` : ''}&type=output`
+                      const url = `/api/comfy/${effectiveComfyPort}/view?filename=${encodeURIComponent(out.filename)}${out.subfolder ? `&subfolder=${encodeURIComponent(out.subfolder)}` : ''}&type=output`
                       if (out.kind === 'image') return (
                         <div key={i} className={cardClass}>
                           <div className="h-36 bg-zinc-950 overflow-hidden">
@@ -477,7 +506,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
               </div>
 
               {/* Logs footer */}
-              {tool.comfyPort && (
+              {effectiveComfyPort && (
                 <div className="border-t border-white/5 shrink-0">
                   <button
                     onClick={() => setLogsOpen((v) => !v)}
@@ -491,7 +520,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                   </button>
                   {logsOpen && (
                     <div className="h-40">
-                      <ComfyLogsPanel port={tool.comfyPort} />
+                      <ComfyLogsPanel port={effectiveComfyPort} />
                     </div>
                   )}
                 </div>

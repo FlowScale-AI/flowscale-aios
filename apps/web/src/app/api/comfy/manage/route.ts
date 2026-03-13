@@ -1,26 +1,50 @@
 import { NextResponse } from 'next/server'
-import { getProcessStatus, startComfyUI, stopComfyUI, restartComfyUI } from '@/lib/comfyui-manager'
+import {
+  getAllInstanceStatuses,
+  getInstanceStatus,
+  startInstance,
+  stopInstance,
+  restartInstance,
+  startAll,
+  stopAll,
+} from '@/lib/comfyui-manager'
 import { getComfyManagedPath, getComfyInstallType } from '@/lib/providerSettings'
 import { probePort } from '@/lib/comfy-probe'
 
 export async function GET() {
-  const { alive, pid, port } = getProcessStatus()
   const managedPath = getComfyManagedPath()
   const installType = getComfyInstallType()
+  const statuses = getAllInstanceStatuses()
 
-  let status: 'running' | 'starting' | 'stopped'
-  if (!alive) {
-    status = 'stopped'
-  } else {
-    // Process is alive — check if HTTP is already up
-    const httpReady = !!(await probePort(port))
-    status = httpReady ? 'running' : 'starting'
-  }
+  // For each instance, determine status:
+  // - If PID is alive and HTTP responds → running
+  // - If PID is alive but HTTP not ready → starting
+  // - If PID is dead, still probe the port (catches externally-started or legacy-PID instances)
+  const instances = await Promise.all(
+    statuses.map(async (st) => {
+      let status: 'running' | 'starting' | 'stopped'
+      if (st.alive) {
+        const httpReady = !!(await probePort(st.port))
+        status = httpReady ? 'running' : 'starting'
+      } else {
+        // No tracked PID — but something might be listening on this port
+        // (externally started, or started before multi-instance migration)
+        const httpReady = !!(await probePort(st.port))
+        status = httpReady ? 'running' : 'stopped'
+      }
+      return {
+        id: st.id,
+        status,
+        pid: st.pid ?? undefined,
+        port: st.port,
+        device: st.device,
+        label: st.label,
+      }
+    }),
+  )
 
   return NextResponse.json({
-    status,
-    pid: pid ?? undefined,
-    port,
+    instances,
     managedPath: managedPath ?? null,
     installType: installType ?? null,
     isSetup: !!managedPath,
@@ -28,22 +52,38 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { action } = await req.json() as { action: 'start' | 'stop' | 'restart' }
+  const { action, instanceId } = (await req.json()) as {
+    action: 'start' | 'stop' | 'restart'
+    instanceId?: string
+  }
 
   try {
     if (action === 'stop') {
-      stopComfyUI()
+      if (instanceId) {
+        stopInstance(instanceId)
+        return NextResponse.json({ success: true, status: 'stopped', instanceId })
+      }
+      stopAll()
       return NextResponse.json({ success: true, status: 'stopped' })
     }
 
     if (action === 'start') {
-      const { port, pid } = startComfyUI()
-      return NextResponse.json({ success: true, status: 'starting', port, pid })
+      if (instanceId) {
+        const { port, pid } = await startInstance(instanceId)
+        return NextResponse.json({ success: true, status: 'starting', instanceId, port, pid })
+      }
+      const results = await startAll()
+      return NextResponse.json({ success: true, status: 'starting', instances: results })
     }
 
     if (action === 'restart') {
-      const { port, pid } = restartComfyUI()
-      return NextResponse.json({ success: true, status: 'starting', port, pid })
+      if (instanceId) {
+        const { port, pid } = await restartInstance(instanceId)
+        return NextResponse.json({ success: true, status: 'starting', instanceId, port, pid })
+      }
+      stopAll()
+      const results = await startAll()
+      return NextResponse.json({ success: true, status: 'starting', instances: results })
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 })

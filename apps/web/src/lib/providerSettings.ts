@@ -8,16 +8,19 @@ export type ProviderName = 'fal' | 'replicate' | 'openrouter' | 'huggingface'
 
 const SETTINGS_FILE = path.join(os.homedir(), '.flowscale', 'aios', 'settings.json')
 
-function readSettingsFile(): Record<string, string> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function readSettingsFile(): Record<string, any> {
   try {
     const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8')
-    return JSON.parse(raw) as Record<string, string>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JSON.parse(raw) as Record<string, any>
   } catch {
     return {}
   }
 }
 
-function writeSettingsFile(settings: Record<string, string>): void {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function writeSettingsFile(settings: Record<string, any>): void {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true })
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8')
 }
@@ -71,6 +74,48 @@ export function setComfyManagedPath(p: string): void {
   // Keep legacy key in sync for existing routes that read it
   settings['comfyuiPath'] = p
   writeSettingsFile(settings)
+}
+
+// ── ComfyUI multi-instance registry ──────────────────────────────────────────
+
+export interface ComfyInstanceConfig {
+  /** Stable identifier, e.g. 'gpu-0', 'cpu' */
+  id: string
+  /** Port this instance listens on */
+  port: number
+  /** Device specifier: 'cuda:0', 'rocm:1', 'cpu' */
+  device: string
+  /** Human-readable label, e.g. 'GPU 0 — RTX 4090' */
+  label: string
+}
+
+/**
+ * Returns configured ComfyUI instances.
+ * Falls back to a single instance from the legacy `comfyManagedPort` key
+ * if `comfyInstances` is not yet set (backward compatibility).
+ */
+export function getComfyInstances(): ComfyInstanceConfig[] {
+  const settings = readSettingsFile()
+  const arr = settings['comfyInstances']
+  if (Array.isArray(arr) && arr.length > 0) return arr as ComfyInstanceConfig[]
+
+  // Legacy fallback: synthesize a single instance from the old key
+  const port = getComfyManagedPort()
+  return [{ id: 'gpu-0', port, device: 'cuda:0', label: 'ComfyUI' }]
+}
+
+export function setComfyInstances(instances: ComfyInstanceConfig[]): void {
+  const settings = readSettingsFile()
+  settings['comfyInstances'] = instances
+  // Keep legacy key in sync with the first instance
+  if (instances.length > 0) {
+    settings['comfyManagedPort'] = String(instances[0].port)
+  }
+  writeSettingsFile(settings)
+}
+
+export function getComfyInstanceById(id: string): ComfyInstanceConfig | undefined {
+  return getComfyInstances().find((i) => i.id === id)
 }
 
 /** Path to the ComfyUI Desktop App's user-data folder (models, custom_nodes, configs). */

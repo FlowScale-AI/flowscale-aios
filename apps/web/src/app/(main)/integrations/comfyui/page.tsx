@@ -67,13 +67,23 @@ function fmt(bytes?: number) {
 
 type ComfyInstallType = 'github' | 'desktop-app' | 'flowscale-managed'
 
-type ManageStatus = {
+type ManagedInstance = {
+  id: string
   status: 'running' | 'starting' | 'stopped'
   pid?: number
   port: number
+  device: string
+  label: string
+}
+
+type ManageStatus = {
+  instances: ManagedInstance[]
   managedPath: string | null
   installType: ComfyInstallType | null
   isSetup: boolean
+  // Legacy compat — derived from first instance
+  status: 'running' | 'starting' | 'stopped'
+  port: number
 }
 
 // ─── Setup Wizard ─────────────────────────────────────────────────────────────
@@ -490,29 +500,45 @@ export default function ComfyUIIntegrationPage() {
   const [tab, setTab] = useState<Tab>('overview')
   const [manageStatus, setManageStatus] = useState<ManageStatus | null>(null)
   const [actionPending, setActionPending] = useState(false)
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadManageStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/comfy/manage')
-      const data: ManageStatus = await res.json()
+      const raw = await res.json()
+      const instances: ManagedInstance[] = raw.instances ?? []
+      // Derive legacy status from selected or first instance
+      const primary = instances.find((i: ManagedInstance) => i.id === selectedInstanceId) ?? instances[0]
+      const data: ManageStatus = {
+        ...raw,
+        instances,
+        status: primary?.status ?? 'stopped',
+        port: primary?.port ?? 8188,
+      }
       setManageStatus(data)
+      // Auto-select first instance if none selected
+      if (!selectedInstanceId && instances.length > 0) {
+        setSelectedInstanceId(instances[0].id)
+      }
       return data
     } catch {
       return null
     }
-  }, [])
+  }, [selectedInstanceId])
 
   const scan = useCallback(async () => {
     setScanning(true)
     try {
       const res = await fetch('/api/comfy/scan')
       const data: ComfyInstance[] = await res.json()
-      setInstance(data.length > 0 ? data[0] : null)
+      // Pick the instance matching selectedInstanceId, or first
+      const match = data.find((i) => (i as { instanceId?: string }).instanceId === selectedInstanceId) ?? data[0]
+      setInstance(match ?? null)
     } finally {
       setScanning(false)
     }
-  }, [])
+  }, [selectedInstanceId])
 
   // Poll when starting so the UI catches when ComfyUI becomes ready
   useEffect(() => {
@@ -534,7 +560,7 @@ export default function ComfyUIIntegrationPage() {
     loadManageStatus().then((s) => {
       if (s?.status === 'running') scan()
     })
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedInstanceId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAction = async (action: 'start' | 'stop' | 'restart') => {
     setActionPending(true)
@@ -542,7 +568,7 @@ export default function ComfyUIIntegrationPage() {
       await fetch('/api/comfy/manage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, instanceId: selectedInstanceId }),
       })
       await loadManageStatus()
       if (action === 'stop') setInstance(null)
@@ -596,6 +622,24 @@ export default function ComfyUIIntegrationPage() {
             <Warning size={14} />
             ComfyUI not configured
           </div>
+        )}
+
+        {/* Instance selector — shown when multiple instances */}
+        {isSetup && (manageStatus?.instances?.length ?? 0) > 1 && (
+          <select
+            value={selectedInstanceId ?? ''}
+            onChange={(e) => {
+              setSelectedInstanceId(e.target.value)
+              setInstance(null) // reset scan data for new instance
+            }}
+            className="ml-2 px-2 py-1 text-xs bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-300 focus:outline-none focus:border-zinc-600"
+          >
+            {manageStatus!.instances.map((inst) => (
+              <option key={inst.id} value={inst.id}>
+                {inst.label} (:{inst.port})
+              </option>
+            ))}
+          </select>
         )}
 
         {/* Process controls — only shown once configured */}
