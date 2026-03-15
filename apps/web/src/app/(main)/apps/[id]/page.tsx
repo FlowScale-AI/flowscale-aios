@@ -773,13 +773,31 @@ export default function ToolPage() {
       if (!res.ok) return { instances: [] }
       return res.json()
     },
-    enabled: tool?.engine === 'comfyui',
   })
   const comfyInstances = comfyManageData?.instances ?? []
   const runningInstances = comfyInstances.filter((i) => i.status === 'running')
   const [selectedComfyPort, setSelectedComfyPort] = useState<number | null>(null)
   // Default to tool's configured port or first running instance
   const effectiveComfyPort = selectedComfyPort ?? tool?.comfyPort ?? runningInstances[0]?.port ?? null
+
+  // ── GPU/device selection for API tools ────────────────────────────────────────
+  const { data: gpuData } = useQuery<{ instances: Array<{ id: string; device: string; label: string }> }>({
+    queryKey: ['gpu-instances'],
+    queryFn: async () => {
+      const res = await fetch('/api/comfy/instances/detect')
+      if (!res.ok) return { instances: [] }
+      return res.json()
+    },
+    enabled: tool?.engine === 'api',
+  })
+  const gpuDevices = gpuData?.instances ?? []
+  // Devices occupied by running ComfyUI instances
+  const busyDevices = new Set(runningInstances.map((i) => i.device))
+  const [selectedDevice, setSelectedDevice] = useState<string>('')
+  // If auto, pick the first available (non-busy) device
+  const effectiveDevice = selectedDevice || (
+    gpuDevices.find((d) => !busyDevices.has(d.device))?.device ?? ''
+  )
 
   const [leftTab, setLeftTab] = useState<'form' | 'nodejs' | 'http'>('form')
   const [latestOutputs, setLatestOutputs] = useState<OutputItem[]>([])
@@ -816,7 +834,7 @@ export default function ToolPage() {
       const res = await fetch(`/api/tools/${id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, comfyPort: effectiveComfyPort }),
+        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, comfyPort: effectiveComfyPort, ...(effectiveDevice ? { device: effectiveDevice } : {}) }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -995,6 +1013,24 @@ export default function ToolPage() {
                 {inst.label} (:{inst.port}) {inst.status !== 'running' ? `— ${inst.status}` : ''}
               </option>
             ))}
+          </select>
+        )}
+        {/* Device selector for API tools */}
+        {tool.engine === 'api' && gpuDevices.length > 0 && (
+          <select
+            value={selectedDevice}
+            onChange={(e) => setSelectedDevice(e.target.value)}
+            className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
+          >
+            <option value="">Auto</option>
+            {gpuDevices.map((d) => {
+              const busy = busyDevices.has(d.device)
+              return (
+                <option key={d.id} value={d.device} disabled={busy}>
+                  {d.label}{busy ? ' — in use by ComfyUI' : ''}
+                </option>
+              )
+            })}
           </select>
         )}
         <button

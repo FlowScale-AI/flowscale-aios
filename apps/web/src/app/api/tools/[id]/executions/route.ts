@@ -105,6 +105,7 @@ async function runApiInference(
   inputs: Record<string, unknown>,
   seed: number,
   signal: AbortSignal,
+  device?: string,
 ) {
   const db = getDb()
   const LOCAL_INFERENCE_PORT = 8765
@@ -118,6 +119,7 @@ async function runApiInference(
       num_inference_steps: inputs?.['api__num_inference_steps'] ?? 4,
       guidance_scale: inputs?.['api__guidance_scale'] ?? 0,
       seed,
+      ...(device ? { device } : {}),
     }, AbortSignal.any([signal, AbortSignal.timeout(1_800_000)]))
 
     if (!inferRes.ok) {
@@ -176,7 +178,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!tool) return NextResponse.json({ error: 'Tool not found' }, { status: 404 })
 
   const body = await req.json()
-  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride } = body
+  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride, device: deviceOverride } = body
   const comfyOrgApiKey = comfyOrgApiKeyFromBody || getComfyOrgApiKeyServer()
 
   // ── API-engine tools (non-ComfyUI) ──────────────────────────────────────────
@@ -214,7 +216,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // Fire inference in background — return immediately so the HTTP connection doesn't time out
       const controller = new AbortController()
       inFlightControllers.set(executionId, controller)
-      runApiInference(executionId, config.model, inputs, seed, controller.signal)
+      runApiInference(executionId, config.model, inputs, seed, controller.signal, deviceOverride)
 
       return NextResponse.json({ executionId, type: 'api', status: 'running', seed }, { status: 202 })
     }

@@ -38,6 +38,7 @@ import uvicorn
 
 app = FastAPI()
 pipe = None
+_current_device: str = "cpu"
 _executor = ThreadPoolExecutor(max_workers=1)
 
 
@@ -49,6 +50,7 @@ class GenerateRequest(BaseModel):
     num_inference_steps: int = 4
     guidance_scale: float = 0.0
     seed: int = -1
+    device: str = ""
 
 
 def _download_model(model_id: str):
@@ -135,6 +137,54 @@ def _download_model(model_id: str):
     return snapshot_download(model_id, local_files_only=True)
 
 
+def _resolve_device(requested: str) -> str:
+    """Resolve a device string to a valid torch device.
+
+    Accepts: 'cpu', 'cuda', 'cuda:N', 'rocm:N' (mapped to cuda:N with
+    HIP_VISIBLE_DEVICES), 'mps', or '' (auto-detect best available).
+    """
+    import torch
+
+    if requested == "cpu":
+        return "cpu"
+    if requested.startswith("rocm:"):
+        # ROCm uses the CUDA API under HIP — map rocm:N to cuda:N
+        return "cuda:" + requested.split(":")[1]
+    if requested.startswith("cuda"):
+        return requested
+    if requested == "mps":
+        return "mps"
+    # Auto-detect
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def _move_pipe_to(device: str):
+    """Move the pipeline to the given device, updating _current_device."""
+    global pipe, _current_device
+    import torch
+
+    if _current_device == device:
+        return
+
+    target = device
+    print(f"Moving model from {_current_device} to {target}…", flush=True)
+
+    try:
+        pipe = pipe.to(target)
+        _current_device = device
+        print(f"Model now on {device}.", flush=True)
+    except torch.OutOfMemoryError:
+        print(f"GPU OOM on {device} — enabling sequential CPU offload.", flush=True)
+        if "cuda" in device:
+            torch.cuda.empty_cache()
+        pipe.enable_sequential_cpu_offload()
+        _current_device = device
+
+
 @app.on_event("startup")
 async def load_model():
     global pipe
@@ -151,47 +201,36 @@ async def load_model():
 
     # Download with progress first, then load from cache
     _download_model(model_id)
-    print("Loading model into memory…", flush=True)
+    print("Loading model into memory (CPU)…", flush=True)
     pipe = DiffusionPipeline.from_pretrained(
         model_id,
         torch_dtype=dtype,
         local_files_only=True,
     )
-
-    if torch.cuda.is_available():
-        try:
-            pipe = pipe.to("cuda")
-            print("Using CUDA.")
-        except torch.OutOfMemoryError:
-            print("GPU OOM — enabling sequential CPU offload (layers streamed to GPU one at a time).")
-            torch.cuda.empty_cache()
-            pipe.enable_sequential_cpu_offload()
-    elif use_mps:
-        pipe = pipe.to("mps")
-        # Reduce peak memory on Apple Silicon — process attention in slices
-        pipe.enable_attention_slicing()
-        print("Using MPS (Apple Silicon) with attention slicing.")
-    else:
-        pipe = pipe.to("cpu")
-        print("Warning: running on CPU — inference will be slow.")
-
-    print("Model ready.")
+    # Keep on CPU — the /generate endpoint moves to the requested device lazily
+    print("Model ready (on CPU). Will move to GPU on first generate request.")
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model_loaded": pipe is not None}
+    return {"status": "ok", "model_loaded": pipe is not None, "current_device": _current_device}
 
 
 def _run_inference(req: GenerateRequest) -> str:
     """Blocking inference — runs in a thread so the event loop stays responsive."""
     import torch
 
+    # Move model to requested device (no-op if already there)
+    target = _resolve_device(req.device)
+    _move_pipe_to(target)
+
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         torch.mps.empty_cache()
-    generator = torch.Generator().manual_seed(req.seed) if req.seed >= 0 else None
+
+    gen_device = "cpu" if target == "cpu" else target
+    generator = torch.Generator(gen_device).manual_seed(req.seed) if req.seed >= 0 else None
     image = pipe(
         prompt=req.prompt,
         negative_prompt=req.negative_prompt or None,
