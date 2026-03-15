@@ -49,6 +49,36 @@ const BUILTIN_CATALOG: CatalogEntry[] = [
     description: 'Generate videos from text prompts using the LTX-2.3 22B model. Powered by Modal cloud GPU.',
     badge: 'Cloud AI',
   },
+  {
+    id: 'qwen-image-builtin',
+    name: 'Qwen Image',
+    description: 'Generate high-quality images with excellent text rendering using Qwen-Image. Powered by Modal cloud GPU.',
+    badge: 'Cloud AI',
+  },
+  {
+    id: 'qwen-image-2512-builtin',
+    name: 'Qwen Image 2512',
+    description: 'Generate high-quality images using the updated Qwen-Image-2512 model. Powered by Modal cloud GPU.',
+    badge: 'Cloud AI',
+  },
+  {
+    id: 'qwen-image-edit-builtin',
+    name: 'Qwen Image Edit',
+    description: 'Edit images with text prompts — style transfer, object manipulation, text editing. Powered by Modal cloud GPU.',
+    badge: 'Cloud AI',
+  },
+  {
+    id: 'qwen-image-edit-2511-builtin',
+    name: 'Qwen Image Edit Plus',
+    description: 'Enhanced image editing with multi-subject support, LoRA integration, and geometric reasoning. Powered by Modal cloud GPU.',
+    badge: 'Cloud AI',
+  },
+  {
+    id: 'qwen-image-layered-builtin',
+    name: 'Qwen Image Layered',
+    description: 'Decompose images into editable RGBA layers. Each layer can be independently manipulated. Powered by Modal cloud GPU.',
+    badge: 'Cloud AI',
+  },
 ]
 
 function CustomToolCard({

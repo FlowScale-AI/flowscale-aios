@@ -373,7 +373,7 @@ function InputField({
     )
   }
 
-  const uploadKind = inferInputUploadKind(field.nodeType)
+  const uploadKind = inferInputUploadKind(field.nodeType, field.paramType)
   if (uploadKind) {
     return (
       <div className="flex flex-col gap-1.5">

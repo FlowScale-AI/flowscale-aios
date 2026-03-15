@@ -251,8 +251,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           return NextResponse.json({ error: msg }, { status: 503 })
         }
       } else {
-        await db.update(executions).set({ status: 'error', errorMessage: 'Unknown API model', completedAt: Date.now() }).where(eq(executions.id, executionId))
-        return NextResponse.json({ error: 'Unknown API model' }, { status: 400 })
+        const msg = `No Modal endpoint configured for ${config.model}. Go to Settings > Modal Endpoints to add one.`
+        await db.update(executions).set({ status: 'error', errorMessage: msg, completedAt: Date.now() }).where(eq(executions.id, executionId))
+        return NextResponse.json({ error: msg }, { status: 503 })
       }
     }
 

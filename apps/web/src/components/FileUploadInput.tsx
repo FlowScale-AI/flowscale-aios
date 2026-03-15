@@ -63,11 +63,16 @@ const ACCEPT_MAP: Record<'image' | 'audio' | 'video' | 'model', string> = {
   model: '.glb,.gltf,.obj,.fbx,.stl,.ply',
 }
 
-export function inferInputUploadKind(nodeType: string): 'image' | 'audio' | 'video' | 'model' | null {
+export function inferInputUploadKind(nodeType: string, paramType?: string): 'image' | 'audio' | 'video' | 'model' | null {
   if (nodeType === 'FSLoadImage' || nodeType === 'LoadImage') return 'image'
   if (nodeType === 'FSLoadAudio' || nodeType === 'LoadAudio') return 'audio'
   if (nodeType === 'FSLoadVideo' || nodeType === 'LoadVideo') return 'video'
   if (nodeType === 'FSLoad3D') return 'model'
+  // API-engine tools use paramType directly
+  if (paramType === 'image') return 'image'
+  if (paramType === 'audio') return 'audio'
+  if (paramType === 'video') return 'video'
+  if (paramType === '3d') return 'model'
   return null
 }
 
@@ -84,22 +89,34 @@ export function FileUploadInput({
 }) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [base64Preview, setBase64Preview] = useState<string | null>(null)
+  const [base64Filename, setBase64Filename] = useState<string>('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleFile = async (file: File) => {
-    if (!comfyPort) {
-      setUploadError('No ComfyUI connected')
-      return
-    }
     setUploading(true)
     setUploadError(null)
     try {
-      const form = new FormData()
-      form.append('image', file, file.name)
-      const res = await fetch(`/api/comfy/${comfyPort}/upload/image`, { method: 'POST', body: form })
-      if (!res.ok) throw new Error(`Upload failed (${res.status})`)
-      const data = await res.json()
-      onChange(data.name)
+      if (comfyPort) {
+        // ComfyUI-engine: upload to ComfyUI input dir
+        const form = new FormData()
+        form.append('image', file, file.name)
+        const res = await fetch(`/api/comfy/${comfyPort}/upload/image`, { method: 'POST', body: form })
+        if (!res.ok) throw new Error(`Upload failed (${res.status})`)
+        const data = await res.json()
+        onChange(data.name)
+      } else {
+        // API-engine: convert to base64 data URL
+        const reader = new FileReader()
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = () => reject(new Error('Failed to read file'))
+          reader.readAsDataURL(file)
+        })
+        setBase64Preview(dataUrl)
+        setBase64Filename(file.name)
+        onChange(dataUrl)
+      }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
@@ -107,7 +124,7 @@ export function FileUploadInput({
     }
   }
 
-  const disabled = !comfyPort
+  const disabled = false
 
   return (
     <div className="flex flex-col gap-1">
@@ -125,11 +142,11 @@ export function FileUploadInput({
           <UploadSimple size={14} className="text-zinc-500 shrink-0" />
         )}
         <span className={`text-sm flex-1 truncate ${value ? 'text-zinc-200' : 'text-zinc-500'}`}>
-          {disabled ? 'No ComfyUI connected' : value || 'Choose file…'}
+          {base64Filename || value || 'Choose file…'}
         </span>
-        {value && !disabled && (
+        {value && (
           <button
-            onClick={(e) => { e.stopPropagation(); onChange(''); setUploadError(null) }}
+            onClick={(e) => { e.stopPropagation(); onChange(''); setUploadError(null); setBase64Preview(null); setBase64Filename('') }}
             className="text-zinc-600 hover:text-zinc-400 shrink-0"
           >
             <X size={12} />
@@ -154,6 +171,15 @@ export function FileUploadInput({
             kind={kind}
             src={`/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(value)}&type=input`}
             filename={value}
+          />
+        </div>
+      )}
+      {base64Preview && !comfyPort && (
+        <div className={`rounded-lg overflow-hidden border border-white/5 bg-zinc-950 ${kind === 'audio' ? 'h-16' : 'h-40'}`}>
+          <InputPreview
+            kind={kind}
+            src={base64Preview}
+            filename={base64Filename}
           />
         </div>
       )}

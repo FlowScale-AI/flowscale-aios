@@ -365,7 +365,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                       <div key={key} className="flex flex-col gap-1.5">
                         <label className="text-xs font-medium text-zinc-400">{label}</label>
                         {(() => {
-                          const uploadKind = inferInputUploadKind(field.nodeType)
+                          const uploadKind = inferInputUploadKind(field.nodeType, field.paramType)
                           if (uploadKind) {
                             return (
                               <FileUploadInput
