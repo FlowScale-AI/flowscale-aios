@@ -1,0 +1,137 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: FlowScale AIOS — EC2 t3.small deployment
+
+Parameters:
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Existing EC2 key pair for SSH access
+
+  AllowedSSHCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR block allowed to SSH (restrict to your IP, e.g. 203.0.113.5/32)
+
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.micro, t3.small, t3.medium]
+
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: FlowScale AIOS security group
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedSSHCidr
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  DataVolume:
+    Type: AWS::EC2::Volume
+    DeletionPolicy: Retain
+    Properties:
+      AvailabilityZone: !GetAtt Instance.AvailabilityZone
+      Size: 20
+      VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: flowscale-data
+
+  DataVolumeAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: /dev/xvdf
+      InstanceId: !Ref Instance
+      VolumeId: !Ref DataVolume
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      KeyName: !Ref KeyPairName
+      SecurityGroupIds:
+        - !GetAtt SecurityGroup.GroupId
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: flowscale-aios
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          exec > /var/log/flowscale-init.log 2>&1
+
+          echo "▸ System setup..."
+          apt-get update -y
+          apt-get install -y ca-certificates curl gnupg
+
+          # Swap (important for 2GB RAM builds)
+          if [ ! -f /swapfile ]; then
+            fallocate -l 2G /swapfile
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+
+          # Docker
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+          apt-get update -y
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+          systemctl enable docker
+          usermod -aG docker ubuntu
+
+          # Mount data volume for persistent storage
+          if [ -b /dev/xvdf ]; then
+            if ! blkid /dev/xvdf; then
+              mkfs.ext4 /dev/xvdf
+            fi
+            mkdir -p /data/flowscale
+            mount /dev/xvdf /data/flowscale
+            echo '/dev/xvdf /data/flowscale ext4 defaults,nofail 0 2' >> /etc/fstab
+            chown ubuntu:ubuntu /data/flowscale
+          fi
+
+          # App directory
+          mkdir -p /home/ubuntu/flowscale
+          chown ubuntu:ubuntu /home/ubuntu/flowscale
+
+          echo "✓ Instance ready — deploy with: ./deploy.sh ubuntu@$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4) ~/.ssh/your-key.pem"
+
+Outputs:
+  PublicIP:
+    Description: EC2 public IP
+    Value: !GetAtt Instance.PublicIp
+
+  SSHCommand:
+    Description: SSH into the instance
+    Value: !Sub ssh -i ~/.ssh/${KeyPairName}.pem ubuntu@${Instance.PublicIp}
+
+  DeployCommand:
+    Description: Run this from the project root to deploy
+    Value: !Sub ./deploy.sh ubuntu@${Instance.PublicIp} ~/.ssh/${KeyPairName}.pem
+
+  WebURL:
+    Description: FlowScale AIOS URL
+    Value: !Sub http://${Instance.PublicIp}

@@ -1,0 +1,14 @@
+services:
+  web:
+    build: .
+    ports:
+      - "80:14173"
+    volumes:
+      - flowscale-data:/home/appuser/.flowscale
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    mem_limit: 1536m
+
+volumes:
+  flowscale-data:
