@@ -22,7 +22,7 @@ export function useInferenceStatus(): InferenceStatus {
   return s
 }
 
-export function LocalInferenceSetup() {
+export function LocalInferenceSetup({ pluginId }: { pluginId?: string } = {}) {
   const [status, setStatus] = useState<InferenceStatus>('checking')
   const [installing, setInstalling] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -39,7 +39,7 @@ export function LocalInferenceSetup() {
 
   async function checkStatus() {
     try {
-      const res = await fetch('/api/local-inference/status')
+      const res = await fetch(`/api/local-inference/status${pluginId ? `?pluginId=${pluginId}` : ''}`)
       const data = await res.json() as { status?: string; running: boolean }
       const serverStatus = data.status as InferenceStatus | undefined
       if (serverStatus === 'running') {
@@ -104,7 +104,7 @@ export function LocalInferenceSetup() {
     failCountRef.current = 0
 
     try {
-      const res = await fetch('/api/local-inference/install', { method: 'POST' })
+      const res = await fetch(`/api/local-inference/install${pluginId ? `?pluginId=${pluginId}` : ''}`, { method: 'POST' })
       if (!res.body) throw new Error('No response body')
 
       const reader = res.body.getReader()
@@ -138,7 +138,7 @@ export function LocalInferenceSetup() {
   async function handleStop() {
     setStopping(true)
     try {
-      await fetch('/api/local-inference/stop', { method: 'POST' })
+      await fetch(`/api/local-inference/stop${pluginId ? `?pluginId=${pluginId}` : ''}`, { method: 'POST' })
       applyStatus('stopped')
     } finally {
       setStopping(false)

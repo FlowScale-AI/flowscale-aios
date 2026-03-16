@@ -15,6 +15,7 @@ import {
   CheckCircle,
   Spinner,
   WarningCircle,
+  ArrowsClockwise,
 } from 'phosphor-react'
 import { PageTransition, Modal } from '@/components/ui'
 
@@ -26,6 +27,7 @@ interface CustomTool {
   description: string | null
   engine: string
   status: string
+  source: string
   createdAt: number
 }
 
@@ -35,15 +37,6 @@ interface CatalogEntry {
   description: string
   badge: string
 }
-
-const BUILTIN_CATALOG: CatalogEntry[] = [
-  {
-    id: 'z-image-turbo-builtin',
-    name: 'Z-Image Turbo',
-    description: 'Generate high-quality images locally using Z-Image Turbo. Runs on your GPU — no API key needed.',
-    badge: 'Local AI',
-  },
-]
 
 function CustomToolCard({
   tool,
@@ -71,9 +64,11 @@ function CustomToolCard({
             'text-[10px] font-semibold px-1.5 py-0.5 rounded-full border',
             tool.status === 'dev'
               ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
-              : 'text-violet-400 bg-violet-500/10 border-violet-500/20',
+              : tool.source === 'registry'
+                ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                : 'text-violet-400 bg-violet-500/10 border-violet-500/20',
           ].join(' ')}>
-            {tool.status === 'dev' ? 'Dev' : 'Custom'}
+            {tool.status === 'dev' ? 'Dev' : tool.source === 'registry' ? 'Official' : tool.source === 'custom' ? 'Custom' : tool.engine === 'comfyui' ? 'ComfyUI' : 'Custom'}
           </span>
         </div>
         <h3 className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors mb-1">
@@ -184,9 +179,28 @@ export default function ToolsPage() {
     },
   })
 
-  const installedIds = new Set(myTools.map((t) => t.id))
+  // Fetch official tools from the remote registry
+  const { data: registryData } = useQuery<{ registry: CatalogEntry[]; installedPluginIds: string[] }>({
+    queryKey: ['tool-plugins'],
+    queryFn: async () => {
+      const res = await fetch('/api/tool-plugins')
+      if (!res.ok) return { registry: [], installedPluginIds: [] }
+      const data = await res.json() as { registry: Array<{ id: string; name: string; description: string; badge: string }>; installedPluginIds: string[] }
+      return {
+        registry: data.registry.map((r) => ({
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          badge: r.badge ?? 'Local AI',
+        })),
+        installedPluginIds: data.installedPluginIds,
+      }
+    },
+  })
 
-  const catalogEntries = BUILTIN_CATALOG
+  const catalogEntries = registryData?.registry ?? []
+  const installedPluginIds = new Set(registryData?.installedPluginIds ?? [])
+  const installedToolIds = new Set(myTools.map((t) => t.id))
 
   const filteredMyTools = myTools.filter(
     (t) =>
@@ -223,15 +237,18 @@ export default function ToolsPage() {
     refetchMyTools()
   }
 
+  const [refreshing, setRefreshing] = useState(false)
+
   async function handleInstall(id: string) {
     setInstalling((prev) => new Set(prev).add(id))
     try {
-      await fetch('/api/tools/install-builtin', {
+      await fetch('/api/tool-plugins/install', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       })
       queryClient.invalidateQueries({ queryKey: ['custom-tools'] })
+      queryClient.invalidateQueries({ queryKey: ['tool-plugins'] })
       setTab('my-tools')
     } finally {
       setInstalling((prev) => {
@@ -239,6 +256,17 @@ export default function ToolsPage() {
         next.delete(id)
         return next
       })
+    }
+  }
+
+  async function handleRefresh() {
+    setRefreshing(true)
+    try {
+      await fetch('/api/tool-plugins/refresh', { method: 'POST' })
+      queryClient.invalidateQueries({ queryKey: ['custom-tools'] })
+      queryClient.invalidateQueries({ queryKey: ['tool-plugins'] })
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -252,13 +280,24 @@ export default function ToolsPage() {
             {myTools.length} {myTools.length === 1 ? 'tool' : 'tools'}
           </p>
         </div>
-        <Link
-          href="/build-tool"
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-100 bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors"
-        >
-          <Plus size={14} />
-          Build Tool
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors disabled:opacity-50"
+            title="Scan for new plugins"
+          >
+            <ArrowsClockwise size={14} className={refreshing ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+          <Link
+            href="/build-tool"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-100 bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors"
+          >
+            <Plus size={14} />
+            Build Tool
+          </Link>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -364,7 +403,7 @@ export default function ToolsPage() {
                   <CatalogCard
                     key={entry.id}
                     entry={entry}
-                    installed={installedIds.has(entry.id)}
+                    installed={installedPluginIds.has(entry.id) || installedToolIds.has(`${entry.id}-builtin`)}
                     installing={installing.has(entry.id)}
                     onInstall={() => handleInstall(entry.id)}
                   />

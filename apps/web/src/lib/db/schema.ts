@@ -11,6 +11,7 @@ export const tools = sqliteTable('tools', {
   schemaJson: text('schema_json').notNull(), // WorkflowIO[] serialized
   layout: text('layout').notNull().default('left-right'),
   status: text('status').notNull().default('dev'), // 'dev' | 'production'
+  source: text('source').notNull().default('comfyui'), // 'comfyui' | 'registry' | 'custom'
   outputDir: text('output_dir'),
   comfyPort: integer('comfy_port'), // port of detected ComfyUI chosen at deploy/test time
   modelVersion: text('model_version'),
