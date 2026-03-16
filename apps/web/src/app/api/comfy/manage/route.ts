@@ -27,8 +27,9 @@ export async function GET() {
         const httpReady = !!(await probePort(st.port))
         status = httpReady ? 'running' : 'starting'
       } else {
-        // No tracked PID — but something might be listening on this port
-        // (externally started, or started before multi-instance migration)
+        // No tracked PID — probe the AIOS-configured port to recover from
+        // PID file loss (e.g. hot-reload). If something responds on our port,
+        // it's an AIOS-spawned instance whose PID file was cleaned up.
         const httpReady = !!(await probePort(st.port))
         status = httpReady ? 'running' : 'stopped'
       }

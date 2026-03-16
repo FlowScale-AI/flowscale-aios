@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Eye,
@@ -19,6 +19,8 @@ import {
   Cpu,
   Lightning,
   MagnifyingGlass,
+  Warning,
+  X,
 } from "phosphor-react";
 import { PageTransition } from "@/components/ui";
 
@@ -279,6 +281,17 @@ export default function ProvidersPage() {
   const [pathInput, setPathInput] = useState("");
   const [pathSaved, setPathSaved] = useState(false);
 
+  // ── Error toast ──────────────────────────────────────────────────────────────
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+  const showError = useCallback((msg: string) => {
+    setErrorToast(msg);
+  }, []);
+  useEffect(() => {
+    if (!errorToast) return;
+    const t = setTimeout(() => setErrorToast(null), 8000);
+    return () => clearTimeout(t);
+  }, [errorToast]);
+
   const { data: providers = [], isLoading } = useQuery<ProviderStatus[]>({
     queryKey: ["providers"],
     queryFn: async () => {
@@ -326,12 +339,18 @@ export default function ProvidersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, instanceId }),
       });
-      if (!res.ok) throw new Error("Action failed");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || "Action failed")
+      }
       return res.json();
     },
     onSuccess: () => {
       refetchManage();
       queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
+    },
+    onError: (err: Error) => {
+      showError(err.message)
     },
   });
 
@@ -395,6 +414,7 @@ export default function ProvidersPage() {
   const savedPath = comfyPathData?.comfyuiPath;
 
   return (
+    <>
     <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
       {/* Header */}
       <div className="px-8 py-6 border-b border-white/5 shrink-0">
@@ -726,5 +746,22 @@ export default function ProvidersPage() {
         </div>
       </div>
     </PageTransition>
+
+      {/* Error toast */}
+      {errorToast && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-md animate-in slide-in-from-bottom-2 duration-200">
+          <div className="bg-red-950/90 border border-red-500/30 rounded-xl px-4 py-3 shadow-2xl backdrop-blur-sm flex items-start gap-3">
+            <Warning size={18} weight="fill" className="text-red-400 shrink-0 mt-0.5" />
+            <div className="flex-1 text-sm text-red-200">{errorToast}</div>
+            <button
+              onClick={() => setErrorToast(null)}
+              className="text-red-400 hover:text-red-200 shrink-0 transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

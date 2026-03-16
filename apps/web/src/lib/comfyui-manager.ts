@@ -6,7 +6,7 @@
  * State is persisted to per-instance PID files so it survives Next.js hot-reloads.
  */
 
-import { spawn, type ChildProcess } from 'child_process'
+import { spawn, execSync, type ChildProcess } from 'child_process'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, readdirSync } from 'fs'
 import { createConnection } from 'net'
 import path from 'path'
@@ -148,12 +148,87 @@ export function getAllInstanceStatuses(): InstanceStatusResult[] {
 }
 
 /**
+ * Detect external (non-AIOS) ComfyUI processes running on a given device.
+ * Looks for `python.*main.py --port` processes (ComfyUI's signature) and checks
+ * their CUDA_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES env vars.
+ * Returns the PID if found, null otherwise.
+ */
+function findExternalComfyOnDevice(device: string): number | null {
+  if (process.platform !== 'linux') return null // /proc required
+
+  // Collect PIDs and ports managed by AIOS so we can exclude them.
+  // Check PID files, in-memory process map, and configured ports.
+  const aiosPids = new Set<number>()
+  const aiosPorts = new Set<string>()
+  for (const cfg of getComfyInstances()) {
+    aiosPorts.add(String(cfg.port))
+    const pid = readPid(cfg.id)
+    if (pid && isProcessAlive(pid)) aiosPids.add(pid)
+    // Also check in-memory references (survives hot-reload gaps where PID file is lost)
+    const proc = comfyProcesses.get(cfg.id)
+    if (proc?.pid && !proc.killed) aiosPids.add(proc.pid)
+  }
+
+  try {
+    // Match python processes running main.py with --port (ComfyUI's launch signature)
+    const raw = execSync(
+      "ps -eo pid,args --no-headers | grep '[p]ython.*main\\.py.*--port'",
+      { encoding: 'utf-8', timeout: 3000 },
+    )
+    for (const line of raw.trim().split('\n')) {
+      if (!line.trim()) continue
+      const match = line.trim().match(/^(\d+)\s+/)
+      if (!match) continue
+      const pid = parseInt(match[1], 10)
+      if (aiosPids.has(pid)) continue // skip AIOS-managed (by PID)
+
+      // Also skip if running on an AIOS-configured port
+      const portMatch = line.match(/--port\s+(\d+)/)
+      if (portMatch && aiosPorts.has(portMatch[1])) continue
+
+      // Read the process's env to check device assignment
+      try {
+        const envRaw = readFileSync(`/proc/${pid}/environ`, 'utf-8')
+        const envVars = envRaw.split('\0')
+
+        if (device === 'cpu') {
+          // CPU instance: external ComfyUI with --cpu flag
+          if (line.includes('--cpu')) return pid
+        } else {
+          const gpuIndex = device.split(':')[1]
+          const envKey = device.startsWith('rocm:') ? 'HIP_VISIBLE_DEVICES' : 'CUDA_VISIBLE_DEVICES'
+          const entry = envVars.find((e) => e.startsWith(`${envKey}=`))
+          const value = entry?.split('=')[1] ?? ''
+          // Match if env var targets the same GPU index, or if it's unset
+          // (unset means all GPUs visible — conflict on any device)
+          if (value === gpuIndex || (!entry && device !== 'cpu')) return pid
+        }
+      } catch {
+        // Can't read /proc/PID/environ — permission denied, skip
+      }
+    }
+  } catch {
+    // grep found nothing or ps failed — no external instances
+  }
+  return null
+}
+
+/**
  * Starts a specific ComfyUI instance. Returns immediately after spawning.
  * Throws if configuration is missing, binary can't be found, or port is already in use.
  */
 export async function startInstance(instanceId: string): Promise<{ port: number; pid: number }> {
   const config = getComfyInstanceById(instanceId)
   if (!config) throw new Error(`Unknown ComfyUI instance: ${instanceId}`)
+
+  // Guard: don't start if an external ComfyUI is already using this device
+  const externalPid = findExternalComfyOnDevice(config.device)
+  if (externalPid) {
+    throw new Error(
+      `Another ComfyUI instance (PID ${externalPid}) is already running on ${config.label}. ` +
+      `Stop the external instance first, then try again.`,
+    )
+  }
 
   // Guard: don't start if something is already listening on this port
   if (await isPortInUse(config.port)) {

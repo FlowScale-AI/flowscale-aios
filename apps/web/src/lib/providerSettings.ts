@@ -49,11 +49,17 @@ export function setComfyInstallType(t: ComfyInstallType): void {
   writeSettingsFile(settings)
 }
 
+/**
+ * Base port for AIOS-managed ComfyUI instances.
+ * Uses 41188+ to avoid collisions with externally launched ComfyUI (default 8188).
+ */
+const AIOS_COMFY_BASE_PORT = 41188
+
 /** The port AIOS will use to start/connect its managed ComfyUI instance. */
 export function getComfyManagedPort(): number {
   const raw = readSettingsFile()['comfyManagedPort']
   const parsed = raw ? parseInt(raw, 10) : NaN
-  return isNaN(parsed) ? 8188 : parsed
+  return isNaN(parsed) ? AIOS_COMFY_BASE_PORT : parsed
 }
 
 export function setComfyManagedPort(port: number): void {
