@@ -170,7 +170,7 @@ export default function ToolsPage() {
   const [pendingDelete, setPendingDelete] = useState<CustomTool | null>(null)
   const queryClient = useQueryClient()
 
-  const { data: myTools = [], refetch: refetchMyTools } = useQuery<CustomTool[]>({
+  const { data: myTools = [], refetch: refetchMyTools, isLoading: myToolsLoading } = useQuery<CustomTool[]>({
     queryKey: ['custom-tools'],
     queryFn: async () => {
       const res = await fetch('/api/tools')
@@ -180,7 +180,7 @@ export default function ToolsPage() {
   })
 
   // Fetch official tools from the remote registry
-  const { data: registryData } = useQuery<{ registry: CatalogEntry[]; installedPluginIds: string[] }>({
+  const { data: registryData, isLoading: registryLoading } = useQuery<{ registry: CatalogEntry[]; installedPluginIds: string[] }>({
     queryKey: ['tool-plugins'],
     queryFn: async () => {
       const res = await fetch('/api/tool-plugins')
@@ -342,7 +342,12 @@ export default function ToolsPage() {
         {/* My Tools tab */}
         {tab === 'my-tools' && (
           <>
-            {myTools.length === 0 ? (
+            {myToolsLoading ? (
+              <div className="flex items-center justify-center gap-2 py-16 text-zinc-500">
+                <SpinnerGap size={18} className="animate-spin" />
+                <span className="text-sm">Loading tools…</span>
+              </div>
+            ) : myTools.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 text-center">
                 <div className="size-14 rounded-2xl bg-zinc-900 border border-white/5 flex items-center justify-center mb-4">
                   <Wrench size={24} weight="duotone" className="text-zinc-600" />
@@ -392,7 +397,12 @@ export default function ToolsPage() {
         {/* Available Tools tab */}
         {tab === 'available-tools' && (
           <>
-            {filteredCatalog.length === 0 ? (
+            {registryLoading ? (
+              <div className="flex items-center justify-center gap-2 py-16 text-zinc-500">
+                <SpinnerGap size={18} className="animate-spin" />
+                <span className="text-sm">Loading available tools…</span>
+              </div>
+            ) : filteredCatalog.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-zinc-600">
                 <Compass size={32} className="mb-3 opacity-30" />
                 <p className="text-sm">No tools found</p>

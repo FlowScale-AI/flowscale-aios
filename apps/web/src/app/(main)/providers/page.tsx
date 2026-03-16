@@ -30,12 +30,18 @@ interface ProviderStatus {
   docsUrl: string;
 }
 
-interface ComfyInstance {
-  port: number;
-  systemStats: Record<string, unknown> | null;
-  instanceId?: string;
-  device?: string;
-  label?: string;
+interface GpuInfo {
+  index: number;
+  name: string;
+  vramMB: number;
+  backend: "cuda" | "rocm";
+}
+
+interface CpuInfo {
+  model: string;
+  cores: number;
+  threads: number;
+  ramGB: number;
 }
 
 interface ComfyManagedInstance {
@@ -329,13 +335,32 @@ export default function ProvidersPage() {
     },
   });
 
-  const detectGpusMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch("/api/comfy/instances/detect", { method: "POST" });
-      if (!res.ok) throw new Error("Detection failed");
+  const { data: gpuData, refetch: refetchGpus } = useQuery<{ gpus: GpuInfo[]; cpu: CpuInfo }>({
+    queryKey: ["gpu-detect"],
+    queryFn: async () => {
+      const res = await fetch("/api/gpu");
+      if (!res.ok) return { gpus: [] };
       return res.json();
     },
+  });
+
+  const detectedGpus = gpuData?.gpus ?? [];
+  const cpuInfo = gpuData?.cpu;
+
+  const detectGpusMutation = useMutation({
+    mutationFn: async () => {
+      // Re-detect GPUs
+      const res = await fetch("/api/gpu", { method: "POST" });
+      if (!res.ok) throw new Error("Detection failed");
+      const data = await res.json();
+      // Also sync ComfyUI instances if ComfyUI is set up
+      if (comfyManage?.isSetup) {
+        await fetch("/api/comfy/instances/detect", { method: "POST" });
+      }
+      return data;
+    },
     onSuccess: () => {
+      refetchGpus();
       refetchManage();
       queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
     },
@@ -388,6 +413,88 @@ export default function ProvidersPage() {
             <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">
               Local Inference
             </h2>
+
+            {/* GPU Detection — shared across all local tools */}
+            <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)] mb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="size-9 rounded-lg border border-white/10 bg-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+                    <Lightning size={18} className="text-zinc-400" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        Devices
+                      </span>
+                      {(detectedGpus.length > 0 || cpuInfo) && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
+                          {detectedGpus.length + (cpuInfo ? 1 : 0)} devices
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-zinc-600 mt-0.5">
+                      Available hardware for local inference tools
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => detectGpusMutation.mutate()}
+                  disabled={detectGpusMutation.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-[11px] font-medium rounded-lg transition-colors"
+                  title="Detect available GPUs"
+                >
+                  {detectGpusMutation.isPending ? (
+                    <CircleNotch size={11} className="animate-spin" />
+                  ) : (
+                    <MagnifyingGlass size={11} />
+                  )}
+                  Detect GPUs
+                </button>
+              </div>
+              {(detectedGpus.length > 0 || cpuInfo) && (
+                <div className="mt-3 space-y-1.5">
+                  {detectedGpus.map((gpu) => (
+                    <div
+                      key={gpu.index}
+                      className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Lightning size={13} className="text-emerald-400/70" />
+                        <span className="text-xs font-medium text-zinc-300">
+                          {gpu.name}
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-600">
+                          {gpu.backend}:{gpu.index}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-zinc-500">
+                        {gpu.vramMB >= 1024
+                          ? `${(gpu.vramMB / 1024).toFixed(1)} GB`
+                          : `${gpu.vramMB} MB`}
+                      </span>
+                    </div>
+                  ))}
+                  {cpuInfo && (
+                    <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5">
+                      <div className="flex items-center gap-2.5">
+                        <Cpu size={13} className="text-zinc-500" />
+                        <span className="text-xs font-medium text-zinc-300">
+                          {cpuInfo.model}
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-600">
+                          {cpuInfo.cores}C/{cpuInfo.threads}T
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-zinc-500">
+                        {cpuInfo.ramGB} GB RAM
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ComfyUI */}
             <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
               {/* Header row */}
               <div className="flex items-center justify-between mb-4">
@@ -419,22 +526,6 @@ export default function ProvidersPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {/* Detect GPUs */}
-                  {comfyManage?.isSetup && (
-                    <button
-                      onClick={() => detectGpusMutation.mutate()}
-                      disabled={detectGpusMutation.isPending}
-                      className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-[11px] font-medium rounded-lg transition-colors"
-                      title="Detect available GPUs and create instances"
-                    >
-                      {detectGpusMutation.isPending ? (
-                        <CircleNotch size={10} className="animate-spin" />
-                      ) : (
-                        <MagnifyingGlass size={10} />
-                      )}
-                      Detect GPUs
-                    </button>
-                  )}
                   {/* Bulk controls */}
                   {comfyManage?.isSetup && managedInstances.length > 0 && (
                     <>
