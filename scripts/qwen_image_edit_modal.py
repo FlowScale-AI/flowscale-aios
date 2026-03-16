@@ -99,6 +99,7 @@ class QwenImageEdit:
             transformer=self.pipe.transformer,
             vae=self.pipe.vae,
             text_encoder=self.pipe.text_encoder,
+            tokenizer=self.pipe.tokenizer,
             processor=self.pipe.processor,
             scheduler=self.pipe.scheduler,
         ).to("cuda")
