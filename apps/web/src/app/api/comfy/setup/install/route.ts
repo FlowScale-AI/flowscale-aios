@@ -19,7 +19,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { setComfyManagedPath, setComfyInstallType } from '@/lib/providerSettings'
-import { isValidComfyInstall } from '../validate-path/route'
+import { isValidComfyInstall } from '../utils'
 
 const FLOWSCALE_COMFY_PATH = path.join(os.homedir(), '.flowscale', 'comfyui')
 const COMFYUI_REPO = 'https://github.com/comfyanonymous/ComfyUI.git'
