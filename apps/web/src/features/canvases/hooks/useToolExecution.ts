@@ -33,6 +33,10 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
       clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
   };
 
   const executeWorkflow = useCallback(

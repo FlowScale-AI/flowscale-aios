@@ -132,10 +132,10 @@ async function runLocalInference(
   signal: AbortSignal,
   device?: string,
 ) {
-  const db = getDb()
   const server = plugin.server as { port: number; generateEndpoint: string }
 
   try {
+    const db = getDb()
     const body: Record<string, unknown> = { seed, ...(device ? { device } : {}) }
     for (const input of plugin.schema.inputs) {
       const value = inputs?.[`api__${input.paramName}`]
@@ -165,11 +165,15 @@ async function runLocalInference(
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error'
     const isCancel = msg === 'AbortError' || (err instanceof Error && err.name === 'AbortError')
-    await db.update(executions).set({
-      status: 'error',
-      errorMessage: isCancel ? 'Cancelled' : msg,
-      completedAt: Date.now(),
-    }).where(eq(executions.id, executionId))
+    try {
+      await getDb().update(executions).set({
+        status: 'error',
+        errorMessage: isCancel ? 'Cancelled' : msg,
+        completedAt: Date.now(),
+      }).where(eq(executions.id, executionId))
+    } catch (dbErr) {
+      console.error(`Failed to mark execution ${executionId} as error:`, dbErr)
+    }
   } finally {
     inFlightControllers.delete(executionId)
   }
@@ -242,6 +246,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: msg }, { status: 503 })
     }
     runLocalInference(executionId, plugin, inputs, seed, controller.signal, deviceOverride)
+      .catch((err) => console.error(`Unhandled error in runLocalInference for ${executionId}:`, err))
 
     return NextResponse.json({ executionId, type: 'api', status: 'running', seed }, { status: 202 })
   }

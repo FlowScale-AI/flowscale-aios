@@ -19,26 +19,31 @@ export async function POST(req: NextRequest) {
 
   const db = getDb()
 
-  // Remove stale entries for this port then insert fresh
-  await db.delete(models).where(eq(models.comfyPort, comfyPort))
+  // Remove stale entries for this port then insert fresh — wrap in a
+  // transaction so a failure mid-insert doesn't leave the table half-empty.
+  // Note: better-sqlite3 transactions are synchronous, so no async/await inside.
+  db.transaction((tx) => {
+    tx.delete(models).where(eq(models.comfyPort, comfyPort)).run()
 
-  for (const m of scanned) {
-    await db
-      .insert(models)
-      .values({
-        id: m.id,
-        filename: m.filename,
-        path: m.path,
-        type: m.type,
-        sizeBytes: m.sizeBytes,
-        comfyPort: m.comfyPort,
-        scannedAt: m.scannedAt,
-      })
-      .onConflictDoUpdate({
-        target: models.id,
-        set: { filename: m.filename, scannedAt: m.scannedAt },
-      })
-  }
+    for (const m of scanned) {
+      tx
+        .insert(models)
+        .values({
+          id: m.id,
+          filename: m.filename,
+          path: m.path,
+          type: m.type,
+          sizeBytes: m.sizeBytes,
+          comfyPort: m.comfyPort,
+          scannedAt: m.scannedAt,
+        })
+        .onConflictDoUpdate({
+          target: models.id,
+          set: { filename: m.filename, scannedAt: m.scannedAt },
+        })
+        .run()
+    }
+  })
 
   return NextResponse.json({ count: scanned.length })
 }

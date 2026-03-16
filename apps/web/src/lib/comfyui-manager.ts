@@ -267,6 +267,12 @@ export async function startInstance(instanceId: string): Promise<{ port: number;
   child.stdout?.on('data', () => { /* consumed to avoid back-pressure */ })
   child.stderr?.on('data', () => { /* consumed to avoid back-pressure */ })
 
+  child.on('error', (err) => {
+    console.error(`ComfyUI instance ${instanceId} spawn error:`, err)
+    comfyProcesses.delete(instanceId)
+    removePid(instanceId)
+  })
+
   child.on('exit', () => {
     comfyProcesses.delete(instanceId)
     removePid(instanceId)

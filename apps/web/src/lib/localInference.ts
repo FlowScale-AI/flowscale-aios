@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn, execSync } from 'child_process'
 import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync, openSync, closeSync } from 'fs'
-import { join } from 'path'
+import { join, resolve, normalize } from 'path'
 import { homedir } from 'os'
 import { getPlugin, getPluginDir } from './toolPlugins'
 
@@ -15,7 +15,11 @@ function getLocalPlugin(pluginId: string) {
 function resolvePluginScriptPath(pluginId: string): string {
   const plugin = getLocalPlugin(pluginId)
   const dir = getPluginDir(pluginId)
-  const scriptPath = join(dir, plugin.server.script)
+  const scriptPath = resolve(dir, normalize(plugin.server.script))
+  // Ensure the resolved path stays within the plugin directory
+  if (!scriptPath.startsWith(dir + '/') && scriptPath !== dir) {
+    throw new Error(`Plugin "${pluginId}" script path escapes plugin directory`)
+  }
   if (!existsSync(scriptPath)) {
     throw new Error(`Plugin "${pluginId}" server script not found at ${scriptPath}`)
   }

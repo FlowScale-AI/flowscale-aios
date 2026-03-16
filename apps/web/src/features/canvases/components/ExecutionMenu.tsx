@@ -87,6 +87,15 @@ export default function ExecutionMenu({
     Record<string, ResultItem>
   >({});
 
+  // Reset accumulated results when the active tool changes
+  const prevToolIdRef = useRef(activeToolId);
+  useEffect(() => {
+    if (activeToolId !== prevToolIdRef.current) {
+      setAccumulatedResults({});
+      prevToolIdRef.current = activeToolId;
+    }
+  }, [activeToolId]);
+
   // Merge new results when execution completes
   useEffect(() => {
     if (

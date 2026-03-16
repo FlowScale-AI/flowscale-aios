@@ -118,7 +118,7 @@ function SetupWizard({ onComplete }: { onComplete: () => void }) {
     if (step === 'configure' && installType === 'desktop-app') {
       validateDesktopPath(desktopComfyPath)
     }
-  }, [step, installType]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step, installType, desktopComfyPath]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const validateDesktopPath = async (p: string) => {
     if (!p.trim()) { setDesktopPathValid(false); return }

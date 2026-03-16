@@ -69,24 +69,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   await db.update(executions).set(updates).where(eq(executions.id, id))
-  const [row] = await db.select().from(executions).where(eq(executions.id, id))
-  if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   // Save outputs to disk when execution completes, then update outputsJson with local paths
   if (body.status === 'completed' && body.outputsJson) {
-    const [tool] = await db.select().from(tools).where(eq(tools.id, row.toolId))
-    if (tool?.comfyPort) {
-      try {
-        const saved = await saveOutputsToDisk(body.outputsJson, tool.comfyPort, tool.id, id)
-        const updatedJson = JSON.stringify(saved)
-        await db.update(executions).set({ outputsJson: updatedJson }).where(eq(executions.id, id))
-        const [updated] = await db.select().from(executions).where(eq(executions.id, id))
-        return NextResponse.json(updated)
-      } catch (err) {
-        console.error('saveOutputsToDisk failed', err)
+    const [exec] = await db.select().from(executions).where(eq(executions.id, id))
+    if (exec) {
+      const [tool] = await db.select().from(tools).where(eq(tools.id, exec.toolId))
+      if (tool?.comfyPort) {
+        try {
+          const saved = await saveOutputsToDisk(body.outputsJson, tool.comfyPort, tool.id, id)
+          await db.update(executions).set({ outputsJson: JSON.stringify(saved) }).where(eq(executions.id, id))
+        } catch (err) {
+          console.error('saveOutputsToDisk failed', err)
+        }
       }
     }
   }
 
+  // Always re-read after all updates are done so the response reflects final state
+  const [row] = await db.select().from(executions).where(eq(executions.id, id))
+  if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   return NextResponse.json(row)
 }
