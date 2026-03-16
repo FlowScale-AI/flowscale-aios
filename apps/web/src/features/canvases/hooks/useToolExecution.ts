@@ -36,7 +36,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
   };
 
   const executeWorkflow = useCallback(
-    async (workflowId: string, inputs: Record<string, any>) => {
+    async (workflowId: string, inputs: Record<string, any>, comfyPortOverride?: number) => {
       abortRef.current = false;
       clearPoll();
 
@@ -80,7 +80,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
         const res = await fetch(`/api/tools/${toolId}/executions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inputs: apiInputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
+          body: JSON.stringify({ inputs: apiInputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, ...(comfyPortOverride ? { comfyPort: comfyPortOverride } : {}) }),
         });
 
         if (!res.ok) {

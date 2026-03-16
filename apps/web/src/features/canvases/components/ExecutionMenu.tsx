@@ -1,13 +1,15 @@
 "use client";
 import { Icon } from "@iconify/react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
 import ResultsPill from "./ResultsPill";
 import RunsHistoryPanel from "./RunsHistoryPanel";
 import { ExecutionState } from "../types";
 import { Tooltip, LottieSpinner } from "@/components/ui";
 import { ComfyLogsPanel } from "@/components/ComfyLogsPanel";
 import { X } from "phosphor-react";
+import { InstanceSelector } from "@/components/InstanceSelector";
 
 interface ResultItem {
   content_type: string;
@@ -22,7 +24,7 @@ interface ResultItem {
 interface ExecutionMenuProps {
   executionState: ExecutionState;
   activeToolId?: string;
-  onRunGeneration: () => void;
+  onRunGeneration: (comfyPort?: number) => void;
   onStopGeneration: () => void;
   onResultDragStart: (filename: string, result: any) => void;
   onReset: () => void;
@@ -40,6 +42,31 @@ export default function ExecutionMenu({
 }: ExecutionMenuProps) {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
+
+  // ── ComfyUI instance selection + auto round-robin ──────────────────────────
+  const { data: comfyManageData } = useQuery<{
+    instances: Array<{ id: string; status: string; port: number; device: string; label: string }>;
+  }>({
+    queryKey: ["comfy-manage"],
+    queryFn: async () => {
+      const res = await fetch("/api/comfy/manage");
+      if (!res.ok) return { instances: [] };
+      return res.json();
+    },
+  });
+  const comfyInstances = comfyManageData?.instances ?? [];
+  const runningInstances = comfyInstances.filter((i) => i.status === "running");
+  const [selectedComfyPort, setSelectedComfyPort] = useState<number | "auto" | null>(null);
+  const rrIndexRef = useRef(0);
+
+  /** Resolve port: round-robin when auto, pinned otherwise. */
+  const resolveComfyPort = useCallback((): number | undefined => {
+    if (selectedComfyPort !== null && selectedComfyPort !== "auto") return selectedComfyPort;
+    if (runningInstances.length <= 1) return runningInstances[0]?.port;
+    const idx = rrIndexRef.current % runningInstances.length;
+    rrIndexRef.current = idx + 1;
+    return runningInstances[idx].port;
+  }, [selectedComfyPort, runningInstances]);
 
   const comfyPort =
     typeof window !== "undefined"
@@ -196,7 +223,7 @@ export default function ExecutionMenu({
                   side="top"
                 >
                   <button
-                    onClick={onRunGeneration}
+                    onClick={() => onRunGeneration(resolveComfyPort())}
                     disabled={!activeToolId}
                     className={`rounded-full px-4 py-1.5 text-xs font-medium flex items-center gap-2 transition-colors ${
                       activeToolId
@@ -212,6 +239,19 @@ export default function ExecutionMenu({
                   </button>
                 </Tooltip>
               )}
+              {/* Instance selector */}
+              {comfyInstances.length > 0 && (
+                <>
+                  <div className="w-px h-5 bg-white/10" />
+                  <InstanceSelector
+                    instances={comfyInstances}
+                    value={selectedComfyPort}
+                    onChange={setSelectedComfyPort}
+                    compact
+                  />
+                </>
+              )}
+
               <div className="w-px h-5 bg-white/10" />
 
               {/* History Button */}

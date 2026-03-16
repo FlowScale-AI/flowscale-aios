@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Play, Warning, Monitor, ImageSquare } from 'phosphor-react'
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
@@ -8,6 +8,7 @@ import { LottieSpinner } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
 import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
+import { InstanceSelector } from '@/components/InstanceSelector'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -150,8 +151,14 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
   })
   const comfyInstances = comfyManageData?.instances ?? []
   const runningInstances = comfyInstances.filter((i) => i.status === 'running')
-  const [selectedComfyPort, setSelectedComfyPort] = useState<number | null>(null)
-  const effectiveComfyPort = selectedComfyPort ?? tool.comfyPort ?? runningInstances[0]?.port ?? null
+  // 'auto' = auto-route to least busy running instance; number = pinned; null = default
+  const [selectedComfyPort, setSelectedComfyPort] = useState<number | 'auto' | null>(null)
+  // When auto (or default), resolve at render time; actual routing for execution happens in handleRun
+  const effectiveComfyPort: number | null =
+    selectedComfyPort === 'auto' || selectedComfyPort === null
+      ? (tool.comfyPort ?? runningInstances[0]?.port ?? null)
+      : selectedComfyPort
+  const isAutoRoute = selectedComfyPort === 'auto' || (selectedComfyPort === null && runningInstances.length > 1)
 
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -163,6 +170,19 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
   const [error, setError] = useState<string[]>([])
   const [logsOpen, setLogsOpen] = useState(false)
 
+  /** Round-robin counter — persists across renders via ref, cycles through running instances. */
+  const rrIndexRef = useRef(0)
+
+  /** Resolve the port: if auto-routing, round-robin across running instances. */
+  const resolveComfyPort = useCallback((): number | null => {
+    if (selectedComfyPort !== null && selectedComfyPort !== 'auto') return selectedComfyPort
+    if (runningInstances.length <= 1) return effectiveComfyPort
+
+    const idx = rrIndexRef.current % runningInstances.length
+    rrIndexRef.current = idx + 1
+    return runningInstances[idx].port
+  }, [selectedComfyPort, runningInstances, effectiveComfyPort])
+
   const handleRun = useCallback(async () => {
     setRunning(true)
     setProgress(0)
@@ -172,10 +192,11 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
     const startTime = Date.now()
 
     try {
+      const routedPort = resolveComfyPort()
       const res = await fetch(`/api/tools/${tool.id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, comfyPort: effectiveComfyPort }),
+        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, comfyPort: routedPort }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -315,7 +336,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
       setError(['Failed to start execution'])
       setRunning(false)
     }
-  }, [inputs, tool.id, effectiveComfyPort])
+  }, [inputs, tool.id, resolveComfyPort])
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -332,17 +353,11 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
         )}
         {/* Instance selector */}
         {comfyInstances.length > 0 && (
-          <select
-            value={effectiveComfyPort ?? ''}
-            onChange={(e) => setSelectedComfyPort(Number(e.target.value))}
-            className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
-          >
-            {comfyInstances.map((inst) => (
-              <option key={inst.id} value={inst.port} disabled={inst.status !== 'running'}>
-                {inst.label} (:{inst.port}) {inst.status !== 'running' ? `— ${inst.status}` : ''}
-              </option>
-            ))}
-          </select>
+          <InstanceSelector
+            instances={comfyInstances}
+            value={selectedComfyPort}
+            onChange={setSelectedComfyPort}
+          />
         )}
         <button
           onClick={handleRun}

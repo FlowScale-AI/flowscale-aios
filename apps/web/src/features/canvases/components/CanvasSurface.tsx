@@ -984,7 +984,7 @@ export default function CanvasSurface({
   );
 
   // Tool Execution Handlers
-  const handleRunGeneration = async () => {
+  const handleRunGeneration = async (comfyPort?: number) => {
     if (!activeToolId) {
       console.warn("No tool selected");
       return;
@@ -996,7 +996,7 @@ export default function CanvasSurface({
     }
 
     try {
-      await executeWorkflow(activeToolId, toolInputs);
+      await executeWorkflow(activeToolId, toolInputs, comfyPort);
     } catch (error) {
       console.error("Execution error:", error);
     }

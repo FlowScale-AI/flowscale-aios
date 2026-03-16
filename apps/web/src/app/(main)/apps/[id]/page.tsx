@@ -23,6 +23,7 @@ import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
 import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
 import { LocalInferenceSetup, useInferenceStatus } from '@/components/LocalInferenceSetup'
+import { InstanceSelector } from '@/components/InstanceSelector'
 
 interface WorkflowIO {
   nodeId: string
@@ -776,9 +777,12 @@ export default function ToolPage() {
   })
   const comfyInstances = comfyManageData?.instances ?? []
   const runningInstances = comfyInstances.filter((i) => i.status === 'running')
-  const [selectedComfyPort, setSelectedComfyPort] = useState<number | null>(null)
+  const [selectedComfyPort, setSelectedComfyPort] = useState<number | 'auto' | null>(null)
   // Default to tool's configured port or first running instance
-  const effectiveComfyPort = selectedComfyPort ?? tool?.comfyPort ?? runningInstances[0]?.port ?? null
+  const effectiveComfyPort: number | null =
+    selectedComfyPort === 'auto' || selectedComfyPort === null
+      ? (tool?.comfyPort ?? runningInstances[0]?.port ?? null)
+      : selectedComfyPort
 
   // ── GPU/device selection for API tools ────────────────────────────────────────
   const { data: gpuData } = useQuery<{ instances: Array<{ id: string; device: string; label: string }> }>({
@@ -829,12 +833,26 @@ export default function ToolPage() {
     }
   }, [runningExecution, executions])
 
+  /** Round-robin counter for auto-routing across running instances. */
+  const rrIndexRef = useRef(0)
+
+  /** Resolve the port: if auto-routing, round-robin across running instances. */
+  const resolveComfyPort = useCallback((): number | null => {
+    if (selectedComfyPort !== null && selectedComfyPort !== 'auto') return selectedComfyPort
+    if (runningInstances.length <= 1) return effectiveComfyPort
+
+    const idx = rrIndexRef.current % runningInstances.length
+    rrIndexRef.current = idx + 1
+    return runningInstances[idx].port
+  }, [selectedComfyPort, runningInstances, effectiveComfyPort])
+
   const runMutation = useMutation<ExecResult, Error>({
     mutationFn: async () => {
+      const routedPort = resolveComfyPort()
       const res = await fetch(`/api/tools/${id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, comfyPort: effectiveComfyPort, ...(effectiveDevice ? { device: effectiveDevice } : {}) }),
+        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, comfyPort: routedPort, ...(effectiveDevice ? { device: effectiveDevice } : {}) }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -1003,17 +1021,11 @@ export default function ToolPage() {
         )}
         {/* Instance selector for ComfyUI tools */}
         {tool.engine === 'comfyui' && comfyInstances.length > 0 && (
-          <select
-            value={effectiveComfyPort ?? ''}
-            onChange={(e) => setSelectedComfyPort(Number(e.target.value))}
-            className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
-          >
-            {comfyInstances.map((inst) => (
-              <option key={inst.id} value={inst.port} disabled={inst.status !== 'running'}>
-                {inst.label} (:{inst.port}) {inst.status !== 'running' ? `— ${inst.status}` : ''}
-              </option>
-            ))}
-          </select>
+          <InstanceSelector
+            instances={comfyInstances}
+            value={selectedComfyPort}
+            onChange={setSelectedComfyPort}
+          />
         )}
         {/* Device selector for API tools */}
         {tool.engine === 'api' && gpuDevices.length > 0 && (
