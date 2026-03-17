@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import {
   getAllInstanceStatuses,
   getInstanceStatus,
@@ -10,8 +10,11 @@ import {
 } from '@/lib/comfyui-manager'
 import { getComfyManagedPath, getComfyInstallType } from '@/lib/providerSettings'
 import { probePort } from '@/lib/comfy-probe'
+import { getRequestUser } from '@/lib/auth'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const user = getRequestUser(req)
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const managedPath = getComfyManagedPath()
   const installType = getComfyInstallType()
   const statuses = getAllInstanceStatuses()
@@ -52,10 +55,19 @@ export async function GET() {
   })
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
+  const user = getRequestUser(req)
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const { action, instanceId } = (await req.json()) as {
-    action: 'start' | 'stop' | 'restart'
+    action: string
     instanceId?: string
+  }
+
+  // Validate action against allowed values
+  const validActions = new Set(['start', 'stop', 'restart'])
+  if (!validActions.has(action)) {
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
   }
 
   try {

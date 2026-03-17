@@ -170,17 +170,20 @@ function SetupWizard({ onComplete }: { onComplete: () => void }) {
     if (!desktopUserDataPath.trim()) return
     setSaving(true)
     setStep('installing')
-    setSaving(false)
 
-    if (desktopPathValid) {
-      // The Desktop App's bundled ComfyUI is valid — use it directly.
-      // Pass targetPath so the install route short-circuits without cloning.
-      await saveSettings('desktop-app', desktopComfyPath.trim(), desktopUserDataPath.trim())
-      await runInstall(desktopComfyPath.trim())
-    } else {
-      // Bundled ComfyUI not found — clone into ~/.flowscale/comfyui then copy assets.
-      await saveSettings('desktop-app', '', desktopUserDataPath.trim())
-      await runInstall()
+    try {
+      if (desktopPathValid) {
+        // The Desktop App's bundled ComfyUI is valid — use it directly.
+        // Pass targetPath so the install route short-circuits without cloning.
+        await saveSettings('desktop-app', desktopComfyPath.trim(), desktopUserDataPath.trim())
+        await runInstall(desktopComfyPath.trim())
+      } else {
+        // Bundled ComfyUI not found — clone into ~/.flowscale/comfyui then copy assets.
+        await saveSettings('desktop-app', '', desktopUserDataPath.trim())
+        await runInstall()
+      }
+    } finally {
+      setSaving(false)
     }
   }
 

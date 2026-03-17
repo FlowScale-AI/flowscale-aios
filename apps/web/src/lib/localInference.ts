@@ -233,7 +233,15 @@ export function spawnServer(python: string, pluginId: string = DEFAULT_PLUGIN_ID
   const proc = spawn(python, ['-u', scriptPath, '--port', String(port)], {
     stdio: ['ignore', logFd, logFd],
     detached: true,
-    env: { ...process.env, PYTHONUNBUFFERED: '1' },
+    // Only pass through safe env vars — avoid leaking API keys/tokens to plugin processes
+    env: (() => {
+      const safeKeys = new Set(['PATH', 'HOME', 'LANG', 'CUDA_VISIBLE_DEVICES', 'HIP_VISIBLE_DEVICES', 'NODE_ENV'])
+      const filtered: Record<string, string> = { PYTHONUNBUFFERED: '1' }
+      for (const key of safeKeys) {
+        if (process.env[key]) filtered[key] = process.env[key]!
+      }
+      return filtered
+    })() as unknown as NodeJS.ProcessEnv,
   })
 
   if (!proc.pid) {

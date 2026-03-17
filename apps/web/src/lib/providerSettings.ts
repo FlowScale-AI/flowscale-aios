@@ -58,8 +58,11 @@ const AIOS_COMFY_BASE_PORT = 41188
 /** The port AIOS will use to start/connect its managed ComfyUI instance. */
 export function getComfyManagedPort(): number {
   const raw = readSettingsFile()['comfyManagedPort']
-  const parsed = raw ? parseInt(raw, 10) : NaN
-  return isNaN(parsed) ? AIOS_COMFY_BASE_PORT : parsed
+  const parsed = raw ? Number(raw) : NaN
+  if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65535) {
+    return AIOS_COMFY_BASE_PORT
+  }
+  return parsed
 }
 
 export function setComfyManagedPort(port: number): void {
@@ -103,7 +106,17 @@ export interface ComfyInstanceConfig {
 export function getComfyInstances(): ComfyInstanceConfig[] {
   const settings = readSettingsFile()
   const arr = settings['comfyInstances']
-  if (Array.isArray(arr) && arr.length > 0) return arr as ComfyInstanceConfig[]
+  if (Array.isArray(arr) && arr.length > 0) {
+    const validated = arr.filter(
+      (i): i is ComfyInstanceConfig =>
+        typeof i === 'object' && i !== null &&
+        typeof i.id === 'string' &&
+        typeof i.port === 'number' && Number.isInteger(i.port) && i.port >= 1024 && i.port <= 65535 &&
+        typeof i.device === 'string' &&
+        typeof i.label === 'string',
+    )
+    if (validated.length > 0) return validated
+  }
 
   // Legacy fallback: synthesize a single instance from the old key
   const port = getComfyManagedPort()

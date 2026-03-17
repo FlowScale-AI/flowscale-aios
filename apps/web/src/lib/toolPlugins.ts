@@ -150,8 +150,8 @@ function readRegistryCache(): RegistryEntry[] {
 
 function writeRegistryCache(entries: RegistryEntry[]): void {
   try {
-    fs.mkdirSync(path.dirname(REGISTRY_CACHE_FILE), { recursive: true })
-    fs.writeFileSync(REGISTRY_CACHE_FILE, JSON.stringify({ tools: entries }, null, 2), 'utf-8')
+    fs.mkdirSync(path.dirname(REGISTRY_CACHE_FILE), { recursive: true, mode: 0o700 })
+    fs.writeFileSync(REGISTRY_CACHE_FILE, JSON.stringify({ tools: entries }, null, 2), { encoding: 'utf-8', mode: 0o600 })
   } catch { /* non-fatal */ }
 }
 
@@ -172,6 +172,12 @@ export async function downloadAndExtractPlugin(entry: RegistryEntry): Promise<To
   fs.mkdirSync(PLUGINS_DIR, { recursive: true })
 
   try {
+    // Validate URL protocol before downloading
+    const downloadUrl = new URL(entry.s3Url)
+    if (!['https:', 'http:'].includes(downloadUrl.protocol)) {
+      throw new Error(`Invalid plugin download URL protocol: ${downloadUrl.protocol}`)
+    }
+
     // Download zip
     const res = await fetch(entry.s3Url, { signal: AbortSignal.timeout(300_000) })
     if (!res.ok) throw new Error(`Failed to download plugin: ${res.status} ${res.statusText}`)
@@ -179,8 +185,14 @@ export async function downloadAndExtractPlugin(entry: RegistryEntry): Promise<To
     const buffer = Buffer.from(await res.arrayBuffer())
     fs.writeFileSync(tmpZip, buffer)
 
-    // Extract — overwrite existing
+    // Extract — overwrite existing (validate entries first to prevent path traversal)
     const zip = new AdmZip(tmpZip)
+    for (const entry of zip.getEntries()) {
+      const entryName = entry.entryName
+      if (entryName.includes('..') || path.isAbsolute(entryName)) {
+        throw new Error(`Unsafe zip entry detected: ${entryName}`)
+      }
+    }
     zip.extractAllTo(destDir, true)
 
     // Parse and return the manifest

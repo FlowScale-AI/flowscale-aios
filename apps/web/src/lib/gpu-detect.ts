@@ -38,11 +38,12 @@ function detectNvidiaGpus(): GpuInfo[] {
 /** Get GPU names from lspci (works when rocm-smi can't resolve names). */
 function getGpuNamesFromLspci(): string[] {
   try {
-    const raw = execSync("lspci | grep -iE 'vga|3d|display'", {
-      encoding: 'utf-8',
-      timeout: 5000,
-      shell: '/bin/sh',
-    }).trim()
+    const lspciOutput = execSync('lspci', { encoding: 'utf-8', timeout: 5000 }).trim()
+    if (!lspciOutput) return []
+    const raw = lspciOutput
+      .split('\n')
+      .filter((line) => /vga|3d|display/i.test(line))
+      .join('\n')
     if (!raw) return []
     // Extract the device description after the colon
     // e.g. "03:00.0 VGA compatible controller: AMD ... Navi 32 [Radeon RX 7700 XT / 7800 XT]"

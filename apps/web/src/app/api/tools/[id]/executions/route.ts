@@ -11,7 +11,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { inFlightControllers } from '@/lib/inferenceRegistry'
 import { getHistory } from '@/lib/comfyui-client'
-import { getComfyOrgApiKey as getComfyOrgApiKeyServer } from '@/lib/providerSettings'
+import { getComfyOrgApiKey as getComfyOrgApiKeyServer, getComfyInstances } from '@/lib/providerSettings'
 import { getPlugin, type ToolPluginManifest } from '@/lib/toolPlugins'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
@@ -246,12 +246,29 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: msg }, { status: 503 })
     }
     runLocalInference(executionId, plugin, inputs, seed, controller.signal, deviceOverride)
-      .catch((err) => console.error(`Unhandled error in runLocalInference for ${executionId}:`, err))
+      .catch(async (err) => {
+        console.error(`Unhandled error in runLocalInference for ${executionId}:`, err)
+        try {
+          await db.update(executions).set({
+            status: 'error',
+            errorMessage: err instanceof Error ? err.message : 'Unknown error',
+            completedAt: Date.now(),
+          }).where(eq(executions.id, executionId))
+        } catch { /* DB update failed — already logged above */ }
+        inFlightControllers.delete(executionId)
+      })
 
     return NextResponse.json({ executionId, type: 'api', status: 'running', seed }, { status: 202 })
   }
 
   // ── ComfyUI-engine tools ─────────────────────────────────────────────────────
+  // Validate comfyPort override against configured instances to prevent arbitrary port access
+  if (comfyPortOverride != null) {
+    const validPorts = new Set(getComfyInstances().map((i) => i.port))
+    if (!validPorts.has(comfyPortOverride)) {
+      return NextResponse.json({ error: 'Invalid ComfyUI port — not a configured instance' }, { status: 400 })
+    }
+  }
   const comfyPort = comfyPortOverride ?? tool.comfyPort
   if (!comfyPort) return NextResponse.json({ error: 'No ComfyUI port configured for this tool' }, { status: 400 })
 

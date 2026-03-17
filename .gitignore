@@ -68,3 +68,4 @@ apps/desktop/releases/
 .claude/skills/
 skills-lock.json
 .agent/skills/
+apps/web/test-results/

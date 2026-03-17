@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import os from 'os'
 import { detectGpus, clearGpuCache } from '@/lib/gpu-detect'
+import { getRequestUser } from '@/lib/auth'
 
 interface CpuInfo {
   model: string
@@ -24,7 +25,10 @@ function getCpuInfo(): CpuInfo {
  * GET /api/gpu
  * Returns cached detected GPUs + CPU info.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const user = getRequestUser(req)
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const gpus = detectGpus()
   const cpu = getCpuInfo()
   return NextResponse.json({ gpus, cpu })
@@ -34,7 +38,9 @@ export async function GET() {
  * POST /api/gpu
  * Re-detects GPUs (clears cache) and returns the result + CPU info.
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const user = getRequestUser(req)
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   clearGpuCache()
   const gpus = detectGpus()
   const cpu = getCpuInfo()
