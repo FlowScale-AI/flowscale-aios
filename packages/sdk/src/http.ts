@@ -24,7 +24,7 @@
  * ```
  */
 
-import type { ToolDefinition, ToolRunResult, ToolOutputItem } from './types';
+import type { ToolDefinition, ToolRunResult, ToolOutputItem, InstanceInfo } from './types';
 
 export interface HttpClientOptions {
   /**
@@ -87,12 +87,19 @@ export interface HttpClient {
      * For ComfyUI tools, inputs use `"${nodeId}__${paramName}"` keys.
      * For registry tools, inputs use `"${nodeId}.${paramName}"` keys.
      * Image inputs can be passed as base64 data URLs (`data:image/png;base64,...`).
+     *
+     * When `comfyPort` is omitted, the server auto-routes to the least-busy
+     * running ComfyUI instance.
      */
     run(
       id: string,
       inputs: Record<string, unknown>,
-      options?: { timeout?: number; onProgress?: (status: string) => void },
+      options?: { timeout?: number; comfyPort?: number; onProgress?: (status: string) => void },
     ): Promise<ToolRunResult>;
+  };
+  instances: {
+    /** List all configured ComfyUI instances with their current status. */
+    list(): Promise<InstanceInfo[]>;
   };
 }
 
@@ -142,15 +149,16 @@ export function createClient(options: HttpClientOptions): HttpClient {
     async run(
       id: string,
       inputs: Record<string, unknown>,
-      runOptions: { timeout?: number; onProgress?: (status: string) => void } = {},
+      runOptions: { timeout?: number; comfyPort?: number; onProgress?: (status: string) => void } = {},
     ): Promise<ToolRunResult> {
-      const { timeout = defaultTimeout, onProgress } = runOptions;
+      const { timeout = defaultTimeout, comfyPort, onProgress } = runOptions;
 
       onProgress?.('running');
 
       // ?wait=true — server polls ComfyUI internally and returns only when done.
       // For API-engine tools the server also runs to completion before responding.
       // Either way we get back a finished execution row directly.
+      // When comfyPort is omitted, the server auto-routes to the least-busy instance.
       const execution = await apiFetch<{
         id: string;
         toolId: string;
@@ -162,7 +170,7 @@ export function createClient(options: HttpClientOptions): HttpClient {
         executionId?: string;
       }>(`/api/tools/${id}/executions?wait=true`, {
         method: 'POST',
-        body: JSON.stringify({ inputs }),
+        body: JSON.stringify({ inputs, ...(comfyPort != null ? { comfyPort } : {}) }),
         signal: AbortSignal.timeout(timeout),
       });
 
@@ -207,5 +215,12 @@ export function createClient(options: HttpClientOptions): HttpClient {
     },
   };
 
-  return { resolveUrl, tools };
+  const instances = {
+    async list(): Promise<InstanceInfo[]> {
+      const data = await apiFetch<{ instances: InstanceInfo[] }>('/api/comfy/manage');
+      return data.instances;
+    },
+  };
+
+  return { resolveUrl, tools, instances };
 }

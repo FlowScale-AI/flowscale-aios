@@ -66,6 +66,11 @@ export interface ToolDefinition {
 export interface ToolRunOptions {
   timeout?: number;
   onProgress?: (progress: number, message?: string) => void;
+  /**
+   * Pin execution to a specific ComfyUI instance port.
+   * When omitted, the server auto-routes to the least-busy running instance.
+   */
+  comfyPort?: number;
 }
 
 export interface ToolOutputItem {
@@ -95,6 +100,16 @@ export interface ToolRunResult {
   toolId: string;
   status: 'completed';
   outputs: ToolOutputItem[];
+}
+
+// ─── Instance types ──────────────────────────────────────────────────────
+
+export interface InstanceInfo {
+  id: string;
+  status: 'running' | 'starting' | 'stopped';
+  port: number;
+  device: string;
+  label: string;
 }
 
 // ─── Provider types ───────────────────────────────────────────────────────────

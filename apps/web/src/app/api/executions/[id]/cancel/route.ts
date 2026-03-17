@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db'
 import { executions } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { inFlightControllers } from '@/lib/inferenceRegistry'
+import { trackExecEndById } from '@/lib/comfyAutoRoute'
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: executionId } = await params
@@ -10,6 +11,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const controller = inFlightControllers.get(executionId)
   if (controller) {
     controller.abort()
+    trackExecEndById(executionId)
     return NextResponse.json({ cancelled: true })
   }
 
@@ -17,6 +19,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const db = getDb()
   const [exec] = await db.select().from(executions).where(eq(executions.id, executionId))
   if (exec?.status === 'running') {
+    trackExecEndById(executionId)
     await db.update(executions)
       .set({ status: 'error', errorMessage: 'Cancelled', completedAt: Date.now() })
       .where(eq(executions.id, executionId))

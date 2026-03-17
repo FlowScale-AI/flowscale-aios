@@ -9,6 +9,7 @@ import { getRequestUser } from '@/lib/auth'
 import { isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@flowscale/workflow'
 import { queuePrompt, getHistory } from '@/lib/comfyui-client'
 import { v4 as uuidv4 } from 'uuid'
+import { autoRouteComfyPort, trackExecStart, trackExecEndById } from '@/lib/comfyAutoRoute'
 
 // ── Image input resolution ────────────────────────────────────────────────────
 //
@@ -107,7 +108,8 @@ export async function POST(req: NextRequest) {
   // Try registry tool first
   const registryTool = getRegistryTool(toolId)
   if (registryTool) {
-    const port = comfyPort ?? 8188
+    const port = comfyPort ?? await autoRouteComfyPort(8188)
+    if (!port) return NextResponse.json({ error: 'No running ComfyUI instance available' }, { status: 503 })
 
     await db.insert(executions).values({
       id: executionId,
@@ -118,9 +120,11 @@ export async function POST(req: NextRequest) {
       status: 'running',
       createdAt: now,
     })
+    trackExecStart(port, executionId)
 
     try {
       const result = await executeRegistryTool(registryTool, { comfyPort: port, inputs })
+      trackExecEndById(executionId)
 
       await db
         .update(executions)
@@ -134,6 +138,7 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({ executionId, toolId, status: 'completed', outputs: result.outputs })
     } catch (err) {
+      trackExecEndById(executionId)
       const msg = err instanceof Error ? err.message : String(err)
       await db
         .update(executions)
@@ -149,18 +154,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Tool not found: ${toolId}` }, { status: 404 })
   }
 
-  if (!customTool.comfyPort) {
-    return NextResponse.json({ error: 'Tool has no ComfyUI port configured' }, { status: 400 })
+  // Server-side auto-routing for custom tools too
+  const customPort = comfyPort ?? await autoRouteComfyPort(customTool.comfyPort)
+  if (!customPort) {
+    return NextResponse.json({ error: 'No running ComfyUI instance available' }, { status: 503 })
   }
 
-  const baseUrl = `http://127.0.0.1:${customTool.comfyPort}`
+  const baseUrl = `http://127.0.0.1:${customPort}`
 
   // Resolve image inputs (data URLs and output refs) server-side before workflow injection
   const resolvedInputs: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(inputs ?? {})) {
     if (isDataUrl(value) || isOutputRef(value)) {
       try {
-        resolvedInputs[key] = await resolveImageInput(value, customTool.comfyPort)
+        resolvedInputs[key] = await resolveImageInput(value, customPort)
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Image resolution failed'
         return NextResponse.json({ error: msg }, { status: 400 })
@@ -208,12 +215,14 @@ export async function POST(req: NextRequest) {
     status: 'running',
     createdAt: Date.now(),
   })
+  trackExecStart(customPort, customExecutionId)
 
   // Queue prompt
   let promptId: string
   try {
     promptId = await queuePrompt(workflow, clientId, baseUrl)
   } catch (err) {
+    trackExecEndById(customExecutionId)
     const msg = err instanceof Error ? err.message : 'Failed to queue prompt'
     await db.update(executions).set({ status: 'error', errorMessage: msg, completedAt: Date.now() })
       .where(eq(executions.id, customExecutionId))
@@ -241,10 +250,12 @@ export async function POST(req: NextRequest) {
 
     if (!entry?.status?.completed) continue
 
+    trackExecEndById(customExecutionId)
+
     const outputs: Array<{ kind: string; filename: string; subfolder: string; path: string }> = []
     for (const nodeOut of Object.values(entry.outputs ?? {})) {
       for (const img of nodeOut.images ?? []) {
-        const path = `/api/comfy/${customTool.comfyPort}/view?filename=${encodeURIComponent(img.filename)}&type=output`
+        const path = `/api/comfy/${customPort}/view?filename=${encodeURIComponent(img.filename)}&type=output`
           + (img.subfolder ? `&subfolder=${encodeURIComponent(img.subfolder)}` : '')
         outputs.push({ kind: 'image', filename: img.filename, subfolder: img.subfolder ?? '', path })
       }
@@ -259,6 +270,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ executionId: customExecutionId, toolId, status: 'completed', outputs })
   }
 
+  trackExecEndById(customExecutionId)
   await db.update(executions).set({ status: 'error', errorMessage: 'Execution timed out', completedAt: Date.now() })
     .where(eq(executions.id, customExecutionId))
   return NextResponse.json({ error: 'Execution timed out' }, { status: 504 })

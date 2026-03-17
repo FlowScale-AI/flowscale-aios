@@ -151,9 +151,9 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
   })
   const comfyInstances = comfyManageData?.instances ?? []
   const runningInstances = comfyInstances.filter((i) => i.status === 'running')
-  // 'auto' = auto-route to least busy running instance; number = pinned; null = default
+  // 'auto' = server-side least-busy routing; number = pinned; null = default (auto)
   const [selectedComfyPort, setSelectedComfyPort] = useState<number | 'auto' | null>(null)
-  // When auto (or default), resolve at render time; actual routing for execution happens in handleRun
+  // For display purposes: show the tool's configured port or first running instance
   const effectiveComfyPort: number | null =
     selectedComfyPort === 'auto' || selectedComfyPort === null
       ? (tool.comfyPort ?? runningInstances[0]?.port ?? null)
@@ -173,18 +173,12 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
   const [error, setError] = useState<string[]>([])
   const [logsOpen, setLogsOpen] = useState(false)
 
-  /** Round-robin counter — persists across renders via ref, cycles through running instances. */
-  const rrIndexRef = useRef(0)
-
-  /** Resolve the port: if auto-routing, round-robin across running instances. */
-  const resolveComfyPort = useCallback((): number | null => {
+  /** Resolve the port: pinned port if user selected one, undefined to let server auto-route. */
+  const resolveComfyPort = useCallback((): number | undefined => {
     if (selectedComfyPort !== null && selectedComfyPort !== 'auto') return selectedComfyPort
-    if (runningInstances.length <= 1) return effectiveComfyPort
-
-    const idx = rrIndexRef.current % runningInstances.length
-    rrIndexRef.current = idx + 1
-    return runningInstances[idx].port
-  }, [selectedComfyPort, runningInstances, effectiveComfyPort])
+    // Let the server handle auto-routing (least-busy across all users)
+    return undefined
+  }, [selectedComfyPort])
 
   const handleRun = useCallback(async () => {
     setRunning(true)
@@ -195,11 +189,11 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
     const startTime = Date.now()
 
     try {
-      const routedPort = resolveComfyPort()
+      const pinnedPort = resolveComfyPort()
       const res = await fetch(`/api/tools/${tool.id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, comfyPort: routedPort }),
+        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, ...(pinnedPort != null ? { comfyPort: pinnedPort } : {}) }),
       })
       if (!res.ok) {
         const err = await res.json()
