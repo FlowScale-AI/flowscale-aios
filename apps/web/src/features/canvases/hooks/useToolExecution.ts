@@ -243,7 +243,8 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
             error: isError ? "ComfyUI reported an error" : undefined,
           });
 
-          // Persist to SQLite via API
+          // Persist to SQLite via API — the PATCH triggers saveOutputsToDisk
+          // which rewrites outputsJson with persistent /api/outputs/... paths.
           fetch(`/api/executions/${executionId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -257,7 +258,26 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
               ),
               completedAt: Date.now(),
             }),
-          }).catch(console.error);
+          })
+            .then((res) => res.json())
+            .then((saved) => {
+              // Update results with persistent /api/outputs/ URLs from disk save
+              try {
+                const outputs: { filename?: string; path?: string }[] = JSON.parse(saved.outputsJson || "[]");
+                const updatedMap = { ...resultsMap };
+                for (const out of outputs) {
+                  if (out.path?.startsWith("/api/outputs/") && out.filename && updatedMap[out.filename]) {
+                    updatedMap[out.filename] = {
+                      ...updatedMap[out.filename],
+                      data: out.path,
+                      download_url: out.path,
+                    };
+                  }
+                }
+                setExecutionState((prev) => ({ ...prev, results: updatedMap }));
+              } catch {}
+            })
+            .catch(console.error);
 
         } catch {
           // Network hiccup — keep polling

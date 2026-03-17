@@ -5,7 +5,7 @@ import { Trash } from 'phosphor-react'
 
 type LogEntry = { id: number; ts: string; msg: string }
 
-export function ComfyLogsPanel({ port }: { port: number }) {
+export function ComfyLogsPanel({ port, instanceLabel }: { port: number; instanceLabel?: string }) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [connected, setConnected] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -15,6 +15,12 @@ export function ComfyLogsPanel({ port }: { port: number }) {
     const next = entries.map((e) => ({ id: counterRef.current++, ts: e.t, msg: e.m }))
     setLogs((prev) => [...prev.slice(-(2000 - next.length)), ...next])
   }
+
+  // Clear logs when switching instances
+  useEffect(() => {
+    setLogs([])
+    counterRef.current = 0
+  }, [port])
 
   useEffect(() => {
     let cancelled = false
@@ -80,6 +86,9 @@ export function ComfyLogsPanel({ port }: { port: number }) {
         <div className="flex items-center gap-2">
           <div className={`size-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
           <span className="text-xs text-zinc-500">{connected ? 'Live' : 'Historical'}</span>
+          {instanceLabel && (
+            <span className="text-xs text-zinc-600 border-l border-zinc-800 pl-2">{instanceLabel}</span>
+          )}
         </div>
         <button
           onClick={() => setLogs([])}

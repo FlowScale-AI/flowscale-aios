@@ -228,9 +228,10 @@ export default function ToolsPage() {
 
   const filteredMyTools = myTools.filter(
     (t) =>
-      !search.trim() ||
-      t.name.toLowerCase().includes(search.toLowerCase()) ||
-      (t.description ?? '').toLowerCase().includes(search.toLowerCase()),
+      t.status !== 'dev' &&
+      (!search.trim() ||
+        t.name.toLowerCase().includes(search.toLowerCase()) ||
+        (t.description ?? '').toLowerCase().includes(search.toLowerCase())),
   )
 
   const filteredCatalog = catalogEntries.filter(
@@ -358,7 +359,7 @@ export default function ToolsPage() {
         <div>
           <h1 className="font-tech text-xl font-semibold text-zinc-100">Tools</h1>
           <p className="text-sm text-zinc-500 mt-0.5">
-            {myTools.length} {myTools.length === 1 ? 'tool' : 'tools'}
+            {myTools.filter(t => t.status !== 'dev').length} {myTools.filter(t => t.status !== 'dev').length === 1 ? 'tool' : 'tools'}
           </p>
         </div>
         <div className="flex items-center gap-2">

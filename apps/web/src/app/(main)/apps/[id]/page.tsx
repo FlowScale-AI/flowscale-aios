@@ -866,12 +866,14 @@ function BottomTabs({
   execLoading,
   onRestore,
   effectiveComfyPort,
+  comfyInstanceLabel,
 }: {
   tool: Tool;
   executions: Execution[];
   execLoading: boolean;
   onRestore: (inputs: Record<string, unknown>) => void;
   effectiveComfyPort?: number | null;
+  comfyInstanceLabel?: string;
 }) {
   const inferenceStatus = useInferenceStatus();
   const availableTabs = ["logs", "history"] as const;
@@ -939,7 +941,10 @@ function BottomTabs({
         {tab === "logs" &&
           tool.engine !== "api" &&
           (effectiveComfyPort ?? tool.comfyPort) && (
-            <ComfyLogsPanel port={(effectiveComfyPort ?? tool.comfyPort)!} />
+            <ComfyLogsPanel
+              port={(effectiveComfyPort ?? tool.comfyPort)!}
+              instanceLabel={comfyInstanceLabel}
+            />
           )}
         {tab === "logs" &&
           tool.engine !== "api" &&
@@ -1036,6 +1041,10 @@ export default function ToolPage() {
     selectedComfyPort === "auto" || selectedComfyPort === null
       ? (tool?.comfyPort ?? runningInstances[0]?.port ?? null)
       : selectedComfyPort;
+  const comfyInstanceLabel = effectiveComfyPort
+    ? (comfyInstances.find((i) => i.port === effectiveComfyPort)?.label ??
+      `:${effectiveComfyPort}`)
+    : undefined;
 
   // ── GPU/device selection for API tools ────────────────────────────────────────
   const { data: gpuData } = useQuery<{
@@ -1540,6 +1549,7 @@ export default function ToolPage() {
                 execLoading={execLoading}
                 onRestore={handleRestore}
                 effectiveComfyPort={effectiveComfyPort}
+                comfyInstanceLabel={comfyInstanceLabel}
               />
             </div>
           </Panel>
