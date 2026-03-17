@@ -20,9 +20,11 @@ const DDL = `
     schema_json TEXT NOT NULL,
     layout TEXT NOT NULL DEFAULT 'left-right',
     status TEXT NOT NULL DEFAULT 'dev',
+    source TEXT NOT NULL DEFAULT 'comfyui',
     output_dir TEXT,
     comfy_port INTEGER,
     model_version TEXT,
+    source_url TEXT,
     version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
     deployed_at INTEGER

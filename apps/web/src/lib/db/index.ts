@@ -5,6 +5,7 @@ import { homedir } from 'os'
 import { mkdirSync, appendFileSync } from 'fs'
 import crypto from 'crypto'
 import * as schema from './schema'
+import { autoRegisterCustomPlugins } from '../toolPlugins'
 
 const DB_DIR = join(homedir(), '.flowscale')
 const DB_PATH = join(DB_DIR, 'aios.db')
@@ -182,6 +183,14 @@ export function getDb() {
     sqlite.exec('ALTER TABLE canvases ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0')
   }
 
+  if (!toolColumns.some((col) => col.name === 'source')) {
+    sqlite.exec("ALTER TABLE tools ADD COLUMN source TEXT NOT NULL DEFAULT 'comfyui'")
+  }
+
+  if (!toolColumns.some((col) => col.name === 'source_url')) {
+    sqlite.exec('ALTER TABLE tools ADD COLUMN source_url TEXT')
+  }
+
   const execColumns = sqlite.prepare('PRAGMA table_info(executions)').all() as { name: string }[]
   if (!execColumns.some((col) => col.name === 'user_id')) {
     sqlite.exec('ALTER TABLE executions ADD COLUMN user_id TEXT')
@@ -212,5 +221,9 @@ export function getDb() {
   }
 
   _db = drizzle(sqlite, { schema })
+
+  // Auto-register custom plugins (non-registry) found on disk
+  autoRegisterCustomPlugins(_db).catch(() => { /* non-fatal */ })
+
   return _db
 }

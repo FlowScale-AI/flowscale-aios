@@ -64,3 +64,8 @@ packages/workflow/node_modules/
 apps/desktop/release/
 TODO.md
 apps/desktop/releases/
+.agents/skills/
+.claude/skills/
+skills-lock.json
+.agent/skills/
+apps/web/test-results/

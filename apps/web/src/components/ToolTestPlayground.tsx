@@ -1,12 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Play, Warning, Monitor, ImageSquare } from 'phosphor-react'
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import { LottieSpinner } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
 import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
+import { InstanceSelector } from '@/components/InstanceSelector'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -138,6 +140,29 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
     return defaults
   })
 
+  // ── ComfyUI instance selection ──────────────────────────────────────────────
+  const { data: comfyManageData } = useQuery<{ instances: Array<{ id: string; status: string; port: number; device: string; label: string }> }>({
+    queryKey: ['comfy-manage'],
+    queryFn: async () => {
+      const res = await fetch('/api/comfy/manage')
+      if (!res.ok) return { instances: [] }
+      return res.json()
+    },
+  })
+  const comfyInstances = comfyManageData?.instances ?? []
+  const runningInstances = comfyInstances.filter((i) => i.status === 'running')
+  // 'auto' = server-side least-busy routing; number = pinned; null = default (auto)
+  const [selectedComfyPort, setSelectedComfyPort] = useState<number | 'auto' | null>(null)
+  // For display purposes: show the tool's configured port or first running instance
+  const effectiveComfyPort: number | null =
+    selectedComfyPort === 'auto' || selectedComfyPort === null
+      ? (tool.comfyPort ?? runningInstances[0]?.port ?? null)
+      : selectedComfyPort
+  const comfyInstanceLabel = effectiveComfyPort
+    ? comfyInstances.find((i) => i.port === effectiveComfyPort)?.label ?? `:${effectiveComfyPort}`
+    : undefined
+  const isAutoRoute = selectedComfyPort === 'auto' || (selectedComfyPort === null && runningInstances.length > 1)
+
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
   type OutputFile = { filename: string; subfolder?: string; kind: 'image' | 'video' | 'audio' | 'model' | 'file' }
@@ -148,6 +173,13 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
   const [error, setError] = useState<string[]>([])
   const [logsOpen, setLogsOpen] = useState(false)
 
+  /** Resolve the port: pinned port if user selected one, undefined to let server auto-route. */
+  const resolveComfyPort = useCallback((): number | undefined => {
+    if (selectedComfyPort !== null && selectedComfyPort !== 'auto') return selectedComfyPort
+    // Let the server handle auto-routing (least-busy across all users)
+    return undefined
+  }, [selectedComfyPort])
+
   const handleRun = useCallback(async () => {
     setRunning(true)
     setProgress(0)
@@ -157,10 +189,11 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
     const startTime = Date.now()
 
     try {
+      const pinnedPort = resolveComfyPort()
       const res = await fetch(`/api/tools/${tool.id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
+        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, ...(pinnedPort != null ? { comfyPort: pinnedPort } : {}) }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -300,7 +333,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
       setError(['Failed to start execution'])
       setRunning(false)
     }
-  }, [inputs, tool.id, tool.comfyPort])
+  }, [inputs, tool.id, resolveComfyPort])
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -309,15 +342,23 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
         <div className="flex-1">
           <p className="text-xs text-zinc-500">Run the tool with test inputs before deploying.</p>
         </div>
-        {!tool.comfyPort && (
+        {!effectiveComfyPort && (
           <div className="flex items-center gap-2 text-amber-400 text-xs">
             <Monitor size={13} weight="duotone" />
             No ComfyUI connected
           </div>
         )}
+        {/* Instance selector */}
+        {comfyInstances.length > 0 && (
+          <InstanceSelector
+            instances={comfyInstances}
+            value={selectedComfyPort}
+            onChange={setSelectedComfyPort}
+          />
+        )}
         <button
           onClick={handleRun}
-          disabled={running || !tool.comfyPort}
+          disabled={running || !effectiveComfyPort}
           className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
         >
           {running ? (
@@ -371,7 +412,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                               <FileUploadInput
                                 kind={uploadKind}
                                 value={String(inputs[key] ?? '')}
-                                comfyPort={tool.comfyPort}
+                                comfyPort={effectiveComfyPort}
                                 onChange={(filename) => setInputs((prev) => ({ ...prev, [key]: filename }))}
                               />
                             )
@@ -425,7 +466,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                           </div>
                         )
                       }
-                      const url = `/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}${out.subfolder ? `&subfolder=${encodeURIComponent(out.subfolder)}` : ''}&type=output`
+                      const url = `/api/comfy/${effectiveComfyPort}/view?filename=${encodeURIComponent(out.filename)}${out.subfolder ? `&subfolder=${encodeURIComponent(out.subfolder)}` : ''}&type=output`
                       if (out.kind === 'image') return (
                         <div key={i} className={cardClass}>
                           <div className="h-36 bg-zinc-950 overflow-hidden">
@@ -477,7 +518,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
               </div>
 
               {/* Logs footer */}
-              {tool.comfyPort && (
+              {effectiveComfyPort && (
                 <div className="border-t border-white/5 shrink-0">
                   <button
                     onClick={() => setLogsOpen((v) => !v)}
@@ -491,7 +532,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                   </button>
                   {logsOpen && (
                     <div className="h-40">
-                      <ComfyLogsPanel port={tool.comfyPort} />
+                      <ComfyLogsPanel port={effectiveComfyPort} instanceLabel={comfyInstanceLabel} />
                     </div>
                   )}
                 </div>
