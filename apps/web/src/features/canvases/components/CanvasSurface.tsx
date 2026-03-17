@@ -322,12 +322,50 @@ export default function CanvasSurface({
   const dragStartRef = useRef<{ x: number; y: number } | null>(null); // To track start of drawing
   const selectionBoxRef = useRef(selectionBox); // Ref for selection box
 
-  // Load canvas items from API when they're fetched
+  // Load canvas items from API when they're fetched, resolving stale ComfyUI proxy URLs
   useEffect(() => {
-    if (canvasItems) {
-      const loadedObjects = canvasItems.map(convertFromCanvasItem);
+    if (!canvasItems) return;
+    const loadedObjects = canvasItems.map(convertFromCanvasItem);
+
+    // Find items with stale /api/comfy/ URLs that need migration
+    const staleObjects = loadedObjects.filter(
+      (obj) => obj.type === "image" && obj.content?.includes("/api/comfy/")
+    );
+    if (staleObjects.length === 0) {
       setObjects(loadedObjects);
+      return;
     }
+
+    // Extract original filenames from the stale proxy URLs
+    const filenameMap = new Map<string, string[]>(); // filename → object ids
+    for (const obj of staleObjects) {
+      const urlFilename = obj.source?.output_selector?.filename
+        || new URLSearchParams(obj.content!.split("?")[1] || "").get("filename");
+      if (urlFilename) {
+        const ids = filenameMap.get(urlFilename) || [];
+        ids.push(obj.id);
+        filenameMap.set(urlFilename, ids);
+      }
+    }
+
+    // Search for persistent paths by filename
+    const filenames = [...filenameMap.keys()];
+    fetch(`/api/outputs/search?filenames=${encodeURIComponent(filenames.join(","))}`)
+      .then((r) => r.ok ? r.json() : {})
+      .then((pathMap: Record<string, string>) => {
+        const migrated = loadedObjects.map((obj) => {
+          if (!obj.content?.includes("/api/comfy/")) return obj;
+          const urlFilename = obj.source?.output_selector?.filename
+            || new URLSearchParams(obj.content.split("?")[1] || "").get("filename");
+          const persistentPath = urlFilename ? pathMap[urlFilename] : undefined;
+          if (persistentPath) {
+            return { ...obj, content: persistentPath, source: { ...obj.source, s3_key: persistentPath } } as CanvasObject;
+          }
+          return obj;
+        });
+        setObjects(migrated);
+      })
+      .catch(() => setObjects(loadedObjects));
   }, [canvasItems]);
 
   // Auto-save
