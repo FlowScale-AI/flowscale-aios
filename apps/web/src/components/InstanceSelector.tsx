@@ -57,7 +57,7 @@ export function InstanceSelector({ instances, value, onChange, compact = false }
         <CaretDown size={compact ? 10 : 12} className="shrink-0 opacity-50" />
       </button>
       {open && (
-        <div className="absolute bottom-full mb-1 left-0 min-w-[220px] bg-zinc-900 border border-white/10 rounded-lg shadow-2xl py-1 z-50">
+        <div className={`absolute right-0 min-w-[220px] bg-zinc-900 border border-white/10 rounded-lg shadow-2xl py-1 z-50 ${compact ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
           {showAuto && (
             <button
               onClick={() => { onChange("auto"); setOpen(false) }}

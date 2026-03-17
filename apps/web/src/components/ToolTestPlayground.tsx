@@ -158,6 +158,9 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
     selectedComfyPort === 'auto' || selectedComfyPort === null
       ? (tool.comfyPort ?? runningInstances[0]?.port ?? null)
       : selectedComfyPort
+  const comfyInstanceLabel = effectiveComfyPort
+    ? comfyInstances.find((i) => i.port === effectiveComfyPort)?.label ?? `:${effectiveComfyPort}`
+    : undefined
   const isAutoRoute = selectedComfyPort === 'auto' || (selectedComfyPort === null && runningInstances.length > 1)
 
   const [running, setRunning] = useState(false)
@@ -535,7 +538,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                   </button>
                   {logsOpen && (
                     <div className="h-40">
-                      <ComfyLogsPanel port={effectiveComfyPort} />
+                      <ComfyLogsPanel port={effectiveComfyPort} instanceLabel={comfyInstanceLabel} />
                     </div>
                   )}
                 </div>

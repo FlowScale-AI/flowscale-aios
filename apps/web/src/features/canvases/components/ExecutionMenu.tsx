@@ -68,7 +68,7 @@ export default function ExecutionMenu({
     return runningInstances[idx].port;
   }, [selectedComfyPort, runningInstances]);
 
-  const comfyPort =
+  const fallbackComfyPort =
     typeof window !== "undefined"
       ? (() => {
           const url =
@@ -81,6 +81,12 @@ export default function ExecutionMenu({
           }
         })()
       : 8188;
+  const comfyPort = fallbackComfyPort;
+  const effectiveComfyPort: number =
+    selectedComfyPort !== null && selectedComfyPort !== "auto"
+      ? selectedComfyPort
+      : runningInstances[0]?.port ?? fallbackComfyPort;
+  const comfyInstanceLabel = comfyInstances.find((i) => i.port === effectiveComfyPort)?.label ?? `:${effectiveComfyPort}`;
 
   // Accumulated results from all generations
   const [accumulatedResults, setAccumulatedResults] = useState<
@@ -340,7 +346,7 @@ export default function ExecutionMenu({
               </button>
             </div>
             <div className="flex-1 overflow-hidden p-3">
-              <ComfyLogsPanel port={comfyPort} />
+              <ComfyLogsPanel port={effectiveComfyPort} instanceLabel={comfyInstanceLabel} />
             </div>
           </div>
         </div>
