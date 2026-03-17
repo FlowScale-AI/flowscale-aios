@@ -9,6 +9,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import crypto from 'crypto'
+import { execSync } from 'child_process'
 import AdmZip from 'adm-zip'
 
 // ── Manifest types ───────────────────────────────────────────────────────────
@@ -219,6 +220,7 @@ export async function registerPluginInDb(
   db: DbType,
   plugin: ToolPluginManifest,
   source: 'registry' | 'custom',
+  sourceUrl?: string,
 ) {
   // Lazy import to avoid circular dependency
   const { tools } = await import('@/lib/db/schema')
@@ -243,6 +245,7 @@ export async function registerPluginInDb(
     layout: 'left-right',
     status: 'production',
     source,
+    sourceUrl: sourceUrl ?? null,
     createdAt: Date.now(),
   })
 
@@ -274,6 +277,133 @@ export async function autoRegisterCustomPlugins(db: DbType): Promise<string[]> {
   }
 
   return registered
+}
+
+// ── Import from local path or GitHub ─────────────────────────────────────────
+
+function isGithubUrl(source: string): boolean {
+  return /^https?:\/\/(www\.)?github\.com\//.test(source)
+}
+
+/** Copy a local plugin folder into ~/.flowscale/tool-plugins/{id}/ */
+function copyPluginFromPath(localPath: string): ToolPluginManifest {
+  const resolvedPath = path.resolve(localPath)
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`Path does not exist: ${resolvedPath}`)
+  }
+
+  const manifestPath = path.join(resolvedPath, 'manifest.json')
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error('No manifest.json found at the given path')
+  }
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as ToolPluginManifest
+  if (!manifest.id || !manifest.name || !manifest.engine || !manifest.server || !manifest.schema) {
+    throw new Error('Invalid manifest.json — missing required fields')
+  }
+
+  const destDir = path.join(PLUGINS_DIR, manifest.id)
+  fs.mkdirSync(PLUGINS_DIR, { recursive: true })
+
+  // Remove existing copy if present
+  if (fs.existsSync(destDir)) {
+    fs.rmSync(destDir, { recursive: true, force: true })
+  }
+
+  // Copy directory recursively
+  fs.cpSync(resolvedPath, destDir, { recursive: true })
+
+  return manifest
+}
+
+/** Clone a GitHub repo into ~/.flowscale/tool-plugins/{id}/ */
+function clonePluginFromGithub(githubUrl: string): ToolPluginManifest {
+  // Normalize URL — strip trailing .git and trailing slashes
+  let url = githubUrl.replace(/\.git\/?$/, '').replace(/\/$/, '')
+
+  const tmpDir = path.join(os.homedir(), '.flowscale', 'tmp', `gh-${Date.now()}`)
+  fs.mkdirSync(tmpDir, { recursive: true })
+
+  try {
+    execSync(`git clone --depth 1 ${JSON.stringify(url)} ${JSON.stringify(tmpDir)}`, {
+      stdio: 'pipe',
+      timeout: 120_000,
+    })
+
+    const manifestPath = path.join(tmpDir, 'manifest.json')
+    if (!fs.existsSync(manifestPath)) {
+      throw new Error('Cloned repository does not contain a manifest.json in its root')
+    }
+
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as ToolPluginManifest
+    if (!manifest.id || !manifest.name || !manifest.engine || !manifest.server || !manifest.schema) {
+      throw new Error('Invalid manifest.json — missing required fields')
+    }
+
+    const destDir = path.join(PLUGINS_DIR, manifest.id)
+    fs.mkdirSync(PLUGINS_DIR, { recursive: true })
+
+    if (fs.existsSync(destDir)) {
+      fs.rmSync(destDir, { recursive: true, force: true })
+    }
+
+    // Copy without .git directory
+    fs.cpSync(tmpDir, destDir, {
+      recursive: true,
+      filter: (src) => !src.includes(`${path.sep}.git${path.sep}`) && !src.endsWith(`${path.sep}.git`),
+    })
+
+    return manifest
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Import a tool plugin from a local path or GitHub URL.
+ * Copies into ~/.flowscale/tool-plugins/{id}/, registers in DB, and stores the source.
+ */
+export async function importPlugin(
+  source: string,
+  db: DbType,
+) {
+  const manifest = isGithubUrl(source)
+    ? clonePluginFromGithub(source)
+    : copyPluginFromPath(source)
+
+  return registerPluginInDb(db, manifest, 'custom', source)
+}
+
+/**
+ * Update an existing imported plugin by re-importing from its stored sourceUrl.
+ */
+export async function updatePluginFromSource(toolId: string, db: DbType) {
+  const { tools } = await import('@/lib/db/schema')
+  const { eq } = await import('drizzle-orm')
+
+  const [tool] = await db.select().from(tools).where(eq(tools.id, toolId))
+  if (!tool) throw new Error('Tool not found')
+  if (!tool.sourceUrl) throw new Error('Tool has no source URL to update from')
+
+  // Re-import files from source
+  const manifest = isGithubUrl(tool.sourceUrl)
+    ? clonePluginFromGithub(tool.sourceUrl)
+    : copyPluginFromPath(tool.sourceUrl)
+
+  // Update DB record with fresh manifest data
+  const workflowJson = JSON.stringify({ engine: 'api', model: manifest.model, pluginId: manifest.id })
+  const workflowHash = crypto.createHash('sha256').update(workflowJson).digest('hex')
+
+  await db.update(tools).set({
+    name: manifest.name,
+    description: manifest.description,
+    workflowJson,
+    workflowHash,
+    schemaJson: JSON.stringify(manifestToDbSchema(manifest)),
+  }).where(eq(tools.id, toolId))
+
+  const [updated] = await db.select().from(tools).where(eq(tools.id, toolId))
+  return updated
 }
 
 // ── Schema helpers ───────────────────────────────────────────────────────────

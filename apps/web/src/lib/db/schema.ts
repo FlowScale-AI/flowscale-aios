@@ -15,6 +15,7 @@ export const tools = sqliteTable('tools', {
   outputDir: text('output_dir'),
   comfyPort: integer('comfy_port'), // port of detected ComfyUI chosen at deploy/test time
   modelVersion: text('model_version'),
+  sourceUrl: text('source_url'), // original local path or GitHub URL for imported plugins
   version: integer('version').notNull().default(1),
   createdAt: integer('created_at').notNull().default(sql`(unixepoch() * 1000)`),
   deployedAt: integer('deployed_at'),

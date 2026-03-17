@@ -187,6 +187,10 @@ export function getDb() {
     sqlite.exec("ALTER TABLE tools ADD COLUMN source TEXT NOT NULL DEFAULT 'comfyui'")
   }
 
+  if (!toolColumns.some((col) => col.name === 'source_url')) {
+    sqlite.exec('ALTER TABLE tools ADD COLUMN source_url TEXT')
+  }
+
   const execColumns = sqlite.prepare('PRAGMA table_info(executions)').all() as { name: string }[]
   if (!execColumns.some((col) => col.name === 'user_id')) {
     sqlite.exec('ALTER TABLE executions ADD COLUMN user_id TEXT')
