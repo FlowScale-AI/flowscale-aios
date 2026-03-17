@@ -1,0 +1,52 @@
+{
+  "name": "@flowscale/aios-web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "next dev --port 14173 --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --port 14173",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "cy:open": "cypress open",
+    "cy:run": "cypress run"
+  },
+  "dependencies": {
+    "@flowscale/sdk": "^1.1.0",
+    "@flowscale/workflow": "workspace:*",
+    "@iconify/react": "^6.0.2",
+    "@tanstack/react-query": "^5.90.20",
+    "axios": "^1.13.6",
+    "better-sqlite3": "^12.6.2",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.44.1",
+    "framer-motion": "^12.34.5",
+    "jspdf": "^4.2.0",
+    "lottie-react": "^2.4.1",
+    "next": "15.3.1",
+    "phosphor-react": "^1.4.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-resizable-panels": "^4.5.6",
+    "tailwind-merge": "^3.5.0",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.2",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@tailwindcss/postcss": "^4.1.6",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.15.17",
+    "@types/react": "^19.1.4",
+    "@types/react-dom": "^19.1.5",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.14",
+    "cypress": "^15.11.0",
+    "drizzle-kit": "^0.31.1",
+    "tailwindcss": "^4.1.6",
+    "typescript": "^5.8.3"
+  }
+}
