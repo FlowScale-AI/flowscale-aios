@@ -27,7 +27,7 @@ export const tools = {
     inputs: Record<string, unknown>,
     options: ToolRunOptions = {},
   ): Promise<ToolRunResult> {
-    const { timeout, onProgress } = options;
+    const { timeout, onProgress, comfyPort } = options;
 
     let unsubscribe: (() => void) | undefined;
     if (onProgress) {
@@ -38,7 +38,11 @@ export const tools = {
     }
 
     try {
-      return await bridge.call<ToolRunResult>('tools.run', { id, inputs }, timeout);
+      return await bridge.call<ToolRunResult>(
+        'tools.run',
+        { id, inputs, ...(comfyPort != null ? { comfyPort } : {}) },
+        timeout,
+      );
     } finally {
       unsubscribe?.();
     }

@@ -57,16 +57,13 @@ export default function ExecutionMenu({
   const comfyInstances = comfyManageData?.instances ?? [];
   const runningInstances = comfyInstances.filter((i) => i.status === "running");
   const [selectedComfyPort, setSelectedComfyPort] = useState<number | "auto" | null>(null);
-  const rrIndexRef = useRef(0);
 
-  /** Resolve port: round-robin when auto, pinned otherwise. */
+  /** Resolve port: pinned port if user selected one, undefined to let server auto-route. */
   const resolveComfyPort = useCallback((): number | undefined => {
     if (selectedComfyPort !== null && selectedComfyPort !== "auto") return selectedComfyPort;
-    if (runningInstances.length <= 1) return runningInstances[0]?.port;
-    const idx = rrIndexRef.current % runningInstances.length;
-    rrIndexRef.current = idx + 1;
-    return runningInstances[idx].port;
-  }, [selectedComfyPort, runningInstances]);
+    // Let the server handle auto-routing (least-busy across all users)
+    return undefined;
+  }, [selectedComfyPort]);
 
   const fallbackComfyPort =
     typeof window !== "undefined"

@@ -13,6 +13,7 @@ import { inFlightControllers } from '@/lib/inferenceRegistry'
 import { getHistory } from '@/lib/comfyui-client'
 import { getComfyOrgApiKey as getComfyOrgApiKeyServer, getComfyInstances } from '@/lib/providerSettings'
 import { getPlugin, type ToolPluginManifest } from '@/lib/toolPlugins'
+import { autoRouteComfyPort, trackExecStart, trackExecEnd } from '@/lib/comfyAutoRoute'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
 
@@ -269,7 +270,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'Invalid ComfyUI port — not a configured instance' }, { status: 400 })
     }
   }
-  const comfyPort = comfyPortOverride ?? tool.comfyPort
+  // Server-side auto-routing: when no port override is provided, pick the
+  // least-busy running instance. Falls back to the tool's stored port.
+  const comfyPort = comfyPortOverride ?? await autoRouteComfyPort(tool.comfyPort)
   if (!comfyPort) return NextResponse.json({ error: 'No ComfyUI port configured for this tool' }, { status: 400 })
 
   // Generate a random seed if not provided in inputs
@@ -334,6 +337,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     status: 'running',
     createdAt: now,
   })
+  trackExecStart(comfyPort, executionId)
 
   // Queue the prompt via embedded ComfyUI proxy (non-blocking)
   const promptPayload: Record<string, unknown> = { prompt: workflow, client_id: clientId }
@@ -363,6 +367,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           .join('\n')
       : detail || 'Failed to queue prompt'
 
+    trackExecEnd(comfyPort)
     await db.update(executions).set({ status: 'error', errorMessage, completedAt: Date.now() })
       .where(eq(executions.id, executionId))
     return NextResponse.json({ error: errorMessage, nodeErrors }, { status: 502 })
@@ -402,6 +407,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
       const isError = entry.status?.status_str === 'error'
       if (isError) {
+        trackExecEnd(comfyPort)
         await db.update(executions)
           .set({ status: 'error', errorMessage: 'ComfyUI reported an error', completedAt: Date.now() })
           .where(eq(executions.id, executionId))
@@ -409,6 +415,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       }
 
       const savedOutputs = await saveComfyOutputsToDisk(rawOutputs, comfyPort, toolId, executionId)
+      trackExecEnd(comfyPort)
       await db.update(executions)
         .set({ status: 'completed', outputsJson: JSON.stringify(savedOutputs), completedAt: Date.now() })
         .where(eq(executions.id, executionId))
@@ -417,6 +424,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json(row)
     }
 
+    trackExecEnd(comfyPort)
     await db.update(executions)
       .set({ status: 'error', errorMessage: 'Execution timed out', completedAt: Date.now() })
       .where(eq(executions.id, executionId))

@@ -1078,11 +1078,15 @@ export default function ToolPage() {
     done: boolean;
     pollInterval?: ReturnType<typeof setInterval> | undefined;
   } | null>(null);
+  // Track execution IDs started by *this* session so we don't show other users' runs as ours
+  const myExecIds = useRef(new Set<string>());
 
   // ── Derive running state from actual DB data ──────────────────────────────────
-  // This is the single source of truth — survives navigation, remounts, server restarts.
+  // Only consider executions started by this session as "our" running state.
   const runningExecution =
-    executions.find((e) => e.status === "running") ?? null;
+    executions.find(
+      (e) => e.status === "running" && myExecIds.current.has(e.id),
+    ) ?? null;
   hasRunningExec.current = !!runningExecution;
 
   // When a running execution transitions to completed, surface its outputs
@@ -1106,30 +1110,24 @@ export default function ToolPage() {
     }
   }, [runningExecution, executions]);
 
-  /** Round-robin counter for auto-routing across running instances. */
-  const rrIndexRef = useRef(0);
-
-  /** Resolve the port: if auto-routing, round-robin across running instances. */
-  const resolveComfyPort = useCallback((): number | null => {
+  /** Resolve the port: pinned port if user selected one, undefined to let server auto-route. */
+  const resolveComfyPort = useCallback((): number | undefined => {
     if (selectedComfyPort !== null && selectedComfyPort !== "auto")
       return selectedComfyPort;
-    if (runningInstances.length <= 1) return effectiveComfyPort;
-
-    const idx = rrIndexRef.current % runningInstances.length;
-    rrIndexRef.current = idx + 1;
-    return runningInstances[idx].port;
-  }, [selectedComfyPort, runningInstances, effectiveComfyPort]);
+    // Let the server handle auto-routing (least-busy across all users)
+    return undefined;
+  }, [selectedComfyPort]);
 
   const runMutation = useMutation<ExecResult, Error>({
     mutationFn: async () => {
-      const routedPort = resolveComfyPort();
+      const pinnedPort = resolveComfyPort();
       const res = await fetch(`/api/tools/${id}/executions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           inputs,
           comfyOrgApiKey: getComfyOrgApiKey() || undefined,
-          comfyPort: routedPort,
+          ...(pinnedPort != null ? { comfyPort: pinnedPort } : {}),
           ...(effectiveDevice ? { device: effectiveDevice } : {}),
         }),
       });
@@ -1141,6 +1139,7 @@ export default function ToolPage() {
     },
     onSuccess: (result) => {
       setLatestOutputs([]);
+      myExecIds.current.add(result.executionId);
 
       // API tools: fire-and-forget. The executions poll (every 2s while running)
       // detects completion/error from the DB — no client-side tracking needed.
@@ -1399,7 +1398,10 @@ export default function ToolPage() {
         <button
           onClick={() => runMutation.mutate()}
           disabled={
-            isRunning || (tool.engine === "comfyui" && !effectiveComfyPort)
+            isRunning ||
+            (tool.engine === "comfyui" &&
+              runningInstances.length === 0 &&
+              !effectiveComfyPort)
           }
           className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
         >
@@ -1426,12 +1428,14 @@ export default function ToolPage() {
       )}
 
       {/* No ComfyUI warning */}
-      {tool.engine === "comfyui" && !effectiveComfyPort && (
-        <div className="px-6 py-2.5 bg-amber-950/30 border-b border-amber-900/50 text-amber-400 text-sm">
-          No running ComfyUI instance available. Start one from the Providers
-          page.
-        </div>
-      )}
+      {tool.engine === "comfyui" &&
+        runningInstances.length === 0 &&
+        !effectiveComfyPort && (
+          <div className="px-6 py-2.5 bg-amber-950/30 border-b border-amber-900/50 text-amber-400 text-sm">
+            No running ComfyUI instance available. Start one from the Providers
+            page.
+          </div>
+        )}
 
       {/* Local inference setup (API tools) */}
       {tool.engine === "api" && <LocalInferenceSetup />}
