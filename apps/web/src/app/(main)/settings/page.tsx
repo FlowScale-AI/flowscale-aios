@@ -38,6 +38,8 @@ import {
   UsersThree,
   Database,
   Plugs,
+  Monitor,
+  Cloud,
 } from "phosphor-react";
 import { PageTransition, Modal } from "@/components/ui";
 import { useUpdateStore } from "@/store/updateStore";
@@ -277,8 +279,35 @@ function SettingsPageInner() {
 
 // ─── Compute Tab ─────────────────────────────────────────────────────────────
 
+interface GpuUtilization {
+  index: number;
+  vramUsedMB: number;
+  vramTotalMB: number;
+  gpuUtil: number;
+}
+
 function ComputeTab() {
   const queryClient = useQueryClient();
+
+  // Per-GPU "Available for jobs" toggle — UI-only, stored in localStorage
+  const [gpuAvailability, setGpuAvailability] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("flowscale-gpu-availability");
+      if (stored) setGpuAvailability(JSON.parse(stored));
+    } catch { /* ignore */ }
+  }, []);
+
+  const toggleGpuAvailability = (key: string) => {
+    setGpuAvailability((prev) => {
+      const next = { ...prev, [key]: prev[key] === false ? true : false };
+      localStorage.setItem("flowscale-gpu-availability", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const isGpuAvailable = (key: string) => gpuAvailability[key] !== false; // default true
 
   const { data: gpuData } = useQuery<{ gpus: GpuInfo[]; cpu: CpuInfo }>({
     queryKey: ["gpu-detect"],
@@ -287,6 +316,16 @@ function ComputeTab() {
       if (!res.ok) return { gpus: [] };
       return res.json();
     },
+  });
+
+  const { data: gpuUtilization = [] } = useQuery<GpuUtilization[]>({
+    queryKey: ["gpu-utilization"],
+    queryFn: async () => {
+      const res = await fetch("/api/gpu/utilization");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchInterval: 5000,
   });
 
   const { data: comfyManage } = useQuery<ComfyManageResponse>({
@@ -367,29 +406,81 @@ function ComputeTab() {
             </div>
             {(detectedGpus.length > 0 || cpuInfo) && (
               <div className="mt-3 space-y-1.5">
-                {detectedGpus.map((gpu) => (
-                  <div
-                    key={gpu.index}
-                    className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Lightning size={13} className="text-emerald-400/70" />
-                      <span className="text-xs font-medium text-zinc-300">
-                        {gpu.name}
-                      </span>
-                      <span className="text-[10px] font-mono text-zinc-600">
-                        {gpu.backend}:{gpu.index}
-                      </span>
+                {detectedGpus.map((gpu) => {
+                  const key = `${gpu.backend}:${gpu.index}`;
+                  const available = isGpuAvailable(key);
+                  const util = gpuUtilization.find((u) => u.index === gpu.index);
+                  const vramPct = util && util.vramTotalMB > 0
+                    ? Math.round((util.vramUsedMB / util.vramTotalMB) * 100)
+                    : 0;
+                  return (
+                    <div
+                      key={gpu.index}
+                      className={[
+                        "py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5 transition-opacity",
+                        available ? "" : "opacity-40",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <Lightning size={13} className="text-emerald-400/70" />
+                          <span className="text-xs font-medium text-zinc-300">
+                            {gpu.name}
+                          </span>
+                          <span className="text-[10px] font-mono text-zinc-600">
+                            {key}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] font-mono text-zinc-500">
+                            {gpu.vramMB >= 1024
+                              ? `${(gpu.vramMB / 1024).toFixed(1)} GB`
+                              : `${gpu.vramMB} MB`}
+                          </span>
+                          <span className="text-[10px] text-zinc-600">{available ? "Available" : "Disabled"}</span>
+                          <button
+                            onClick={() => toggleGpuAvailability(key)}
+                            className={[
+                              "relative inline-flex h-4 w-7 items-center rounded-full transition-colors shrink-0",
+                              available ? "bg-emerald-500" : "bg-zinc-700",
+                            ].join(" ")}
+                            title={available ? "Available for jobs — click to disable" : "Disabled for jobs — click to enable"}
+                          >
+                            <span
+                              className={[
+                                "inline-block size-3 rounded-full bg-white transition-transform",
+                                available ? "translate-x-3.5" : "translate-x-0.5",
+                              ].join(" ")}
+                            />
+                          </button>
+                        </div>
+                      </div>
+                      {util && (
+                        <div className="mt-1.5 flex items-center gap-2">
+                          <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${vramPct > 90 ? "bg-red-500/70" : vramPct > 70 ? "bg-amber-500/60" : "bg-emerald-500/60"}`}
+                              style={{ width: `${vramPct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-600">
+                            {(util.vramUsedMB / 1024).toFixed(1)}/{(util.vramTotalMB / 1024).toFixed(0)} GB
+                          </span>
+                          <span className="text-[10px] font-mono text-zinc-600">
+                            GPU {util.gpuUtil}%
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    <span className="text-[10px] font-mono text-zinc-500">
-                      {gpu.vramMB >= 1024
-                        ? `${(gpu.vramMB / 1024).toFixed(1)} GB`
-                        : `${gpu.vramMB} MB`}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
                 {cpuInfo && (
-                  <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5">
+                  <div
+                    className={[
+                      "flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5 transition-opacity",
+                      isGpuAvailable("cpu") ? "" : "opacity-40",
+                    ].join(" ")}
+                  >
                     <div className="flex items-center gap-2.5">
                       <Cpu size={13} className="text-zinc-500" />
                       <span className="text-xs font-medium text-zinc-300">
@@ -399,9 +490,27 @@ function ComputeTab() {
                         {cpuInfo.cores}C/{cpuInfo.threads}T
                       </span>
                     </div>
-                    <span className="text-[10px] font-mono text-zinc-500">
-                      {cpuInfo.ramGB} GB RAM
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-mono text-zinc-500">
+                        {cpuInfo.ramGB} GB RAM
+                      </span>
+                      <span className="text-[10px] text-zinc-600">{isGpuAvailable("cpu") ? "Available" : "Disabled"}</span>
+                      <button
+                        onClick={() => toggleGpuAvailability("cpu")}
+                        className={[
+                          "relative inline-flex h-4 w-7 items-center rounded-full transition-colors shrink-0",
+                          isGpuAvailable("cpu") ? "bg-emerald-500" : "bg-zinc-700",
+                        ].join(" ")}
+                        title={isGpuAvailable("cpu") ? "Available for jobs — click to disable" : "Disabled for jobs — click to enable"}
+                      >
+                        <span
+                          className={[
+                            "inline-block size-3 rounded-full bg-white transition-transform",
+                            isGpuAvailable("cpu") ? "translate-x-3.5" : "translate-x-0.5",
+                          ].join(" ")}
+                        />
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -440,6 +549,54 @@ function ComputeTab() {
                 disabled
                 className="w-full px-3 py-2 text-xs font-mono-custom bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600"
               />
+            </div>
+          </div>
+        </section>
+
+        {/* V2 placeholder: Connect another machine */}
+        <section>
+          <div className="p-5 rounded-xl border border-dashed border-white/10 bg-[var(--color-background-panel)]/30 opacity-50">
+            <div className="flex items-center gap-3">
+              <div className="size-9 rounded-lg border border-white/10 bg-zinc-800/50 flex items-center justify-center overflow-hidden shrink-0">
+                <Monitor size={18} className="text-zinc-600" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-zinc-400">
+                    Connect another machine
+                  </span>
+                  <span className="px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500 bg-zinc-800 rounded-full border border-zinc-700">
+                    V2
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-600 mt-0.5">
+                  Add remote machines to your compute pool
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* V2 placeholder: Multi-cloud */}
+        <section>
+          <div className="p-5 rounded-xl border border-dashed border-white/10 bg-[var(--color-background-panel)]/30 opacity-50">
+            <div className="flex items-center gap-3">
+              <div className="size-9 rounded-lg border border-white/10 bg-zinc-800/50 flex items-center justify-center overflow-hidden shrink-0">
+                <Cloud size={18} className="text-zinc-600" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-zinc-400">
+                    Multi-cloud
+                  </span>
+                  <span className="px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500 bg-zinc-800 rounded-full border border-zinc-700">
+                    V2
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-600 mt-0.5">
+                  Deploy to AWS, RunPod, and more
+                </p>
+              </div>
             </div>
           </div>
         </section>
@@ -1213,6 +1370,8 @@ function UpdatesSection() {
 }
 
 function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
+  const queryClient = useQueryClient();
+
   const { data: network } = useQuery<NetworkData>({
     queryKey: ["network"],
     queryFn: async () => {
@@ -1221,6 +1380,31 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
       return res.json();
     },
   });
+
+  const { data: comfySetup } = useQuery<{ autoStartComfyUI: boolean }>({
+    queryKey: ["comfyui-setup"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings/comfyui-setup");
+      if (!res.ok) return { autoStartComfyUI: false };
+      return res.json();
+    },
+  });
+
+  const autoStartMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const res = await fetch("/api/settings/comfyui-setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoStartComfyUI: enabled }),
+      });
+      if (!res.ok) throw new Error("Failed to save setting");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["comfyui-setup"] });
+    },
+  });
+
+  const autoStartEnabled = comfySetup?.autoStartComfyUI ?? false;
 
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -1243,6 +1427,40 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
       <div className="max-w-2xl mx-auto space-y-8">
         {/* Updates */}
         {isDesktop && <UpdatesSection />}
+
+        {/* Auto-start ComfyUI */}
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <GearSix size={16} className="text-zinc-400" />
+            <h2 className="font-tech text-sm font-semibold text-zinc-200">
+              Startup
+            </h2>
+          </div>
+          <div className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg">
+            <div>
+              <div className="text-sm text-zinc-300">Auto-start ComfyUI on launch</div>
+              <p className="text-xs text-zinc-600 mt-0.5">
+                Automatically start all ComfyUI instances when the app launches
+              </p>
+            </div>
+            <button
+              onClick={() => autoStartMutation.mutate(!autoStartEnabled)}
+              disabled={autoStartMutation.isPending}
+              className={[
+                "relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 disabled:opacity-50",
+                autoStartEnabled ? "bg-emerald-500" : "bg-zinc-700",
+              ].join(" ")}
+              title={autoStartEnabled ? "Disable auto-start" : "Enable auto-start"}
+            >
+              <span
+                className={[
+                  "inline-block size-3.5 rounded-full bg-white transition-transform",
+                  autoStartEnabled ? "translate-x-[18px]" : "translate-x-1",
+                ].join(" ")}
+              />
+            </button>
+          </div>
+        </section>
 
         {/* Network Access */}
         <section>
@@ -1327,6 +1545,19 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
             Use the network URL to open FlowScale AI OS from any device on the
             same network.
           </p>
+
+          {/* App Port */}
+          <div className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg mt-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-zinc-500 mb-1">App Port</div>
+              <span className="text-sm font-mono-custom text-zinc-300">
+                {network?.port ?? 14173}
+              </span>
+            </div>
+            <span className="text-[10px] text-zinc-600 bg-zinc-800 px-2 py-1 rounded">
+              Not configurable
+            </span>
+          </div>
         </section>
 
         {/* App info */}

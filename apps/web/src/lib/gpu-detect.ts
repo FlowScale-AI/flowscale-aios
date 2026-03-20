@@ -127,3 +127,36 @@ export function detectGpus(): GpuInfo[] {
 export function clearGpuCache(): void {
   cachedGpus = null
 }
+
+export interface GpuUtilization {
+  index: number
+  vramUsedMB: number
+  vramTotalMB: number
+  gpuUtil: number
+}
+
+/**
+ * Returns real-time GPU utilization (VRAM usage + GPU %).
+ * NOT cached — intended for polling.
+ * Only supports NVIDIA GPUs (via nvidia-smi). Returns empty array for AMD/ROCm.
+ */
+export function getGpuUtilization(): GpuUtilization[] {
+  try {
+    const raw = execSync(
+      'nvidia-smi --query-gpu=index,memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits',
+      { encoding: 'utf-8', timeout: 5000 },
+    ).trim()
+    if (!raw) return []
+    return raw.split('\n').map((line) => {
+      const [idx, used, total, util] = line.split(',').map((s) => s.trim())
+      return {
+        index: parseInt(idx, 10),
+        vramUsedMB: Math.round(parseFloat(used)),
+        vramTotalMB: Math.round(parseFloat(total)),
+        gpuUtil: Math.round(parseFloat(util)),
+      }
+    })
+  } catch {
+    return []
+  }
+}

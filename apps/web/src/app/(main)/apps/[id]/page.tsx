@@ -723,6 +723,16 @@ export default function ToolPage() {
   const { id } = useParams<{ id: string }>()
   const qc = useQueryClient()
 
+  const { data: currentUser } = useQuery<{ role: string }>({
+    queryKey: ['current-user'],
+    queryFn: async () => {
+      const res = await fetch('/api/auth/me')
+      if (!res.ok) return { role: '' }
+      return res.json()
+    },
+  })
+  const isArtist = currentUser?.role === 'artist'
+
   const { data: tool, isLoading: toolLoading } = useQuery<Tool>({
     queryKey: ['tool', id],
     queryFn: async () => {
@@ -1031,7 +1041,7 @@ export default function ToolPage() {
           </button>
         )}
         {/* Instance selector for ComfyUI tools */}
-        {tool.engine === 'comfyui' && comfyInstances.length > 0 && (
+        {!isArtist && tool.engine === 'comfyui' && comfyInstances.length > 0 && (
           <ComputePicker
             instances={comfyInstances}
             gpuInfo={gpuHardwareData?.gpus}
@@ -1040,7 +1050,7 @@ export default function ToolPage() {
           />
         )}
         {/* Device selector for API tools */}
-        {tool.engine === 'api' && gpuDevices.length > 0 && (
+        {!isArtist && tool.engine === 'api' && gpuDevices.length > 0 && (
           <select
             value={selectedDevice}
             onChange={(e) => setSelectedDevice(e.target.value)}

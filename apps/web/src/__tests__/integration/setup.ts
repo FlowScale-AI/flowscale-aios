@@ -44,6 +44,7 @@ const DDL = `
     status TEXT NOT NULL DEFAULT 'running',
     error_message TEXT,
     metadata_json TEXT,
+    comfy_port INTEGER,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
     completed_at INTEGER
   );

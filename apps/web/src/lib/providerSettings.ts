@@ -148,6 +148,18 @@ export function setComfyDesktopUserDataPath(p: string): void {
   writeSettingsFile(settings)
 }
 
+// ── Auto-start ComfyUI on launch ─────────────────────────────────────────────
+
+export function getAutoStartComfyUI(): boolean {
+  return readSettingsFile()['autoStartComfyUI'] === true
+}
+
+export function setAutoStartComfyUI(enabled: boolean): void {
+  const settings = readSettingsFile()
+  settings['autoStartComfyUI'] = enabled
+  writeSettingsFile(settings)
+}
+
 export function getComfyOrgApiKey(): string | undefined {
   return readSettingsFile()['comfyOrgApiKey'] || undefined
 }

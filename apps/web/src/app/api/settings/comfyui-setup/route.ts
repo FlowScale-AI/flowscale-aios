@@ -8,6 +8,8 @@ import {
   setComfyManagedPort,
   getComfyDesktopUserDataPath,
   setComfyDesktopUserDataPath,
+  getAutoStartComfyUI,
+  setAutoStartComfyUI,
   type ComfyInstallType,
 } from '@/lib/providerSettings'
 
@@ -17,6 +19,7 @@ export async function GET() {
     managedPath: getComfyManagedPath() ?? null,
     managedPort: getComfyManagedPort(),
     desktopUserDataPath: getComfyDesktopUserDataPath() ?? null,
+    autoStartComfyUI: getAutoStartComfyUI(),
   })
 }
 
@@ -26,12 +29,14 @@ export async function POST(req: Request) {
     managedPath?: string
     managedPort?: number
     desktopUserDataPath?: string
+    autoStartComfyUI?: boolean
   }
 
   if (body.installType !== undefined) setComfyInstallType(body.installType)
   if (body.managedPath !== undefined) setComfyManagedPath(body.managedPath)
   if (body.managedPort !== undefined) setComfyManagedPort(body.managedPort)
   if (body.desktopUserDataPath !== undefined) setComfyDesktopUserDataPath(body.desktopUserDataPath)
+  if (body.autoStartComfyUI !== undefined) setAutoStartComfyUI(body.autoStartComfyUI)
 
   return NextResponse.json({ success: true })
 }

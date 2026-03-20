@@ -204,6 +204,10 @@ export function getDb() {
     sqlite.exec('ALTER TABLE executions ADD COLUMN user_id TEXT')
   }
 
+  if (!execColumns.some((col) => col.name === 'comfy_port')) {
+    try { sqlite.exec('ALTER TABLE executions ADD COLUMN comfy_port INTEGER') } catch { /* column may already exist */ }
+  }
+
   // First-run: seed admin user if no users exist.
   // Uses a transaction with INSERT OR IGNORE to be fully idempotent — safe
   // even if next build prerenders the login page across multiple workers.

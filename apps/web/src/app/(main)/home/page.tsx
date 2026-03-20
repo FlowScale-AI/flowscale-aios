@@ -63,14 +63,40 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
-function VramBar({ vramMB }: { vramMB: number }) {
-  const gb = (vramMB / 1024).toFixed(0)
+interface GpuUtilization {
+  index: number
+  vramUsedMB: number
+  vramTotalMB: number
+  gpuUtil: number
+}
+
+function VramBar({ vramMB, utilization }: { vramMB: number; utilization?: GpuUtilization }) {
+  const totalGB = (vramMB / 1024).toFixed(0)
+  if (utilization) {
+    const usedGB = (utilization.vramUsedMB / 1024).toFixed(1)
+    const totalGBLive = (utilization.vramTotalMB / 1024).toFixed(0)
+    const pct = utilization.vramTotalMB > 0 ? Math.round((utilization.vramUsedMB / utilization.vramTotalMB) * 100) : 0
+    return (
+      <div className="mt-2 space-y-1">
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${pct > 90 ? 'bg-red-500/70' : pct > 70 ? 'bg-amber-500/60' : 'bg-emerald-500/60'}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span className="text-[10px] font-mono text-zinc-500">{usedGB}/{totalGBLive} GB</span>
+        </div>
+        <span className="text-[10px] font-mono text-zinc-600">GPU {utilization.gpuUtil}%</span>
+      </div>
+    )
+  }
   return (
     <div className="flex items-center gap-2 mt-2">
       <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
         <div className="h-full bg-emerald-500/60 rounded-full" style={{ width: '0%' }} />
       </div>
-      <span className="text-[10px] font-mono text-zinc-500">{gb} GB</span>
+      <span className="text-[10px] font-mono text-zinc-500">{totalGB} GB</span>
     </div>
   )
 }
@@ -86,6 +112,16 @@ export default function HomePage() {
       return res.json()
     },
     staleTime: 60_000,
+  })
+
+  const { data: gpuUtilization = [] } = useQuery<GpuUtilization[]>({
+    queryKey: ['gpu-utilization'],
+    queryFn: async () => {
+      const res = await fetch('/api/gpu/utilization')
+      if (!res.ok) return []
+      return res.json()
+    },
+    refetchInterval: 5000,
   })
 
   const { data: comfyManage } = useQuery<{ instances: ComfyManagedInstance[] }>({
@@ -174,7 +210,7 @@ export default function HomePage() {
                     )}
                   </div>
                   <p className="text-xs text-zinc-400 mt-1 truncate">{gpu.name}</p>
-                  <VramBar vramMB={gpu.vramMB} />
+                  <VramBar vramMB={gpu.vramMB} utilization={gpuUtilization.find(u => u.index === gpu.index)} />
                 </div>
               )
             })}

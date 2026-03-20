@@ -231,6 +231,16 @@ export default function ToolsPage() {
   const [updatingTools, setUpdatingTools] = useState<Set<string>>(new Set())
   const queryClient = useQueryClient()
 
+  const { data: currentUser } = useQuery<{ role: string }>({
+    queryKey: ['current-user'],
+    queryFn: async () => {
+      const res = await fetch('/api/auth/me')
+      if (!res.ok) return { role: '' }
+      return res.json()
+    },
+  })
+  const isArtist = currentUser?.role === 'artist'
+
   const { data: myTools = [], refetch: refetchMyTools, isLoading: myToolsLoading } = useQuery<CustomTool[]>({
     queryKey: ['custom-tools'],
     queryFn: async () => {
@@ -265,7 +275,7 @@ export default function ToolsPage() {
 
   const filteredMyTools = myTools.filter(
     (t) =>
-      t.status !== 'dev' &&
+      (isArtist ? t.status === 'production' : t.status !== 'dev') &&
       (!search.trim() ||
         t.name.toLowerCase().includes(search.toLowerCase()) ||
         (t.description ?? '').toLowerCase().includes(search.toLowerCase())),
@@ -399,32 +409,34 @@ export default function ToolsPage() {
             {myTools.filter(t => t.status !== 'dev').length} {myTools.filter(t => t.status !== 'dev').length === 1 ? 'tool' : 'tools'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors disabled:opacity-50"
-            title="Scan for new plugins"
-          >
-            <ArrowsClockwise size={14} className={refreshing ? 'animate-spin' : ''} />
-            Refresh
-          </button>
-          <button
-            onClick={() => { setShowImportModal(true); setImportError(''); setImportSource('') }}
-            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
-            title="Import tool from local path or GitHub"
-          >
-            <Download size={14} />
-            Import
-          </button>
-          <Link
-            href="/build-tool"
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-100 bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors"
-          >
-            <Plus size={14} />
-            Build Tool
-          </Link>
-        </div>
+        {!isArtist && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors disabled:opacity-50"
+              title="Scan for new plugins"
+            >
+              <ArrowsClockwise size={14} className={refreshing ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+            <button
+              onClick={() => { setShowImportModal(true); setImportError(''); setImportSource('') }}
+              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+              title="Import tool from local path or GitHub"
+            >
+              <Download size={14} />
+              Import
+            </button>
+            <Link
+              href="/build-tool"
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-100 bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors"
+            >
+              <Plus size={14} />
+              Build Tool
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -440,17 +452,19 @@ export default function ToolsPage() {
         >
           My Tools
         </button>
-        <button
-          onClick={() => setTab('available-tools')}
-          className={[
-            'px-4 py-2 text-sm font-medium rounded-t-lg transition-colors -mb-px border-b-2',
-            tab === 'available-tools'
-              ? 'text-emerald-400 border-emerald-500'
-              : 'text-zinc-500 border-transparent hover:text-zinc-300',
-          ].join(' ')}
-        >
-          Available Tools
-        </button>
+        {!isArtist && (
+          <button
+            onClick={() => setTab('available-tools')}
+            className={[
+              'px-4 py-2 text-sm font-medium rounded-t-lg transition-colors -mb-px border-b-2',
+              tab === 'available-tools'
+                ? 'text-emerald-400 border-emerald-500'
+                : 'text-zinc-500 border-transparent hover:text-zinc-300',
+            ].join(' ')}
+          >
+            Available Tools
+          </button>
+        )}
       </div>
 
       <div className="flex-1 p-8 overflow-y-auto">
@@ -483,23 +497,25 @@ export default function ToolsPage() {
                 <p className="text-sm text-zinc-600 mb-6 max-w-xs">
                   Install a ready-made tool from the catalogue, or build your own from a ComfyUI workflow.
                 </p>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setTab('available-tools')}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-100 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
-                  >
-                    <Compass size={15} />
-                    Explore Tools
-                    <ArrowRight size={13} className="text-zinc-400" />
-                  </button>
-                  <Link
-                    href="/build-tool"
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-100 bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors"
-                  >
-                    <Plus size={14} />
-                    Build Tool
-                  </Link>
-                </div>
+                {!isArtist && (
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setTab('available-tools')}
+                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-100 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+                    >
+                      <Compass size={15} />
+                      Explore Tools
+                      <ArrowRight size={13} className="text-zinc-400" />
+                    </button>
+                    <Link
+                      href="/build-tool"
+                      className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-100 bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors"
+                    >
+                      <Plus size={14} />
+                      Build Tool
+                    </Link>
+                  </div>
+                )}
               </div>
             ) : filteredMyTools.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-zinc-600">
@@ -542,6 +558,8 @@ export default function ToolsPage() {
                 {[
                   { id: 'coming-flux-lora', name: 'Flux LoRA Trainer', type: 'training' as ToolType, description: 'Train Flux LoRA models on your images' },
                   { id: 'coming-sdxl-lora', name: 'SDXL LoRA Trainer', type: 'training' as ToolType, description: 'Train SDXL LoRA models with AI-Toolkit' },
+                  { id: 'coming-qwen-image', name: 'Qwen Image', type: 'image-gen' as ToolType, description: 'Generate images with Qwen Image model via cloud API' },
+                  { id: 'coming-qwen-image-edit', name: 'Qwen Image Edit', type: 'edit' as ToolType, description: 'Edit and modify images using Qwen\'s image editing model' },
                 ].filter((p) => !search.trim() || p.name.toLowerCase().includes(search.toLowerCase()) || p.description.toLowerCase().includes(search.toLowerCase()))
                 .map((placeholder) => {
                   const cfg = TOOL_TYPE_CONFIG[placeholder.type]

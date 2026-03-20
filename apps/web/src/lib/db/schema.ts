@@ -35,6 +35,7 @@ export const executions = sqliteTable('executions', {
   status: text('status').notNull().default('running'), // 'running' | 'completed' | 'error'
   errorMessage: text('error_message'),
   metadataJson: text('metadata_json'), // timing, model_version, etc.
+  comfyPort: integer('comfy_port'),
   createdAt: integer('created_at').notNull().default(sql`(unixepoch() * 1000)`),
   completedAt: integer('completed_at'),
 })

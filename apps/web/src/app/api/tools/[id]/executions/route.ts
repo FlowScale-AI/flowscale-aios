@@ -336,6 +336,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     workflowHash: tool.workflowHash,
     seed,
     status: 'running',
+    comfyPort,
     createdAt: now,
   })
   db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()

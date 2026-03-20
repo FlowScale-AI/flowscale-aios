@@ -14,6 +14,14 @@ import { PageTransition } from '@/components/ui'
 
 type Tab = 'active' | 'completed' | 'failed'
 
+interface ComfyManagedInstance {
+  id: string
+  status: string
+  port: number
+  device: string
+  label: string
+}
+
 interface ExecutionRow {
   id: string
   toolId: string
@@ -25,6 +33,7 @@ interface ExecutionRow {
   status: string
   errorMessage: string | null
   metadataJson: string | null
+  comfyPort: number | null
   createdAt: number
   completedAt: number | null
 }
@@ -101,6 +110,21 @@ export default function JobsPage() {
   const [tab, setTab] = useState<Tab>('active')
   const [search, setSearch] = useState('')
   const router = useRouter()
+
+  const { data: comfyManage } = useQuery<{ instances: ComfyManagedInstance[] }>({
+    queryKey: ['comfy-manage'],
+    queryFn: async () => {
+      const res = await fetch('/api/comfy/manage')
+      if (!res.ok) return { instances: [] }
+      return res.json()
+    },
+    staleTime: 30_000,
+  })
+
+  const instanceLabelByPort = new Map<number, string>()
+  for (const inst of comfyManage?.instances ?? []) {
+    instanceLabelByPort.set(inst.port, inst.label)
+  }
 
   const { data: allExecutions = [], isLoading } = useQuery<ExecutionRow[]>({
     queryKey: ['executions-all'],
@@ -215,10 +239,11 @@ export default function JobsPage() {
         ) : (
           <div className="border border-white/5 rounded-xl overflow-hidden">
             {/* Table header */}
-            <div className="grid grid-cols-[1fr_150px_100px_120px_100px] gap-4 px-5 py-3 bg-zinc-900/50 border-b border-white/5">
+            <div className="grid grid-cols-[1fr_150px_100px_100px_120px_100px] gap-4 px-5 py-3 bg-zinc-900/50 border-b border-white/5">
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Job</span>
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Tool</span>
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Status</span>
+              <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Compute</span>
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Started</span>
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Duration</span>
             </div>
@@ -228,7 +253,7 @@ export default function JobsPage() {
               <button
                 key={row.id}
                 onClick={() => router.push(`/jobs/${row.id}`)}
-                className="w-full grid grid-cols-[1fr_150px_100px_120px_100px] gap-4 px-5 py-3 border-b border-white/5 last:border-b-0 hover:bg-white/[0.02] transition-colors text-left"
+                className="w-full grid grid-cols-[1fr_150px_100px_100px_120px_100px] gap-4 px-5 py-3 border-b border-white/5 last:border-b-0 hover:bg-white/[0.02] transition-colors text-left"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <StatusIcon status={row.status} />
@@ -238,6 +263,11 @@ export default function JobsPage() {
                 <div>
                   <StatusBadge status={row.status} />
                 </div>
+                <span className="text-xs font-mono text-zinc-500 truncate">
+                  {row.comfyPort
+                    ? instanceLabelByPort.get(row.comfyPort) ?? `:${row.comfyPort}`
+                    : '--'}
+                </span>
                 <span className="text-sm text-zinc-500">{timeAgo(row.createdAt)}</span>
                 <span className="text-sm text-zinc-500 font-mono">
                   {formatDuration(row.createdAt, row.completedAt)}
