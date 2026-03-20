@@ -4,43 +4,55 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Palette,
-  Cube,
-  Plus,
+  Lightning,
+  Cpu,
   Clock,
   CheckCircle,
   XCircle,
   CircleNotch,
-  Lightning,
-  Storefront,
+  Wrench,
+  ArrowSquareOut,
+  CaretRight,
 } from 'phosphor-react'
 import { PageTransition } from '@/components/ui'
-import type { AppManifest } from '@/lib/appManifest'
 
-interface InstalledAppRow {
+interface GpuInfo {
+  index: number
+  name: string
+  vramMB: number
+  backend: 'cuda' | 'rocm'
+}
+
+interface CpuInfo {
+  model: string
+  cores: number
+  threads: number
+  ramGB: number
+}
+
+interface ComfyManagedInstance {
   id: string
-  displayName: string
-  source: string
-  manifest: AppManifest | null
+  status: 'running' | 'starting' | 'stopped'
+  port: number
+  device: string
+  label: string
+}
+
+interface StatsData {
+  runningJobs: number
+  completedJobs: number
+  failedJobs: number
+  toolsInstalled: number
+  modelsAvailable: number
 }
 
 interface Execution {
   id: string
   toolId: string
+  toolName?: string
   status: 'running' | 'completed' | 'error'
   createdAt: number
   completedAt: number | null
-}
-
-interface ComfyInstance {
-  port: number
-  systemStats: Record<string, unknown> | null
-}
-
-interface ProviderStatus {
-  name: string
-  label: string
-  configured: boolean
 }
 
 function timeAgo(ts: number): string {
@@ -51,121 +63,194 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
+function VramBar({ vramMB }: { vramMB: number }) {
+  const gb = (vramMB / 1024).toFixed(0)
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+        <div className="h-full bg-emerald-500/60 rounded-full" style={{ width: '0%' }} />
+      </div>
+      <span className="text-[10px] font-mono text-zinc-500">{gb} GB</span>
+    </div>
+  )
+}
+
 export default function HomePage() {
   const router = useRouter()
 
-  const { data: installedApps = [] } = useQuery<InstalledAppRow[]>({
-    queryKey: ['installed-apps'],
+  const { data: gpuData } = useQuery<{ gpus: GpuInfo[]; cpu: CpuInfo }>({
+    queryKey: ['gpu-detect'],
     queryFn: async () => {
-      const res = await fetch('/api/apps')
-      if (!res.ok) return []
-      return res.json()
-    },
-    staleTime: 30_000,
-  })
-
-  const { data: executions = [] } = useQuery<Execution[]>({
-    queryKey: ['recent-executions'],
-    queryFn: async () => {
-      const res = await fetch('/api/executions?limit=8')
-      if (!res.ok) return []
-      return res.json()
-    },
-    refetchInterval: 15_000,
-  })
-
-  const { data: comfyInstances = [] } = useQuery<ComfyInstance[]>({
-    queryKey: ['comfy-instances'],
-    queryFn: async () => {
-      const res = await fetch('/api/comfy/scan')
-      if (!res.ok) return []
+      const res = await fetch('/api/gpu')
+      if (!res.ok) return { gpus: [], cpu: null }
       return res.json()
     },
     staleTime: 60_000,
   })
 
-  const { data: providers = [] } = useQuery<ProviderStatus[]>({
-    queryKey: ['providers'],
+  const { data: comfyManage } = useQuery<{ instances: ComfyManagedInstance[] }>({
+    queryKey: ['comfy-manage'],
     queryFn: async () => {
-      const res = await fetch('/api/providers')
+      const res = await fetch('/api/comfy/manage')
+      if (!res.ok) return { instances: [] }
+      return res.json()
+    },
+    refetchInterval: 10_000,
+  })
+
+  const { data: stats } = useQuery<StatsData>({
+    queryKey: ['stats'],
+    queryFn: async () => {
+      const res = await fetch('/api/stats')
+      if (!res.ok) return { runningJobs: 0, completedJobs: 0, failedJobs: 0, toolsInstalled: 0, modelsAvailable: 0 }
+      return res.json()
+    },
+    refetchInterval: 10_000,
+  })
+
+  const { data: executions = [] } = useQuery<Execution[]>({
+    queryKey: ['recent-executions'],
+    queryFn: async () => {
+      const res = await fetch('/api/executions?limit=10')
       if (!res.ok) return []
       return res.json()
     },
-    staleTime: 30_000,
+    refetchInterval: 10_000,
   })
 
-  const mainApps = installedApps.filter(
-    (app) => app.manifest?.capabilities?.slots?.includes('main-app'),
-  )
+  const gpus = gpuData?.gpus ?? []
+  const cpuInfo = gpuData?.cpu
+  const instances = comfyManage?.instances ?? []
+  const firstRunningInstance = instances.find(i => i.status === 'running')
 
-  const configuredProviders = providers.filter((p) => p.configured)
+  // Map instance status to GPU
+  function getGpuStatus(gpuIndex: number) {
+    const inst = instances.find(i => i.device === `cuda:${gpuIndex}` || i.device === `rocm:${gpuIndex}`)
+    return inst?.status ?? 'stopped'
+  }
+
+  function getCpuStatus() {
+    const inst = instances.find(i => i.device === 'cpu')
+    return inst?.status ?? 'stopped'
+  }
 
   return (
     <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
-      <div className="flex-1 px-8 py-8 max-w-5xl w-full mx-auto">
+      <div className="flex-1 px-8 py-8 max-w-6xl w-full mx-auto">
 
         {/* Header */}
         <div className="mb-8">
           <h1 className="font-tech text-2xl font-semibold text-zinc-100">Home</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">Your workspace at a glance</p>
+          <p className="text-sm text-zinc-500 mt-0.5">System overview and recent activity</p>
         </div>
 
-        {/* Quick Access */}
-        <section className="mb-10">
-          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">Quick Access</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-
-            {/* Canvas — always first */}
-            <Link
-              href="/canvas"
-              className="group flex flex-col items-center gap-2.5 p-4 rounded-xl border border-white/5 bg-[var(--color-background-panel)] hover:border-zinc-700 hover:bg-zinc-800/50 transition-all duration-150 text-center"
-            >
-              <div className="size-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center group-hover:bg-emerald-500/15 transition-colors">
-                <Palette size={22} weight="duotone" className="text-emerald-400" />
-              </div>
-              <div>
-                <div className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors">Canvas</div>
-                <div className="text-xs text-zinc-600">Built-in</div>
-              </div>
-            </Link>
-
-            {/* Installed third-party apps */}
-            {mainApps.map((app) => (
-              <Link
-                key={app.id}
-                href={`/installed-apps/${app.id}`}
-                className="group flex flex-col items-center gap-2.5 p-4 rounded-xl border border-white/5 bg-[var(--color-background-panel)] hover:border-zinc-700 hover:bg-zinc-800/50 transition-all duration-150 text-center"
-              >
-                <div className="size-12 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center group-hover:bg-violet-500/15 transition-colors">
-                  <Cube size={22} weight="duotone" className="text-violet-400" />
+        {/* GPU Pool Cards */}
+        <section className="mb-8">
+          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">GPU Pool</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {gpus.map((gpu) => {
+              const status = getGpuStatus(gpu.index)
+              return (
+                <div key={gpu.index} className="p-4 rounded-xl border border-white/5 bg-[var(--color-background-panel)]">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-2">
+                      <Lightning size={16} className="text-emerald-400" />
+                      <span className="text-sm font-medium text-zinc-200">GPU {gpu.index}</span>
+                    </div>
+                    {status === 'running' ? (
+                      <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
+                        <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Running
+                      </span>
+                    ) : status === 'starting' ? (
+                      <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400 bg-amber-400/10 rounded-full border border-amber-400/20">
+                        <CircleNotch size={9} className="animate-spin" />
+                        Starting
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 bg-zinc-800 rounded-full">
+                        Idle
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-1 truncate">{gpu.name}</p>
+                  <VramBar vramMB={gpu.vramMB} />
                 </div>
-                <div>
-                  <div className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors truncate max-w-[100px]">{app.displayName}</div>
-                  {app.source === 'sideloaded' && (
-                    <div className="text-[10px] text-amber-500/70 font-semibold uppercase tracking-wider">Dev</div>
+              )
+            })}
+
+            {/* CPU Card */}
+            {cpuInfo && (
+              <div className="p-4 rounded-xl border border-white/5 bg-[var(--color-background-panel)]">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cpu size={16} className="text-zinc-500" />
+                    <span className="text-sm font-medium text-zinc-200">CPU</span>
+                  </div>
+                  {getCpuStatus() === 'running' ? (
+                    <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
+                      <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Running
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 bg-zinc-800 rounded-full">
+                      Idle
+                    </span>
                   )}
                 </div>
-              </Link>
-            ))}
-
-            {/* Install More */}
-            <Link
-              href="/explore"
-              className="group flex flex-col items-center gap-2.5 p-4 rounded-xl border border-dashed border-white/10 hover:border-zinc-600 transition-all duration-150 text-center"
-            >
-              <div className="size-12 rounded-xl bg-zinc-800/50 flex items-center justify-center group-hover:bg-zinc-700/50 transition-colors">
-                <Plus size={20} className="text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+                <p className="text-xs text-zinc-400 mt-1 truncate">{cpuInfo.model}</p>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-[10px] font-mono text-zinc-500">{cpuInfo.cores}C/{cpuInfo.threads}T</span>
+                  <span className="text-[10px] font-mono text-zinc-600">·</span>
+                  <span className="text-[10px] font-mono text-zinc-500">{cpuInfo.ramGB} GB RAM</span>
+                </div>
               </div>
-              <div className="text-sm font-medium text-zinc-600 group-hover:text-zinc-400 transition-colors">Install More</div>
-            </Link>
+            )}
+
+            {gpus.length === 0 && !cpuInfo && (
+              <div className="col-span-full flex flex-col items-center justify-center py-8 text-zinc-600">
+                <Lightning size={24} className="opacity-40 mb-2" />
+                <p className="text-sm">No devices detected</p>
+                <Link href="/settings" className="text-xs text-zinc-500 hover:text-zinc-300 mt-1 transition-colors">
+                  Configure compute →
+                </Link>
+              </div>
+            )}
           </div>
         </section>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Quick Stats */}
+        <section className="mb-8">
+          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">Overview</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-4 rounded-xl border border-white/5 bg-[var(--color-background-panel)]">
+              <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Running</p>
+              <p className="text-2xl font-tech font-semibold text-zinc-100 mt-1">{stats?.runningJobs ?? 0}</p>
+            </div>
+            <div className="p-4 rounded-xl border border-white/5 bg-[var(--color-background-panel)]">
+              <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Completed</p>
+              <p className="text-2xl font-tech font-semibold text-zinc-100 mt-1">{stats?.completedJobs ?? 0}</p>
+            </div>
+            <div className="p-4 rounded-xl border border-white/5 bg-[var(--color-background-panel)]">
+              <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Tools</p>
+              <p className="text-2xl font-tech font-semibold text-zinc-100 mt-1">{stats?.toolsInstalled ?? 0}</p>
+            </div>
+            <div className="p-4 rounded-xl border border-white/5 bg-[var(--color-background-panel)]">
+              <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">Models</p>
+              <p className="text-2xl font-tech font-semibold text-zinc-100 mt-1">{stats?.modelsAvailable ?? 0}</p>
+            </div>
+          </div>
+        </section>
 
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Recent Activity */}
-          <section>
-            <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">Recent Activity</h2>
+          <section className="lg:col-span-2">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Recent Activity</h2>
+              <Link href="/jobs" className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors flex items-center gap-1">
+                View all <CaretRight size={10} />
+              </Link>
+            </div>
             <div className="rounded-xl border border-white/5 bg-[var(--color-background-panel)] divide-y divide-white/5">
               {executions.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-10 text-zinc-600">
@@ -175,84 +260,54 @@ export default function HomePage() {
                 </div>
               )}
               {executions.map((exec) => (
-                <div key={exec.id} className="flex items-center gap-3 px-4 py-3">
+                <Link
+                  key={exec.id}
+                  href="/jobs"
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors"
+                >
                   {exec.status === 'completed' && <CheckCircle size={15} weight="fill" className="text-emerald-500 shrink-0" />}
                   {exec.status === 'error' && <XCircle size={15} weight="fill" className="text-red-500 shrink-0" />}
-                  {exec.status === 'running' && <CircleNotch size={15} className="text-zinc-500 animate-spin shrink-0" />}
+                  {exec.status === 'running' && <CircleNotch size={15} className="text-amber-400 animate-spin shrink-0" />}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-zinc-300 truncate font-mono-custom text-xs">{exec.toolId}</p>
+                    <p className="text-sm text-zinc-300 truncate">{exec.toolName ?? exec.toolId}</p>
                   </div>
                   <span className="text-xs text-zinc-600 shrink-0">{timeAgo(exec.createdAt)}</span>
-                </div>
+                </Link>
               ))}
             </div>
           </section>
 
-          {/* System Status */}
+          {/* Quick Actions */}
           <section>
-            <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">System Status</h2>
-            <div className="rounded-xl border border-white/5 bg-[var(--color-background-panel)] divide-y divide-white/5">
-
-              {/* ComfyUI */}
-              <div className="px-4 py-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <img src="/comfyui-logo.png" alt="ComfyUI" className="size-4 object-contain" />
-                    <span className="text-sm text-zinc-300">ComfyUI</span>
+            <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">Quick Actions</h2>
+            <div className="space-y-3">
+              {firstRunningInstance && (
+                <button
+                  onClick={() => window.open(`http://127.0.0.1:${firstRunningInstance.port}`, '_blank')}
+                  className="w-full flex items-center gap-3 p-4 rounded-xl border border-white/5 bg-[var(--color-background-panel)] hover:border-zinc-700 hover:bg-zinc-800/50 transition-all text-left"
+                >
+                  <div className="size-10 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+                    <ArrowSquareOut size={18} className="text-emerald-400" />
                   </div>
-                  {comfyInstances.length > 0 ? (
-                    <span className="flex items-center gap-1.5 text-xs text-emerald-400">
-                      <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      {comfyInstances.length === 1
-                        ? `Connected (port ${comfyInstances[0].port})`
-                        : `${comfyInstances.length} instances`}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-zinc-600">Not running</span>
-                  )}
-                </div>
-              </div>
-
-              {/* Providers */}
-              {providers.map((provider) => (
-                <div key={provider.name} className="flex items-center justify-between px-4 py-3">
-                  <span className="text-sm text-zinc-300">{provider.label}</span>
-                  {provider.configured ? (
-                    <span className="flex items-center gap-1.5 text-xs text-emerald-400">
-                      <span className="size-1.5 rounded-full bg-emerald-400" />
-                      Configured
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => router.push('/providers')}
-                      className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
-                    >
-                      Not set up →
-                    </button>
-                  )}
-                </div>
-              ))}
-
-              {providers.length === 0 && comfyInstances.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-8 text-zinc-600 gap-2">
-                  <Lightning size={24} className="opacity-40" />
-                  <p className="text-sm">No infrastructure configured</p>
-                  <Link href="/providers" className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
-                    Set up providers →
-                  </Link>
-                </div>
+                  <div>
+                    <p className="text-sm font-medium text-zinc-200">Open ComfyUI</p>
+                    <p className="text-xs text-zinc-600">Port {firstRunningInstance.port}</p>
+                  </div>
+                </button>
               )}
-            </div>
-
-            {configuredProviders.length > 0 || comfyInstances.length > 0 ? (
               <Link
-                href="/providers"
-                className="flex items-center gap-1.5 mt-3 text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                href="/tools"
+                className="w-full flex items-center gap-3 p-4 rounded-xl border border-white/5 bg-[var(--color-background-panel)] hover:border-zinc-700 hover:bg-zinc-800/50 transition-all"
               >
-                <Storefront size={12} />
-                Manage providers
+                <div className="size-10 rounded-lg bg-zinc-800 border border-white/10 flex items-center justify-center shrink-0">
+                  <Wrench size={18} className="text-zinc-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-zinc-200">Browse Tools</p>
+                  <p className="text-xs text-zinc-600">Install, build, and manage</p>
+                </div>
               </Link>
-            ) : null}
+            </div>
           </section>
         </div>
       </div>

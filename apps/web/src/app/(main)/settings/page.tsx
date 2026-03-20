@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect, type FormEvent } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { Suspense, useState, useEffect, useCallback, type FormEvent } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   HardDrive,
   Globe,
@@ -19,11 +21,28 @@ import {
   ArrowsClockwise,
   DownloadSimple,
   ArrowCircleUp,
+  Eye,
+  EyeSlash,
+  ArrowCounterClockwise,
+  CircleNotch,
+  ArrowRight,
+  FolderOpen,
+  Play,
+  Stop,
+  Cpu,
+  Lightning,
+  MagnifyingGlass,
+  Warning,
+  CloudArrowUp,
+  GearSix,
+  UsersThree,
+  Database,
+  Plugs,
 } from "phosphor-react";
 import { PageTransition, Modal } from "@/components/ui";
 import { useUpdateStore } from "@/store/updateStore";
 
-// ─── Settings types ───────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface UserMe {
   id: string;
@@ -36,8 +55,6 @@ interface NetworkData {
   addresses: string[];
 }
 
-// ─── Users types ─────────────────────────────────────────────────────────────
-
 type UserRow = {
   id: string;
   username: string;
@@ -47,6 +64,46 @@ type UserRow = {
   approvedAt: number | null;
   approvedBy: string | null;
 };
+
+interface ProviderStatus {
+  name: string;
+  label: string;
+  configured: boolean;
+  maskedKey?: string;
+  docsUrl: string;
+}
+
+interface GpuInfo {
+  index: number;
+  name: string;
+  vramMB: number;
+  backend: "cuda" | "rocm";
+}
+
+interface CpuInfo {
+  model: string;
+  cores: number;
+  threads: number;
+  ramGB: number;
+}
+
+interface ComfyManagedInstance {
+  id: string;
+  status: "running" | "starting" | "stopped";
+  pid?: number;
+  port: number;
+  device: string;
+  label: string;
+}
+
+interface ComfyManageResponse {
+  instances: ComfyManagedInstance[];
+  managedPath: string | null;
+  installType: string | null;
+  isSetup: boolean;
+}
+
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 const ROLES = ["admin", "dev", "artist"];
 const ROLE_LABELS: Record<string, string> = {
@@ -60,30 +117,74 @@ const STATUS_BADGE: Record<string, string> = {
   disabled: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
 };
 
+const PROVIDER_ICONS: Record<string, string> = {
+  fal: "https://fal.ai/favicon.ico",
+  replicate: "https://cdn.simpleicons.org/replicate/white",
+  openrouter: "https://openrouter.ai/favicon.ico",
+  huggingface:
+    "https://huggingface.co/front/assets/huggingface_logo-noborder.svg",
+};
+
+const PROVIDER_DESCRIPTIONS: Record<string, string> = {
+  fal: "Run generative AI models on fal.ai serverless infrastructure with fast cold starts.",
+  replicate:
+    "Run open-source models in the cloud via Replicate with a single API call.",
+  openrouter:
+    "Access hundreds of LLMs through a single API — route to the best model for your needs.",
+  huggingface:
+    "Access the HuggingFace Inference API to run models from the Hub.",
+};
+
+type Tab = "compute" | "providers" | "comfyui" | "storage" | "users" | "general";
+
+const TAB_CONFIG: { id: Tab; label: string; icon: typeof Cpu }[] = [
+  { id: "compute", label: "Compute", icon: Lightning },
+  { id: "providers", label: "Providers", icon: Plugs },
+  { id: "comfyui", label: "ComfyUI", icon: GearSix },
+  { id: "storage", label: "Storage", icon: Database },
+  { id: "users", label: "Users", icon: UsersThree },
+  { id: "general", label: "General", icon: Globe },
+];
+
 function formatDate(ms: number | null) {
-  if (!ms) return "—";
+  if (!ms) return "\u2014";
   return new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
-
-type Tab = "general" | "users";
+// ─── Main page (with Suspense boundary for useSearchParams) ──────────────────
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>("general");
+  return (
+    <Suspense fallback={null}>
+      <SettingsPageInner />
+    </Suspense>
+  );
+}
+
+function SettingsPageInner() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const rawTab = searchParams.get("tab");
+  const tab: Tab = TAB_CONFIG.some((t) => t.id === rawTab)
+    ? (rawTab as Tab)
+    : "compute";
+
   const [isDesktop, setIsDesktop] = useState(false);
 
   useEffect(() => {
     setIsDesktop(!!window.desktop?.updates);
   }, []);
-  const { data: network } = useQuery<NetworkData>({
-    queryKey: ["network"],
-    queryFn: async () => {
-      const res = await fetch("/api/settings/network");
-      if (!res.ok) throw new Error("Failed to fetch network info");
-      return res.json();
-    },
-  });
+
+  // ── Error toast (used by ComfyUI tab) ────────────────────────────────────
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+  const showError = useCallback((msg: string) => {
+    setErrorToast(msg);
+  }, []);
+  useEffect(() => {
+    if (!errorToast) return;
+    const t = setTimeout(() => setErrorToast(null), 8000);
+    return () => clearTimeout(t);
+  }, [errorToast]);
 
   const { data: me } = useQuery<UserMe>({
     queryKey: ["me"],
@@ -94,225 +195,859 @@ export default function SettingsPage() {
     },
   });
 
-  const [copied, setCopied] = useState<string | null>(null);
-
-  const openInBrowser = (url: string) => {
-    if (window.desktop?.shell?.openExternal) {
-      window.desktop.shell.openExternal(url);
-    } else {
-      window.open(url, "_blank");
-    }
-  };
-
-  const copyUrl = (url: string) => {
-    navigator.clipboard.writeText(url);
-    setCopied(url);
-    setTimeout(() => setCopied(null), 2000);
-  };
+  function setTab(t: Tab) {
+    router.push(`/settings?tab=${t}`, { scroll: false });
+  }
 
   return (
-    <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
-        <div>
-          <h1 className="font-tech text-xl font-semibold text-zinc-100">
-            Settings
-          </h1>
-          <p className="text-sm text-zinc-500 mt-0.5">
-            Network access and app configuration
-          </p>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 px-8 pt-4 shrink-0">
-        {(["general", "users"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={[
-              "px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize",
-              tab === t
-                ? "bg-white/10 text-white"
-                : "text-zinc-500 hover:text-zinc-300",
-            ].join(" ")}
-          >
-            {t === "general" ? "General" : "Users"}
-          </button>
-        ))}
-      </div>
-
-      {/* Content */}
-      {tab === "general" ? (
-        <div className="flex-1 overflow-y-auto px-8 py-6">
-          <div className="max-w-2xl mx-auto space-y-8">
-            {/* Updates */}
-            {isDesktop && <UpdatesSection />}
-
-            {/* Network Access */}
-            <section>
-              <div className="flex items-center gap-2 mb-4">
-                <Globe size={16} className="text-zinc-400" />
-                <h2 className="font-tech text-sm font-semibold text-zinc-200">
-                  Network Access
-                </h2>
-              </div>
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs text-zinc-500 mb-1">Local</div>
-                    <span className="text-sm font-mono-custom text-zinc-300">
-                      http://localhost:{network?.port ?? 14173}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0 ml-4">
-                    <button
-                      onClick={() =>
-                        copyUrl(`http://localhost:${network?.port ?? 14173}`)
-                      }
-                      className="p-1.5 text-zinc-500 hover:text-white transition-colors"
-                      title="Copy URL"
-                    >
-                      {copied ===
-                      `http://localhost:${network?.port ?? 14173}` ? (
-                        <Check size={14} className="text-emerald-400" />
-                      ) : (
-                        <Copy size={14} />
-                      )}
-                    </button>
-                    <button
-                      onClick={() =>
-                        openInBrowser(
-                          `http://localhost:${network?.port ?? 14173}`,
-                        )
-                      }
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
-                    >
-                      <ArrowSquareOut size={12} /> Open
-                    </button>
-                  </div>
-                </div>
-                {network?.addresses.map((ip) => {
-                  const url = `http://${ip}:${network.port}`;
-                  return (
-                    <div
-                      key={ip}
-                      className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs text-zinc-500 mb-1">
-                          Network
-                        </div>
-                        <span className="text-sm font-mono-custom text-zinc-300">
-                          {url}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0 ml-4">
-                        <button
-                          onClick={() => copyUrl(url)}
-                          className="p-1.5 text-zinc-500 hover:text-white transition-colors"
-                          title="Copy URL"
-                        >
-                          {copied === url ? (
-                            <Check size={14} className="text-emerald-400" />
-                          ) : (
-                            <Copy size={14} />
-                          )}
-                        </button>
-                        <button
-                          onClick={() => openInBrowser(url)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
-                        >
-                          <ArrowSquareOut size={12} /> Open
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="text-xs text-zinc-600 mt-2">
-                Use the network URL to open FlowScale AI OS from any device on
-                the same network.
-              </p>
-            </section>
-
-            {/* Storage */}
-            <section>
-              <div className="flex items-center gap-2 mb-4">
-                <HardDrive size={16} className="text-zinc-400" />
-                <h2 className="font-tech text-sm font-semibold text-zinc-200">
-                  Storage
-                </h2>
-              </div>
-              <div className="flex flex-col gap-3 p-4 bg-zinc-900/50 border border-white/5 rounded-lg text-sm">
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">Database</span>
-                  <span className="text-zinc-300 font-mono-custom text-xs">
-                    ~/.flowscale/aios.db
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">App data</span>
-                  <span className="text-zinc-300 font-mono-custom text-xs">
-                    ~/.flowscale/app-data/
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">App bundles</span>
-                  <span className="text-zinc-300 font-mono-custom text-xs">
-                    ~/.flowscale/apps/
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">Outputs</span>
-                  <span className="text-zinc-300 font-mono-custom text-xs">
-                    ~/.flowscale/aios-outputs/
-                  </span>
-                </div>
-              </div>
-              <p className="text-xs text-zinc-600 mt-2">
-                All data stays on this machine. Nothing is sent to the cloud.
-              </p>
-            </section>
-
-            {/* App info */}
-            <section className="pt-4 border-t border-white/5">
-              <div className="flex justify-between text-xs text-zinc-600">
-                <span className="font-tech">FlowScale AI OS</span>
-                <span className="font-mono-custom">
-                  v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.2.0"}
-                </span>
-              </div>
-            </section>
+    <>
+      <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
+          <div>
+            <h1 className="font-tech text-xl font-semibold text-zinc-100">
+              Settings
+            </h1>
+            <p className="text-sm text-zinc-500 mt-0.5">
+              Configure compute, providers, and app settings
+            </p>
           </div>
         </div>
-      ) : (
-        <UsersPanel
-          currentUserId={me?.id ?? null}
-          currentUserRole={me?.role ?? null}
-        />
+
+        {/* Tabs */}
+        <div className="flex gap-1 px-8 pt-4 shrink-0">
+          {TAB_CONFIG.map((t) => {
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={[
+                  "flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                  tab === t.id
+                    ? "bg-white/10 text-white"
+                    : "text-zinc-500 hover:text-zinc-300",
+                ].join(" ")}
+              >
+                <Icon size={14} />
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto">
+          {tab === "compute" && <ComputeTab />}
+          {tab === "providers" && <ProvidersTab />}
+          {tab === "comfyui" && <ComfyUITab showError={showError} />}
+          {tab === "storage" && <StorageTab />}
+          {tab === "users" && (
+            <UsersPanel
+              currentUserId={me?.id ?? null}
+              currentUserRole={me?.role ?? null}
+            />
+          )}
+          {tab === "general" && <GeneralTab isDesktop={isDesktop} />}
+        </div>
+      </PageTransition>
+
+      {/* Error toast */}
+      {errorToast && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-md animate-in slide-in-from-bottom-2 duration-200">
+          <div className="bg-red-950/90 border border-red-500/30 rounded-xl px-4 py-3 shadow-2xl backdrop-blur-sm flex items-start gap-3">
+            <Warning
+              size={18}
+              weight="fill"
+              className="text-red-400 shrink-0 mt-0.5"
+            />
+            <div className="flex-1 text-sm text-red-200">{errorToast}</div>
+            <button
+              onClick={() => setErrorToast(null)}
+              className="text-red-400 hover:text-red-200 shrink-0 transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
       )}
-    </PageTransition>
+    </>
   );
 }
 
-// ─── Updates Section ──────────────────────────────────────────────────────────
+// ─── Compute Tab ─────────────────────────────────────────────────────────────
 
-const UPDATE_COMMAND = 'curl -fsSL https://flowscale.ai/update_mac.sh | sudo bash'
+function ComputeTab() {
+  const queryClient = useQueryClient();
+
+  const { data: gpuData } = useQuery<{ gpus: GpuInfo[]; cpu: CpuInfo }>({
+    queryKey: ["gpu-detect"],
+    queryFn: async () => {
+      const res = await fetch("/api/gpu");
+      if (!res.ok) return { gpus: [] };
+      return res.json();
+    },
+  });
+
+  const { data: comfyManage } = useQuery<ComfyManageResponse>({
+    queryKey: ["comfy-manage"],
+    queryFn: async () => {
+      const res = await fetch("/api/comfy/manage");
+      if (!res.ok)
+        return {
+          instances: [],
+          managedPath: null,
+          installType: null,
+          isSetup: false,
+        };
+      return res.json();
+    },
+  });
+
+  const detectedGpus = gpuData?.gpus ?? [];
+  const cpuInfo = gpuData?.cpu;
+
+  const detectGpusMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/gpu", { method: "POST" });
+      if (!res.ok) throw new Error("Detection failed");
+      const data = await res.json();
+      if (comfyManage?.isSetup) {
+        await fetch("/api/comfy/instances/detect", { method: "POST" });
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gpu-detect"] });
+      queryClient.invalidateQueries({ queryKey: ["comfy-manage"] });
+      queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
+    },
+  });
+
+  return (
+    <div className="px-8 py-6">
+      <div className="max-w-2xl mx-auto space-y-6">
+        {/* GPU Detection */}
+        <section>
+          <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="size-9 rounded-lg border border-white/10 bg-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+                  <Lightning size={18} className="text-zinc-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-zinc-200">
+                      Devices
+                    </span>
+                    {(detectedGpus.length > 0 || cpuInfo) && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
+                        {detectedGpus.length + (cpuInfo ? 1 : 0)} devices
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-600 mt-0.5">
+                    Available hardware for local inference tools
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => detectGpusMutation.mutate()}
+                disabled={detectGpusMutation.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-[11px] font-medium rounded-lg transition-colors"
+                title="Detect available GPUs"
+              >
+                {detectGpusMutation.isPending ? (
+                  <CircleNotch size={11} className="animate-spin" />
+                ) : (
+                  <MagnifyingGlass size={11} />
+                )}
+                Detect GPUs
+              </button>
+            </div>
+            {(detectedGpus.length > 0 || cpuInfo) && (
+              <div className="mt-3 space-y-1.5">
+                {detectedGpus.map((gpu) => (
+                  <div
+                    key={gpu.index}
+                    className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Lightning size={13} className="text-emerald-400/70" />
+                      <span className="text-xs font-medium text-zinc-300">
+                        {gpu.name}
+                      </span>
+                      <span className="text-[10px] font-mono text-zinc-600">
+                        {gpu.backend}:{gpu.index}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono text-zinc-500">
+                      {gpu.vramMB >= 1024
+                        ? `${(gpu.vramMB / 1024).toFixed(1)} GB`
+                        : `${gpu.vramMB} MB`}
+                    </span>
+                  </div>
+                ))}
+                {cpuInfo && (
+                  <div className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5">
+                    <div className="flex items-center gap-2.5">
+                      <Cpu size={13} className="text-zinc-500" />
+                      <span className="text-xs font-medium text-zinc-300">
+                        {cpuInfo.model}
+                      </span>
+                      <span className="text-[10px] font-mono text-zinc-600">
+                        {cpuInfo.cores}C/{cpuInfo.threads}T
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono text-zinc-500">
+                      {cpuInfo.ramGB} GB RAM
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Modal.com placeholder */}
+        <section>
+          <div className="p-5 rounded-xl border border-white/5 bg-[var(--color-background-panel)]/50">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="size-9 rounded-lg border border-white/10 bg-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+                  <CloudArrowUp size={18} className="text-zinc-500" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-zinc-200">
+                      Modal.com
+                    </span>
+                    <span className="px-1.5 py-0.5 text-[10px] font-semibold text-amber-300 bg-amber-400/10 rounded-full border border-amber-400/20">
+                      Coming Soon
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-600 mt-0.5">
+                    Spin up cloud GPU instances on demand for burst compute
+                    workloads.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="opacity-50 pointer-events-none select-none">
+              <input
+                type="password"
+                placeholder="Modal API key..."
+                disabled
+                className="w-full px-3 py-2 text-xs font-mono-custom bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600"
+              />
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// ─── Providers Tab ───────────────────────────────────────────────────────────
+
+function ProviderCard({ provider }: { provider: ProviderStatus }) {
+  const queryClient = useQueryClient();
+  const [keyInput, setKeyInput] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [testState, setTestState] = useState<
+    "idle" | "testing" | "ok" | "error"
+  >("idle");
+
+  const saveMutation = useMutation({
+    mutationFn: async (key: string) => {
+      const res = await fetch(`/api/providers/${provider.name}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      if (!res.ok) throw new Error("Failed to save key");
+    },
+    onSuccess: () => {
+      setKeyInput("");
+      queryClient.invalidateQueries({ queryKey: ["providers"] });
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/providers/${provider.name}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to remove key");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["providers"] });
+    },
+  });
+
+  async function testConnection() {
+    setTestState("testing");
+    try {
+      const res = await fetch(`/api/providers/${provider.name}/proxy/models`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      setTestState(res.ok ? "ok" : "error");
+    } catch {
+      setTestState("error");
+    }
+    setTimeout(() => setTestState("idle"), 3000);
+  }
+
+  return (
+    <div
+      className={[
+        "p-5 rounded-xl border transition-colors",
+        provider.configured
+          ? "border-white/10 bg-[var(--color-background-panel)]"
+          : "border-white/5 bg-[var(--color-background-panel)]/50",
+      ].join(" ")}
+    >
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3">
+          <div className="size-9 rounded-lg border border-white/10 bg-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+            {PROVIDER_ICONS[provider.name] ? (
+              <img
+                src={PROVIDER_ICONS[provider.name]}
+                alt={provider.label}
+                className="size-5 object-contain"
+              />
+            ) : (
+              <span className="text-xs font-bold text-zinc-400">
+                {provider.label[0]}
+              </span>
+            )}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-zinc-200">
+                {provider.label}
+              </span>
+              {provider.configured ? (
+                <span className="px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
+                  Configured
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 bg-zinc-800 rounded-full">
+                  Not configured
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {PROVIDER_DESCRIPTIONS[provider.name]}
+            </p>
+          </div>
+        </div>
+        <a
+          href={provider.docsUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="text-zinc-600 hover:text-zinc-400 transition-colors shrink-0 mt-0.5"
+          title="Docs"
+        >
+          <ArrowSquareOut size={14} />
+        </a>
+      </div>
+
+      {/* Key input */}
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <input
+            type={showKey ? "text" : "password"}
+            placeholder={
+              provider.configured ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "Paste API key\u2026"
+            }
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            className="w-full px-3 py-2 pr-9 text-xs font-mono-custom bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+          />
+          <button
+            onClick={() => setShowKey((v) => !v)}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
+          >
+            {showKey ? <EyeSlash size={13} /> : <Eye size={13} />}
+          </button>
+        </div>
+        <button
+          disabled={!keyInput.trim() || saveMutation.isPending}
+          onClick={() => saveMutation.mutate(keyInput.trim())}
+          className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Save
+        </button>
+      </div>
+
+      {/* Actions when configured */}
+      {provider.configured && (
+        <div className="flex items-center gap-3 mt-3">
+          <button
+            onClick={testConnection}
+            disabled={testState === "testing"}
+            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50"
+          >
+            {testState === "testing" && (
+              <CircleNotch size={12} className="animate-spin" />
+            )}
+            {testState === "ok" && (
+              <CheckCircle size={12} className="text-emerald-400" />
+            )}
+            {testState === "error" && (
+              <XCircle size={12} className="text-red-400" />
+            )}
+            {testState === "idle" && null}
+            {testState === "idle"
+              ? "Test Connection"
+              : testState === "testing"
+                ? "Testing\u2026"
+                : testState === "ok"
+                  ? "Connected"
+                  : "Failed"}
+          </button>
+          <span className="text-zinc-800">\u00B7</span>
+          <button
+            onClick={() => removeMutation.mutate()}
+            disabled={removeMutation.isPending}
+            className="flex items-center gap-1 text-xs text-zinc-600 hover:text-red-400 transition-colors"
+          >
+            <Trash size={11} />
+            Remove
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProvidersTab() {
+  const { data: providers = [], isLoading } = useQuery<ProviderStatus[]>({
+    queryKey: ["providers"],
+    queryFn: async () => {
+      const res = await fetch("/api/providers");
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+
+  return (
+    <div className="px-8 py-6">
+      <div className="max-w-2xl mx-auto space-y-6">
+        <section>
+          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">
+            Cloud Providers
+          </h2>
+
+          {isLoading ? (
+            <div className="flex items-center gap-2 py-8 text-zinc-600 justify-center">
+              <CircleNotch size={16} className="animate-spin" />
+              <span className="text-sm">Loading\u2026</span>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {providers.map((provider) => (
+                <ProviderCard key={provider.name} provider={provider} />
+              ))}
+            </div>
+          )}
+
+          <p className="text-xs text-zinc-600 mt-2">
+            API keys are stored locally in{" "}
+            <span className="font-mono-custom">
+              ~/.flowscale/aios/provider-keys.json
+            </span>{" "}
+            and never sent to FlowScale servers.
+          </p>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// ─── ComfyUI Tab ─────────────────────────────────────────────────────────────
+
+function InstanceStatusBadge({ status }: { status: string }) {
+  if (status === "starting") {
+    return (
+      <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400 bg-amber-400/10 rounded-full border border-amber-400/20">
+        <CircleNotch size={9} className="animate-spin" />
+        Starting
+      </span>
+    );
+  }
+  if (status === "running") {
+    return (
+      <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
+        <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        Running
+      </span>
+    );
+  }
+  return (
+    <span className="px-1.5 py-0.5 text-[10px] font-semibold text-zinc-600 bg-zinc-800 rounded-full">
+      Stopped
+    </span>
+  );
+}
+
+function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
+  const queryClient = useQueryClient();
+  const [pathInput, setPathInput] = useState("");
+  const [pathSaved, setPathSaved] = useState(false);
+
+  const { data: comfyManage, refetch: refetchManage } =
+    useQuery<ComfyManageResponse>({
+      queryKey: ["comfy-manage"],
+      queryFn: async () => {
+        const res = await fetch("/api/comfy/manage");
+        if (!res.ok)
+          return {
+            instances: [],
+            managedPath: null,
+            installType: null,
+            isSetup: false,
+          };
+        return res.json();
+      },
+      refetchInterval: (q) => {
+        const data = q.state.data;
+        if (!data) return false;
+        const anyStarting = data.instances?.some(
+          (i: ComfyManagedInstance) => i.status === "starting"
+        );
+        return anyStarting ? 2000 : false;
+      },
+    });
+
+  const managedInstances = comfyManage?.instances ?? [];
+  const anyRunning = managedInstances.some((i) => i.status === "running");
+  const anyStopped = managedInstances.some((i) => i.status === "stopped");
+  const anyStarting = managedInstances.some((i) => i.status === "starting");
+
+  const comfyActionMutation = useMutation({
+    mutationFn: async ({
+      action,
+      instanceId,
+    }: {
+      action: "start" | "stop" | "restart";
+      instanceId?: string;
+    }) => {
+      const res = await fetch("/api/comfy/manage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, instanceId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Action failed");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchManage();
+      queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
+    },
+    onError: (err: Error) => {
+      showError(err.message);
+    },
+  });
+
+  const { data: comfyPathData } = useQuery<{ comfyuiPath: string | null }>({
+    queryKey: ["comfyui-path"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings/comfyui-path");
+      if (!res.ok) return { comfyuiPath: null };
+      return res.json();
+    },
+  });
+
+  const savePathMutation = useMutation({
+    mutationFn: async (p: string) => {
+      const res = await fetch("/api/settings/comfyui-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comfyuiPath: p }),
+      });
+      if (!res.ok) throw new Error("Failed to save path");
+    },
+    onSuccess: () => {
+      setPathInput("");
+      setPathSaved(true);
+      queryClient.invalidateQueries({ queryKey: ["comfyui-path"] });
+      setTimeout(() => setPathSaved(false), 2500);
+    },
+  });
+
+  const savedPath = comfyPathData?.comfyuiPath;
+
+  return (
+    <div className="px-8 py-6">
+      <div className="max-w-2xl mx-auto">
+        <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+          {/* Header row */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="size-9 rounded-lg border border-white/10 bg-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+                <img
+                  src="/comfyui-logo.png"
+                  alt="ComfyUI"
+                  className="size-5 object-contain"
+                />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-zinc-200">
+                    ComfyUI
+                  </span>
+                  {managedInstances.length > 0 && (
+                    <span className="text-[10px] font-mono text-zinc-600">
+                      {managedInstances.length} instance
+                      {managedInstances.length !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
+                {!comfyManage?.isSetup && (
+                  <p className="text-xs text-zinc-600 mt-0.5">
+                    Setup required
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Bulk controls */}
+              {comfyManage?.isSetup && managedInstances.length > 0 && (
+                <>
+                  {anyStopped && (
+                    <button
+                      onClick={() =>
+                        comfyActionMutation.mutate({ action: "start" })
+                      }
+                      disabled={comfyActionMutation.isPending}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-[11px] font-medium rounded-lg transition-colors"
+                      title="Start all instances"
+                    >
+                      <Play size={10} weight="fill" />
+                      Start All
+                    </button>
+                  )}
+                  {(anyRunning || anyStarting) && (
+                    <button
+                      onClick={() =>
+                        comfyActionMutation.mutate({ action: "stop" })
+                      }
+                      disabled={comfyActionMutation.isPending}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-red-900/50 hover:bg-red-800/60 disabled:opacity-40 text-red-300 text-[11px] font-medium rounded-lg transition-colors"
+                      title="Stop all instances"
+                    >
+                      <Stop size={10} weight="fill" />
+                      Stop All
+                    </button>
+                  )}
+                </>
+              )}
+              <Link
+                href="/integrations/comfyui"
+                className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                View details
+                <ArrowRight size={12} />
+              </Link>
+            </div>
+          </div>
+
+          {/* Instance list */}
+          {managedInstances.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {managedInstances.map((inst) => (
+                <div
+                  key={inst.id}
+                  className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5"
+                >
+                  <div className="flex items-center gap-2.5">
+                    {inst.device === "cpu" ? (
+                      <Cpu size={14} className="text-zinc-500" />
+                    ) : (
+                      <Lightning size={14} className="text-zinc-500" />
+                    )}
+                    <span className="text-xs font-medium text-zinc-300">
+                      {inst.label}
+                    </span>
+                    <span className="text-[10px] font-mono text-zinc-600">
+                      :{inst.port}
+                    </span>
+                    <InstanceStatusBadge status={inst.status} />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {inst.status === "stopped" && (
+                      <button
+                        onClick={() =>
+                          comfyActionMutation.mutate({
+                            action: "start",
+                            instanceId: inst.id,
+                          })
+                        }
+                        disabled={comfyActionMutation.isPending}
+                        className="p-1 text-zinc-600 hover:text-emerald-400 transition-colors disabled:opacity-40"
+                        title={`Start ${inst.label}`}
+                      >
+                        <Play size={12} weight="fill" />
+                      </button>
+                    )}
+                    {(inst.status === "running" ||
+                      inst.status === "starting") && (
+                      <>
+                        <button
+                          onClick={() =>
+                            comfyActionMutation.mutate({
+                              action: "restart",
+                              instanceId: inst.id,
+                            })
+                          }
+                          disabled={
+                            comfyActionMutation.isPending ||
+                            inst.status === "starting"
+                          }
+                          className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors disabled:opacity-40"
+                          title={`Restart ${inst.label}`}
+                        >
+                          <ArrowCounterClockwise size={12} />
+                        </button>
+                        <button
+                          onClick={() =>
+                            comfyActionMutation.mutate({
+                              action: "stop",
+                              instanceId: inst.id,
+                            })
+                          }
+                          disabled={comfyActionMutation.isPending}
+                          className="p-1 text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-40"
+                          title={`Stop ${inst.label}`}
+                        >
+                          <Stop size={12} weight="fill" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ComfyUI installation path */}
+          <div className="border-t border-white/5 pt-4">
+            <label className="block text-xs font-medium text-zinc-500 mb-1.5">
+              Installation path
+            </label>
+            {savedPath && (
+              <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
+                <CheckCircle size={11} weight="fill" />
+                {savedPath}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <FolderOpen
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={pathInput}
+                  onChange={(e) => setPathInput(e.target.value)}
+                  placeholder={savedPath ?? "/path/to/ComfyUI"}
+                  className="w-full pl-8 pr-3 py-2 text-xs font-mono-custom bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+                />
+              </div>
+              <button
+                disabled={!pathInput.trim() || savePathMutation.isPending}
+                onClick={() => savePathMutation.mutate(pathInput.trim())}
+                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {pathSaved ? "Saved \u2713" : "Save"}
+              </button>
+            </div>
+            <p className="text-[11px] text-zinc-600 mt-1.5">
+              The root directory of your ComfyUI install. Models will be
+              downloaded into{" "}
+              <span className="font-mono-custom">models/</span>{" "}
+              subdirectories.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Storage Tab ─────────────────────────────────────────────────────────────
+
+function StorageTab() {
+  return (
+    <div className="px-8 py-6">
+      <div className="max-w-2xl mx-auto">
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <HardDrive size={16} className="text-zinc-400" />
+            <h2 className="font-tech text-sm font-semibold text-zinc-200">
+              Storage
+            </h2>
+          </div>
+          <div className="flex flex-col gap-3 p-4 bg-zinc-900/50 border border-white/5 rounded-lg text-sm">
+            <div className="flex justify-between">
+              <span className="text-zinc-500">Database</span>
+              <span className="text-zinc-300 font-mono-custom text-xs">
+                ~/.flowscale/aios.db
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-500">App data</span>
+              <span className="text-zinc-300 font-mono-custom text-xs">
+                ~/.flowscale/app-data/
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-500">App bundles</span>
+              <span className="text-zinc-300 font-mono-custom text-xs">
+                ~/.flowscale/apps/
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-500">Outputs</span>
+              <span className="text-zinc-300 font-mono-custom text-xs">
+                ~/.flowscale/aios-outputs/
+              </span>
+            </div>
+          </div>
+          <p className="text-xs text-zinc-600 mt-2">
+            All data stays on this machine. Nothing is sent to the cloud.
+          </p>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// ─── General Tab ─────────────────────────────────────────────────────────────
+
+const UPDATE_COMMAND =
+  "curl -fsSL https://flowscale.ai/update_mac.sh | sudo bash";
 
 function UpdatesSection() {
-  const { status, version, progress, error, setChecking } = useUpdateStore()
-  const [isMac, setIsMac] = useState(false)
-  const [cmdCopied, setCmdCopied] = useState(false)
+  const { status, version, progress, error, setChecking } = useUpdateStore();
+  const [isMac, setIsMac] = useState(false);
+  const [cmdCopied, setCmdCopied] = useState(false);
 
   useEffect(() => {
-    setIsMac(window.desktop?.platform === 'darwin')
-  }, [])
+    setIsMac(window.desktop?.platform === "darwin");
+  }, []);
 
   function handleCopyCommand() {
-    navigator.clipboard.writeText(UPDATE_COMMAND)
-    setCmdCopied(true)
-    setTimeout(() => setCmdCopied(false), 2000)
+    navigator.clipboard.writeText(UPDATE_COMMAND);
+    setCmdCopied(true);
+    setTimeout(() => setCmdCopied(false), 2000);
   }
 
   async function handleCheck() {
@@ -354,7 +1089,7 @@ function UpdatesSection() {
         {status === "checking" && (
           <div className="flex items-center gap-2 text-sm text-zinc-400">
             <ArrowsClockwise size={14} className="animate-spin" /> Checking for
-            updates…
+            updates\u2026
           </div>
         )}
 
@@ -372,30 +1107,40 @@ function UpdatesSection() {
           </div>
         )}
 
-        {status === 'available' && isMac && (
+        {status === "available" && isMac && (
           <div className="space-y-3">
             <div>
-              <div className="text-sm text-zinc-200 font-medium">Update available — v{version}</div>
-              <div className="text-xs text-zinc-500 mt-0.5">Run this command in Terminal to update.</div>
+              <div className="text-sm text-zinc-200 font-medium">
+                Update available \u2014 v{version}
+              </div>
+              <div className="text-xs text-zinc-500 mt-0.5">
+                Run this command in Terminal to update.
+              </div>
             </div>
             <div className="flex items-center gap-2 bg-zinc-950 border border-white/10 rounded-md px-3 py-2">
-              <code className="flex-1 text-xs font-mono text-emerald-400 select-all break-all">{UPDATE_COMMAND}</code>
+              <code className="flex-1 text-xs font-mono text-emerald-400 select-all break-all">
+                {UPDATE_COMMAND}
+              </code>
               <button
                 onClick={handleCopyCommand}
                 className="shrink-0 flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-white transition-colors"
               >
-                {cmdCopied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
-                {cmdCopied ? 'Copied' : 'Copy'}
+                {cmdCopied ? (
+                  <Check size={13} className="text-emerald-400" />
+                ) : (
+                  <Copy size={13} />
+                )}
+                {cmdCopied ? "Copied" : "Copy"}
               </button>
             </div>
           </div>
         )}
 
-        {status === 'available' && !isMac && (
+        {status === "available" && !isMac && (
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm text-zinc-200 font-medium">
-                Update available — v{version}
+                Update available \u2014 v{version}
               </div>
               <div className="text-xs text-zinc-500 mt-0.5">
                 Download and install when ready.
@@ -410,10 +1155,10 @@ function UpdatesSection() {
           </div>
         )}
 
-        {status === 'downloading' && !isMac && (
+        {status === "downloading" && !isMac && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-zinc-400">Downloading v{version}…</span>
+              <span className="text-zinc-400">Downloading v{version}\u2026</span>
               <span className="text-zinc-500 font-mono-custom text-xs">
                 {progress}%
               </span>
@@ -427,7 +1172,7 @@ function UpdatesSection() {
           </div>
         )}
 
-        {status === 'downloaded' && !isMac && (
+        {status === "downloaded" && !isMac && (
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm text-zinc-200 font-medium">
@@ -467,7 +1212,138 @@ function UpdatesSection() {
   );
 }
 
-// ─── Users Panel ──────────────────────────────────────────────────────────────
+function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
+  const { data: network } = useQuery<NetworkData>({
+    queryKey: ["network"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings/network");
+      if (!res.ok) throw new Error("Failed to fetch network info");
+      return res.json();
+    },
+  });
+
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const openInBrowser = (url: string) => {
+    if (window.desktop?.shell?.openExternal) {
+      window.desktop.shell.openExternal(url);
+    } else {
+      window.open(url, "_blank");
+    }
+  };
+
+  const copyUrl = (url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopied(url);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  return (
+    <div className="px-8 py-6">
+      <div className="max-w-2xl mx-auto space-y-8">
+        {/* Updates */}
+        {isDesktop && <UpdatesSection />}
+
+        {/* Network Access */}
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <Globe size={16} className="text-zinc-400" />
+            <h2 className="font-tech text-sm font-semibold text-zinc-200">
+              Network Access
+            </h2>
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg">
+              <div className="flex-1 min-w-0">
+                <div className="text-xs text-zinc-500 mb-1">Local</div>
+                <span className="text-sm font-mono-custom text-zinc-300">
+                  http://localhost:{network?.port ?? 14173}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 ml-4">
+                <button
+                  onClick={() =>
+                    copyUrl(`http://localhost:${network?.port ?? 14173}`)
+                  }
+                  className="p-1.5 text-zinc-500 hover:text-white transition-colors"
+                  title="Copy URL"
+                >
+                  {copied ===
+                  `http://localhost:${network?.port ?? 14173}` ? (
+                    <Check size={14} className="text-emerald-400" />
+                  ) : (
+                    <Copy size={14} />
+                  )}
+                </button>
+                <button
+                  onClick={() =>
+                    openInBrowser(
+                      `http://localhost:${network?.port ?? 14173}`
+                    )
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
+                >
+                  <ArrowSquareOut size={12} /> Open
+                </button>
+              </div>
+            </div>
+            {network?.addresses.map((ip) => {
+              const url = `http://${ip}:${network.port}`;
+              return (
+                <div
+                  key={ip}
+                  className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-zinc-500 mb-1">Network</div>
+                    <span className="text-sm font-mono-custom text-zinc-300">
+                      {url}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 ml-4">
+                    <button
+                      onClick={() => copyUrl(url)}
+                      className="p-1.5 text-zinc-500 hover:text-white transition-colors"
+                      title="Copy URL"
+                    >
+                      {copied === url ? (
+                        <Check size={14} className="text-emerald-400" />
+                      ) : (
+                        <Copy size={14} />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => openInBrowser(url)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
+                    >
+                      <ArrowSquareOut size={12} /> Open
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-zinc-600 mt-2">
+            Use the network URL to open FlowScale AI OS from any device on the
+            same network.
+          </p>
+        </section>
+
+        {/* App info */}
+        <section className="pt-4 border-t border-white/5">
+          <div className="flex justify-between text-xs text-zinc-600">
+            <span className="font-tech">FlowScale AI OS</span>
+            <span className="font-mono-custom">
+              v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.2.0"}
+            </span>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// ─── Users Panel ─────────────────────────────────────────────────────────────
 
 function UsersPanel({
   currentUserId,
@@ -484,7 +1360,7 @@ function UsersPanel({
   const [approveId, setApproveId] = useState<string | null>(null);
   const [approveRole, setApproveRole] = useState("artist");
   const [pendingDeleteUser, setPendingDeleteUser] = useState<UserRow | null>(
-    null,
+    null
   );
   const isAdmin = currentUserRole === "admin";
 
@@ -605,7 +1481,7 @@ function UsersPanel({
       <div className="flex-1 overflow-y-auto px-8 py-2">
         {loading ? (
           <div className="flex items-center justify-center h-40 text-zinc-500 text-sm">
-            Loading…
+            Loading\u2026
           </div>
         ) : usersTab === "pending" ? (
           pending.length === 0 ? (
@@ -635,7 +1511,7 @@ function UsersPanel({
                       )}
                     </div>
                     <div className="text-xs text-zinc-500">
-                      Requested {ROLE_LABELS[u.role] ?? u.role} ·{" "}
+                      Requested {ROLE_LABELS[u.role] ?? u.role} \u00B7{" "}
                       {formatDate(u.createdAt)}
                     </div>
                   </div>
@@ -820,7 +1696,7 @@ function UsersPanel({
   );
 }
 
-// ─── Modals ───────────────────────────────────────────────────────────────────
+// ─── Modals ──────────────────────────────────────────────────────────────────
 
 function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [current, setCurrent] = useState("");
@@ -934,7 +1810,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
                 disabled={loading}
                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
               >
-                {loading ? "Saving…" : "Save"}
+                {loading ? "Saving\u2026" : "Save"}
               </button>
             </div>
           </form>
@@ -1052,7 +1928,7 @@ function AddUserModal({
               disabled={loading}
               className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
             >
-              {loading ? "Creating…" : "Create"}
+              {loading ? "Creating\u2026" : "Create"}
             </button>
           </div>
         </form>

@@ -5,29 +5,16 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
+  House,
   Wrench,
-  Plugs,
-  Storefront,
+  ClockCounterClockwise,
   GearSix,
   SignOut,
-  Cube,
-  ImageSquare,
   Bug,
 } from "phosphor-react";
 import type { Role } from "@/lib/auth";
 import { useUpdateStore } from "@/store/updateStore";
 import ReportIssueModal from "@/components/ReportIssueModal";
-
-function SectionLabel({ label }: { label: string }) {
-  return (
-    <div className="px-3 pt-3 pb-0.5">
-      <span className="text-[9px] font-semibold tracking-widest text-zinc-600 uppercase opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150 delay-75 whitespace-nowrap block">
-        {label}
-      </span>
-      <div className="border-t border-white/5 mt-1 group-hover/sidebar:opacity-0 transition-opacity duration-150" />
-    </div>
-  );
-}
 
 function NavItem({
   href,
@@ -79,16 +66,17 @@ export default function Sidebar({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [reportOpen, setReportOpen] = useState(false);
   const {
-    status,
+    status: updateStatus,
     setAvailable,
     setNotAvailable,
     setProgress,
     setDownloaded,
     setError,
   } = useUpdateStore();
-  const [reportOpen, setReportOpen] = useState(false);
 
+  // Register desktop update listeners (sidebar is always mounted)
   useEffect(() => {
     const u = window.desktop?.updates;
     if (!u) return;
@@ -132,63 +120,42 @@ export default function Sidebar({
 
       {/* Nav */}
       <div className="flex flex-col gap-0.5 p-2 flex-1 overflow-y-auto overflow-x-hidden">
-        {/* <NavItem
-          href="/explore"
-          icon={Storefront}
-          label="Discover"
-          active={pathname === '/explore' || pathname.startsWith('/explore/')}
-        /> */}
-
         <NavItem
-          href="/apps"
-          icon={Cube}
-          label="Apps"
-          active={
-            pathname === "/apps" ||
-            pathname.startsWith("/apps/") ||
-            pathname.startsWith("/installed-apps/")
-          }
+          href="/home"
+          icon={House}
+          label="Home"
+          active={pathname === "/home" || pathname === "/"}
         />
 
         <NavItem
           href="/tools"
           icon={Wrench}
           label="Tools"
-          active={pathname === "/tools" || pathname.startsWith("/tools/")}
+          active={pathname === "/tools" || pathname.startsWith("/tools/") || pathname === "/build-tool"}
         />
 
         <NavItem
-          href="/outputs"
-          icon={ImageSquare}
-          label="Assets"
-          active={pathname === "/outputs" || pathname.startsWith("/outputs/")}
+          href="/jobs"
+          icon={ClockCounterClockwise}
+          label="Jobs"
+          active={pathname === "/jobs" || pathname.startsWith("/jobs/")}
         />
 
         <NavItem
-          href="/providers"
-          icon={Plugs}
-          label="Providers"
-          active={
-            pathname === "/providers" || pathname.startsWith("/providers/")
+          href="/settings"
+          icon={GearSix}
+          label="Settings"
+          active={pathname === "/settings" || pathname.startsWith("/settings/")}
+          badge={
+            updateStatus === "available" || updateStatus === "downloading" || updateStatus === "downloaded"
+              ? "Update"
+              : undefined
           }
         />
       </div>
 
       {/* Footer */}
       <div className="p-2 border-t border-white/5 shrink-0">
-        <div className="relative">
-          <NavItem
-            href="/settings"
-            icon={GearSix}
-            label="Settings"
-            active={pathname === "/settings"}
-          />
-          {(status === "available" ||
-            status === "downloading" ||
-            status === "downloaded") && (
-            <span className="absolute top-2 right-2 size-2 rounded-full bg-emerald-400 ring-2 ring-[#121214]" />
-          )}
-        </div>
         <button
           onClick={() => setReportOpen(true)}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-zinc-400 hover:bg-white/5 hover:text-zinc-100 transition-colors duration-150 whitespace-nowrap"

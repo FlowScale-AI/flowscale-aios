@@ -8,7 +8,7 @@ import { LottieSpinner } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
 import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
-import { InstanceSelector } from '@/components/InstanceSelector'
+import { ComputePicker } from '@/components/ComputePicker'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -148,6 +148,15 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
       if (!res.ok) return { instances: [] }
       return res.json()
     },
+  })
+  const { data: gpuData } = useQuery<{ gpus: Array<{ index: number; name: string; vramMB: number; backend: string }> }>({
+    queryKey: ['gpu-info'],
+    queryFn: async () => {
+      const res = await fetch('/api/gpu')
+      if (!res.ok) return { gpus: [] }
+      return res.json()
+    },
+    staleTime: 60_000,
   })
   const comfyInstances = comfyManageData?.instances ?? []
   const runningInstances = comfyInstances.filter((i) => i.status === 'running')
@@ -350,8 +359,9 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
         )}
         {/* Instance selector */}
         {comfyInstances.length > 0 && (
-          <InstanceSelector
+          <ComputePicker
             instances={comfyInstances}
+            gpuInfo={gpuData?.gpus}
             value={selectedComfyPort}
             onChange={setSelectedComfyPort}
           />

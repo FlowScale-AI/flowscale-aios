@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/register", "/setup", "/api/auth/", "/api/local-inference/"];
+const PUBLIC_PATHS = ["/login", "/register", "/setup", "/api/auth/", "/api/local-inference/", "/api/setup/"];
 
 // Regex to match /canvas/<uuid> pages and their API data routes
 const SHARED_CANVAS_PAGE = /^\/canvas\/[\w-]+$/;

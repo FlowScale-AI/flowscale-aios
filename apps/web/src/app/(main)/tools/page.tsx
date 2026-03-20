@@ -23,6 +23,8 @@ import { PageTransition, Modal } from '@/components/ui'
 
 type Tab = 'my-tools' | 'available-tools'
 
+type ToolType = 'training' | 'image-gen' | 'video-gen' | 'upscale' | 'edit' | 'custom'
+
 interface CustomTool {
   id: string
   name: string
@@ -31,7 +33,30 @@ interface CustomTool {
   status: string
   source: string
   sourceUrl: string | null
+  toolType: ToolType | null
+  lastUsedAt: number | null
   createdAt: number
+}
+
+const TOOL_TYPE_CONFIG: Record<ToolType, { label: string; textColor: string; bgColor: string; borderColor: string }> = {
+  training: { label: 'Training', textColor: 'text-violet-400', bgColor: 'bg-violet-400/10', borderColor: 'border-violet-400/20' },
+  'image-gen': { label: 'Image Gen', textColor: 'text-blue-400', bgColor: 'bg-blue-400/10', borderColor: 'border-blue-400/20' },
+  'video-gen': { label: 'Video Gen', textColor: 'text-cyan-400', bgColor: 'bg-cyan-400/10', borderColor: 'border-cyan-400/20' },
+  upscale: { label: 'Upscale', textColor: 'text-amber-400', bgColor: 'bg-amber-400/10', borderColor: 'border-amber-400/20' },
+  edit: { label: 'Edit', textColor: 'text-pink-400', bgColor: 'bg-pink-400/10', borderColor: 'border-pink-400/20' },
+  custom: { label: 'Custom', textColor: 'text-zinc-400', bgColor: 'bg-zinc-800', borderColor: 'border-zinc-700' },
+}
+
+function formatLastUsed(timestamp: number | null): string | null {
+  if (!timestamp) return null
+  const diff = Date.now() - timestamp
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return 'Last used: just now'
+  if (minutes < 60) return `Last used: ${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `Last used: ${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `Last used: ${days}d ago`
 }
 
 interface CatalogEntry {
@@ -55,6 +80,8 @@ function CustomToolCard({
   inferenceStatus?: 'running' | 'starting' | 'stopped'
 }) {
   const showInference = tool.engine === 'api' && inferenceStatus
+  const typeConfig = TOOL_TYPE_CONFIG[(tool.toolType as ToolType) ?? 'custom']
+  const lastUsedText = formatLastUsed(tool.lastUsedAt)
 
   return (
     <div className="group flex flex-col rounded-xl border border-white/5 bg-[var(--color-background-panel)] hover:border-zinc-700 transition-all duration-150 relative overflow-hidden">
@@ -67,16 +94,24 @@ function CustomToolCard({
               <Wrench size={16} weight="duotone" className="text-violet-400" />
             )}
           </div>
-          <span className={[
-            'text-[10px] font-semibold px-1.5 py-0.5 rounded-full border',
-            tool.status === 'dev'
-              ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
-              : tool.source === 'registry'
-                ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
-                : 'text-violet-400 bg-violet-500/10 border-violet-500/20',
-          ].join(' ')}>
-            {tool.status === 'dev' ? 'Dev' : tool.source === 'registry' ? 'Official' : tool.source === 'custom' ? 'Custom' : tool.engine === 'comfyui' ? 'ComfyUI' : 'Custom'}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className={[
+              'text-[10px] font-semibold px-1.5 py-0.5 rounded-full border',
+              typeConfig.textColor, typeConfig.bgColor, typeConfig.borderColor,
+            ].join(' ')}>
+              {typeConfig.label}
+            </span>
+            <span className={[
+              'text-[10px] font-semibold px-1.5 py-0.5 rounded-full border',
+              tool.status === 'dev'
+                ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+                : tool.source === 'registry'
+                  ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                  : 'text-violet-400 bg-violet-500/10 border-violet-500/20',
+            ].join(' ')}>
+              {tool.status === 'dev' ? 'Dev' : tool.source === 'registry' ? 'Official' : tool.source === 'custom' ? 'Custom' : tool.engine === 'comfyui' ? 'ComfyUI' : 'Custom'}
+            </span>
+          </div>
         </div>
         <h3 className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors mb-1">
           {tool.name}
@@ -101,6 +136,8 @@ function CustomToolCard({
               <span className="text-zinc-500">Not running</span></>
             )}
           </span>
+        ) : lastUsedText ? (
+          <span className="text-xs text-zinc-500">{lastUsedText}</span>
         ) : (
           <span className="text-xs text-zinc-600">Click to run</span>
         )}
@@ -501,6 +538,38 @@ export default function ToolsPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {/* Coming soon placeholder cards */}
+                {[
+                  { id: 'coming-flux-lora', name: 'Flux LoRA Trainer', type: 'training' as ToolType, description: 'Train Flux LoRA models on your images' },
+                  { id: 'coming-sdxl-lora', name: 'SDXL LoRA Trainer', type: 'training' as ToolType, description: 'Train SDXL LoRA models with AI-Toolkit' },
+                ].filter((p) => !search.trim() || p.name.toLowerCase().includes(search.toLowerCase()) || p.description.toLowerCase().includes(search.toLowerCase()))
+                .map((placeholder) => {
+                  const cfg = TOOL_TYPE_CONFIG[placeholder.type]
+                  return (
+                    <div key={placeholder.id} className="group flex flex-col rounded-xl border border-white/5 bg-[var(--color-background-panel)] opacity-70 overflow-hidden">
+                      <div className="flex flex-col p-4 flex-1">
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className={`size-9 rounded-lg ${cfg.bgColor} border ${cfg.borderColor} flex items-center justify-center shrink-0`}>
+                            <Wrench size={16} weight="duotone" className={cfg.textColor} />
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${cfg.textColor} ${cfg.bgColor} ${cfg.borderColor}`}>
+                              {cfg.label}
+                            </span>
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full border text-zinc-400 bg-zinc-800 border-zinc-700">
+                              Coming Soon
+                            </span>
+                          </div>
+                        </div>
+                        <h3 className="text-sm font-medium text-zinc-200 mb-1">{placeholder.name}</h3>
+                        <p className="text-xs text-zinc-500 line-clamp-2 leading-relaxed flex-1">{placeholder.description}</p>
+                      </div>
+                      <div className="flex items-center justify-end px-4 py-2 border-t border-white/5">
+                        <span className="text-xs text-zinc-600">Coming soon</span>
+                      </div>
+                    </div>
+                  )
+                })}
                 {filteredCatalog.map((entry) => (
                   <CatalogCard
                     key={entry.id}

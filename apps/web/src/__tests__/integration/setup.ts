@@ -25,6 +25,8 @@ const DDL = `
     comfy_port INTEGER,
     model_version TEXT,
     source_url TEXT,
+    tool_type TEXT DEFAULT 'custom',
+    last_used_at INTEGER,
     version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
     deployed_at INTEGER

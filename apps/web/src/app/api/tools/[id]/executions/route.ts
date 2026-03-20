@@ -224,6 +224,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       status: 'running',
       createdAt: now,
     })
+    db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()
 
     const config = JSON.parse(tool.workflowJson) as { engine: string; model: string; pluginId: string }
 
@@ -337,6 +338,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     status: 'running',
     createdAt: now,
   })
+  db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()
   trackExecStart(comfyPort, executionId)
 
   // Queue the prompt via embedded ComfyUI proxy (non-blocking)

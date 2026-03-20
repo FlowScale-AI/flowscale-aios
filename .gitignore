@@ -69,3 +69,4 @@ apps/desktop/releases/
 skills-lock.json
 .agent/skills/
 apps/web/test-results/
+apps/web/tsconfig.tsbuildinfo

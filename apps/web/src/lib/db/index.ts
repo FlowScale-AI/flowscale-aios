@@ -191,6 +191,14 @@ export function getDb() {
     sqlite.exec('ALTER TABLE tools ADD COLUMN source_url TEXT')
   }
 
+  if (!toolColumns.some((col) => col.name === 'tool_type')) {
+    try { sqlite.exec("ALTER TABLE tools ADD COLUMN tool_type TEXT DEFAULT 'custom'") } catch { /* column may already exist */ }
+  }
+
+  if (!toolColumns.some((col) => col.name === 'last_used_at')) {
+    try { sqlite.exec('ALTER TABLE tools ADD COLUMN last_used_at INTEGER') } catch { /* column may already exist */ }
+  }
+
   const execColumns = sqlite.prepare('PRAGMA table_info(executions)').all() as { name: string }[]
   if (!execColumns.some((col) => col.name === 'user_id')) {
     sqlite.exec('ALTER TABLE executions ADD COLUMN user_id TEXT')

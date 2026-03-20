@@ -23,7 +23,7 @@ import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
 import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
 import { LocalInferenceSetup, useInferenceStatus } from '@/components/LocalInferenceSetup'
-import { InstanceSelector } from '@/components/InstanceSelector'
+import { ComputePicker } from '@/components/ComputePicker'
 
 interface WorkflowIO {
   nodeId: string
@@ -777,6 +777,15 @@ export default function ToolPage() {
       return res.json()
     },
   })
+  const { data: gpuHardwareData } = useQuery<{ gpus: Array<{ index: number; name: string; vramMB: number; backend: string }> }>({
+    queryKey: ['gpu-info'],
+    queryFn: async () => {
+      const res = await fetch('/api/gpu')
+      if (!res.ok) return { gpus: [] }
+      return res.json()
+    },
+    staleTime: 60_000,
+  })
   const comfyInstances = comfyManageData?.instances ?? []
   const runningInstances = comfyInstances.filter((i) => i.status === 'running')
   const [selectedComfyPort, setSelectedComfyPort] = useState<number | 'auto' | null>(null)
@@ -1023,8 +1032,9 @@ export default function ToolPage() {
         )}
         {/* Instance selector for ComfyUI tools */}
         {tool.engine === 'comfyui' && comfyInstances.length > 0 && (
-          <InstanceSelector
+          <ComputePicker
             instances={comfyInstances}
+            gpuInfo={gpuHardwareData?.gpus}
             value={selectedComfyPort}
             onChange={setSelectedComfyPort}
           />
