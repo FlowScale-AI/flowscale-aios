@@ -10,6 +10,7 @@ import { Tooltip, LottieSpinner } from "@/components/ui";
 import { ComfyLogsPanel } from "@/components/ComfyLogsPanel";
 import { X } from "phosphor-react";
 import { InstanceSelector } from "@/components/InstanceSelector";
+import { useModalStatus } from "@/hooks/useModalStatus";
 
 interface ResultItem {
   content_type: string;
@@ -24,7 +25,7 @@ interface ResultItem {
 interface ExecutionMenuProps {
   executionState: ExecutionState;
   activeToolId?: string;
-  onRunGeneration: (comfyPort?: number) => void;
+  onRunGeneration: (comfyPort?: number | "modal") => void;
   onStopGeneration: () => void;
   onResultDragStart: (filename: string, result: any) => void;
   onReset: () => void;
@@ -56,10 +57,12 @@ export default function ExecutionMenu({
   });
   const comfyInstances = comfyManageData?.instances ?? [];
   const runningInstances = comfyInstances.filter((i) => i.status === "running");
-  const [selectedComfyPort, setSelectedComfyPort] = useState<number | "auto" | null>(null);
+  const [selectedComfyPort, setSelectedComfyPort] = useState<number | "auto" | "modal" | null>(null);
+  const { data: modalStatus } = useModalStatus();
 
-  /** Resolve port: pinned port if user selected one, undefined to let server auto-route. */
-  const resolveComfyPort = useCallback((): number | undefined => {
+  /** Resolve port: pinned port if user selected one, 'modal' for cloud, undefined to let server auto-route. */
+  const resolveComfyPort = useCallback((): number | "modal" | undefined => {
+    if (selectedComfyPort === "modal") return "modal";
     if (selectedComfyPort !== null && selectedComfyPort !== "auto") return selectedComfyPort;
     // Let the server handle auto-routing (least-busy across all users)
     return undefined;
@@ -80,7 +83,7 @@ export default function ExecutionMenu({
       : 8188;
   const comfyPort = fallbackComfyPort;
   const effectiveComfyPort: number =
-    selectedComfyPort !== null && selectedComfyPort !== "auto"
+    selectedComfyPort !== null && selectedComfyPort !== "auto" && selectedComfyPort !== "modal"
       ? selectedComfyPort
       : runningInstances[0]?.port ?? fallbackComfyPort;
   const comfyInstanceLabel = comfyInstances.find((i) => i.port === effectiveComfyPort)?.label ?? `:${effectiveComfyPort}`;
@@ -260,6 +263,7 @@ export default function ExecutionMenu({
                     value={selectedComfyPort}
                     onChange={setSelectedComfyPort}
                     compact
+                    modalConnected={modalStatus?.authenticated}
                   />
                 </>
               )}

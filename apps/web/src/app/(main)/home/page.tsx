@@ -13,8 +13,10 @@ import {
   Wrench,
   ArrowSquareOut,
   CaretRight,
+  Cloud,
 } from 'phosphor-react'
 import { PageTransition } from '@/components/ui'
+import { useModalStatus } from '@/hooks/useModalStatus'
 
 interface GpuInfo {
   index: number
@@ -154,6 +156,8 @@ export default function HomePage() {
     refetchInterval: 10_000,
   })
 
+  const { data: modalStatus } = useModalStatus()
+
   const gpus = gpuData?.gpus ?? []
   const cpuInfo = gpuData?.cpu
   const instances = comfyManage?.instances ?? []
@@ -239,6 +243,28 @@ export default function HomePage() {
                   <span className="text-[10px] font-mono text-zinc-500">{cpuInfo.cores}C/{cpuInfo.threads}T</span>
                   <span className="text-[10px] font-mono text-zinc-600">·</span>
                   <span className="text-[10px] font-mono text-zinc-500">{cpuInfo.ramGB} GB RAM</span>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Cloud Card */}
+            {modalStatus?.authenticated && (
+              <div className="p-4 rounded-xl border border-purple-500/20 bg-[var(--color-background-panel)]">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cloud size={16} className="text-purple-400" />
+                    <span className="text-sm font-medium text-zinc-200">Modal Cloud</span>
+                  </div>
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
+                    <span className="size-1.5 rounded-full bg-emerald-400" />
+                    Connected
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 mt-1">{modalStatus.workspace ?? 'Cloud GPU'}</p>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                    Cloud
+                  </span>
                 </div>
               </div>
             )}

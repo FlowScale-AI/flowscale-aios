@@ -24,6 +24,7 @@ import { getComfyOrgApiKey } from '@/lib/platform'
 import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
 import { LocalInferenceSetup, useInferenceStatus } from '@/components/LocalInferenceSetup'
 import { ComputePicker } from '@/components/ComputePicker'
+import { useModalStatus } from '@/hooks/useModalStatus'
 
 interface WorkflowIO {
   nodeId: string
@@ -798,10 +799,13 @@ export default function ToolPage() {
   })
   const comfyInstances = comfyManageData?.instances ?? []
   const runningInstances = comfyInstances.filter((i) => i.status === 'running')
-  const [selectedComfyPort, setSelectedComfyPort] = useState<number | 'auto' | null>(null)
+  const [selectedComfyPort, setSelectedComfyPort] = useState<number | 'auto' | 'modal' | null>(null)
+  const { data: modalStatus } = useModalStatus()
   // Default to tool's configured port or first running instance
   const effectiveComfyPort: number | null =
-    selectedComfyPort === 'auto' || selectedComfyPort === null
+    selectedComfyPort === 'modal'
+      ? null
+      : selectedComfyPort === 'auto' || selectedComfyPort === null
       ? (tool?.comfyPort ?? runningInstances[0]?.port ?? null)
       : selectedComfyPort
   const comfyInstanceLabel = effectiveComfyPort
@@ -859,8 +863,9 @@ export default function ToolPage() {
     }
   }, [runningExecution, executions])
 
-  /** Resolve the port: pinned port if user selected one, undefined to let server auto-route. */
-  const resolveComfyPort = useCallback((): number | undefined => {
+  /** Resolve the port: pinned port if user selected one, 'modal' for cloud, undefined to let server auto-route. */
+  const resolveComfyPort = useCallback((): number | 'modal' | undefined => {
+    if (selectedComfyPort === 'modal') return 'modal'
     if (selectedComfyPort !== null && selectedComfyPort !== 'auto') return selectedComfyPort
     // Let the server handle auto-routing (least-busy across all users)
     return undefined
@@ -1047,6 +1052,7 @@ export default function ToolPage() {
             gpuInfo={gpuHardwareData?.gpus}
             value={selectedComfyPort}
             onChange={setSelectedComfyPort}
+            modalConnected={modalStatus?.authenticated}
           />
         )}
         {/* Device selector for API tools */}

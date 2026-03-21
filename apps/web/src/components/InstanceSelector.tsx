@@ -8,13 +8,14 @@ interface InstanceSelectorProps {
   onChange: ComputePickerProps["onChange"]
   compact?: boolean
   gpuInfo?: ComputePickerProps["gpuInfo"]
+  modalConnected?: boolean
 }
 
 /**
  * Thin wrapper around ComputePicker for backwards compatibility.
  * New code should import ComputePicker directly.
  */
-export function InstanceSelector({ instances, value, onChange, compact = false, gpuInfo }: InstanceSelectorProps) {
+export function InstanceSelector({ instances, value, onChange, compact = false, gpuInfo, modalConnected }: InstanceSelectorProps) {
   return (
     <ComputePicker
       instances={instances}
@@ -22,6 +23,7 @@ export function InstanceSelector({ instances, value, onChange, compact = false, 
       value={value}
       onChange={onChange}
       compact={compact}
+      modalConnected={modalConnected}
     />
   )
 }

@@ -207,6 +207,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride, device: deviceOverride } = body
   const comfyOrgApiKey = comfyOrgApiKeyFromBody || getComfyOrgApiKeyServer()
 
+  // ── Modal cloud guard ───────────────────────────────────────────────────────
+  if (comfyPortOverride === 'modal') {
+    return NextResponse.json(
+      { error: 'Modal cloud execution coming soon. Select a local compute target.' },
+      { status: 501 }
+    )
+  }
+
   // ── API-engine tools (non-ComfyUI, plugin-driven) ───────────────────────────
   if (tool.engine === 'api') {
     const currentUser = getRequestUser(req)

@@ -9,11 +9,14 @@ import {
   ArrowRight,
   Lightning,
   Cloud,
+  CloudArrowUp,
   ArrowSquareOut,
   Key,
   Cpu,
   CircleNotch,
   FolderOpen,
+  Warning,
+  ArrowCounterClockwise,
 } from 'phosphor-react'
 
 interface GpuInfo {
@@ -197,43 +200,160 @@ function StepGpus({ onNext }: { onNext: () => void }) {
 
 /* ─── Step 2: Cloud Compute ─── */
 function StepCloud({ onNext }: { onNext: () => void }) {
+  const [phase, setPhase] = useState<'idle' | 'installing' | 'authenticating' | 'connected' | 'error'>('idle')
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [workspace, setWorkspace] = useState<string | null>(null)
+
+  // Poll for status during auth
+  useEffect(() => {
+    if (phase !== 'authenticating') return
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/setup/modal')
+        if (!res.ok) return
+        const data = await res.json()
+        if (data.authenticated) {
+          setPhase('connected')
+          setWorkspace(data.workspace ?? 'default')
+        }
+      } catch {}
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [phase])
+
+  // Check if already connected on mount
+  useEffect(() => {
+    fetch('/api/setup/modal')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.authenticated) {
+          setPhase('connected')
+          setWorkspace(data.workspace ?? 'default')
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  async function handleLogin() {
+    setErrorMsg(null)
+    try {
+      // Check if installed first
+      const statusRes = await fetch('/api/setup/modal')
+      const status = statusRes.ok ? await statusRes.json() : { installed: false }
+
+      if (!status.installed) {
+        setPhase('installing')
+        const installRes = await fetch('/api/setup/modal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'install' }),
+        })
+        const installData = await installRes.json()
+        if (!installData.success) {
+          setPhase('error')
+          setErrorMsg(installData.error || 'Failed to install Modal CLI')
+          return
+        }
+      }
+
+      setPhase('authenticating')
+      await fetch('/api/setup/modal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'authenticate' }),
+      })
+      // Polling will detect completion
+    } catch (err: any) {
+      setPhase('error')
+      setErrorMsg(err.message || 'Setup failed')
+    }
+  }
+
   return (
     <div>
       <h1 className="text-xl font-semibold text-white mb-1 font-tech">Cloud Compute</h1>
-      <p className="text-sm text-zinc-400 mb-6">Optional cloud GPU providers.</p>
+      <p className="text-sm text-zinc-400 mb-6">Connect Modal.com for cloud GPU access.</p>
 
-      <div className="bg-white/5 border border-white/10 rounded-lg p-5 mb-6">
-        <div className="flex items-start gap-3">
-          <div className="size-10 rounded-lg bg-emerald-600/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-            <Cloud size={20} weight="fill" className="text-emerald-400" />
+      <div className={`border rounded-lg p-5 mb-6 ${phase === 'connected' ? 'bg-purple-500/5 border-purple-500/20' : 'bg-white/5 border-white/10'}`}>
+        <div className="flex items-start gap-3 mb-4">
+          <div className="size-10 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0">
+            <Cloud size={20} weight="fill" className="text-purple-400" />
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
               <h3 className="text-sm font-semibold text-white">Modal.com</h3>
-              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-zinc-700/50 text-zinc-400 border border-zinc-600/30">
-                Coming Soon
-              </span>
+              {phase === 'connected' && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
+                  <span className="size-1.5 rounded-full bg-emerald-400" />
+                  Connected
+                </span>
+              )}
             </div>
             <p className="text-xs text-zinc-400 leading-relaxed">
-              Connect Modal.com for cloud GPU access. Train models on A100s without buying
-              hardware.
+              {phase === 'connected'
+                ? `Workspace: ${workspace}`
+                : 'Run tools on A100, H100, and more. No hardware required.'}
             </p>
           </div>
         </div>
 
-        <button
-          disabled
-          className="mt-4 w-full flex items-center justify-center gap-2 bg-zinc-800 text-zinc-500 font-medium py-2 px-4 rounded-lg cursor-not-allowed border border-zinc-700/50"
-        >
-          Connect Modal
-        </button>
+        {phase === 'idle' && (
+          <button
+            onClick={handleLogin}
+            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white font-medium py-2.5 px-4 rounded-lg transition-all"
+          >
+            <CloudArrowUp size={16} />
+            Login with Modal
+          </button>
+        )}
+
+        {phase === 'installing' && (
+          <div className="flex items-center gap-2 py-2.5 px-4 rounded-lg bg-zinc-900/50 border border-white/5">
+            <CircleNotch size={14} className="animate-spin text-purple-400" />
+            <span className="text-sm text-zinc-300">Installing Modal CLI...</span>
+          </div>
+        )}
+
+        {phase === 'authenticating' && (
+          <div className="flex items-center gap-2 py-2.5 px-4 rounded-lg bg-zinc-900/50 border border-white/5">
+            <CircleNotch size={14} className="animate-spin text-purple-400" />
+            <span className="text-sm text-zinc-300">Waiting for browser authentication...</span>
+          </div>
+        )}
+
+        {phase === 'connected' && (
+          <div className="flex items-center gap-2">
+            <CheckCircle size={16} weight="fill" className="text-emerald-400" />
+            <span className="text-sm text-emerald-400">Modal is ready to use</span>
+          </div>
+        )}
+
+        {phase === 'error' && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-950/30 border border-red-500/20">
+              <Warning size={14} className="text-red-400 shrink-0" />
+              <span className="text-xs text-red-300">{errorMsg}</span>
+            </div>
+            <button
+              onClick={() => { setPhase('idle'); setErrorMsg(null) }}
+              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              <ArrowCounterClockwise size={12} />
+              Retry
+            </button>
+          </div>
+        )}
       </div>
 
       <button
         onClick={onNext}
-        className="flex items-center justify-center gap-2 w-full bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium py-2.5 px-4 rounded-lg transition-colors border border-white/10"
+        className={`flex items-center justify-center gap-2 w-full font-medium py-2.5 px-4 rounded-lg transition-colors border ${
+          phase === 'connected'
+            ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500'
+            : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-white/10'
+        }`}
       >
-        Skip for now
+        {phase === 'connected' ? 'Continue' : 'Skip for now'}
         <ArrowRight size={16} />
       </button>
     </div>

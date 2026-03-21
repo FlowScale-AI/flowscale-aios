@@ -40,7 +40,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
   };
 
   const executeWorkflow = useCallback(
-    async (workflowId: string, inputs: Record<string, any>, comfyPortOverride?: number) => {
+    async (workflowId: string, inputs: Record<string, any>, comfyPortOverride?: number | "modal") => {
       abortRef.current = false;
       clearPoll();
 

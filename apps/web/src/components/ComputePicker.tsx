@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
+import Link from "next/link"
 import { CaretDown, Lightning, Cpu, Cloud } from "phosphor-react"
 
 interface ComputeInstance {
@@ -21,10 +22,12 @@ interface GpuInfoItem {
 export interface ComputePickerProps {
   instances: ComputeInstance[]
   gpuInfo?: GpuInfoItem[]
-  value: number | "auto" | null
-  onChange: (value: number | "auto") => void
+  value: number | "auto" | "modal" | null
+  onChange: (value: number | "auto" | "modal") => void
   /** Compact mode for tight layouts like the canvas toolbar */
   compact?: boolean
+  /** Whether Modal cloud compute is connected */
+  modalConnected?: boolean
 }
 
 function formatVram(mb: number): string {
@@ -37,7 +40,6 @@ function matchGpuToInstance(
   gpuInfo?: GpuInfoItem[]
 ): GpuInfoItem | undefined {
   if (!gpuInfo || gpuInfo.length === 0) return undefined
-  // Match by device string — e.g. "gpu-0" -> index 0
   const match = instance.device.match(/gpu-(\d+)/)
   if (match) {
     const idx = parseInt(match[1], 10)
@@ -52,6 +54,7 @@ export function ComputePicker({
   value,
   onChange,
   compact = false,
+  modalConnected = false,
 }: ComputePickerProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -59,14 +62,18 @@ export function ComputePicker({
   const showAuto = running.length > 1
 
   const selected =
-    value === "auto" || value === null
+    value === "modal"
+      ? "modal"
+      : value === "auto" || value === null
       ? showAuto
         ? "auto"
         : instances[0]?.id
       : String(value)
 
   const selectedLabel =
-    selected === "auto"
+    selected === "modal"
+      ? "Modal (Cloud)"
+      : selected === "auto"
       ? "Auto"
       : instances.find((i) => String(i.port) === selected)?.label ?? "Select"
 
@@ -91,11 +98,19 @@ export function ComputePicker({
         }`}
       >
         {!compact && (
-          <Cpu
-            size={13}
-            weight="duotone"
-            className="shrink-0 text-emerald-400"
-          />
+          selected === "modal" ? (
+            <Cloud
+              size={13}
+              weight="duotone"
+              className="shrink-0 text-purple-400"
+            />
+          ) : (
+            <Cpu
+              size={13}
+              weight="duotone"
+              className="shrink-0 text-emerald-400"
+            />
+          )
         )}
         <span className="truncate">{selectedLabel}</span>
         <CaretDown
@@ -239,20 +254,42 @@ export function ComputePicker({
             )
           })}
 
-          {/* Cloud option (coming soon) */}
+          {/* Cloud option */}
           <div className="h-px bg-white/5 my-1" />
-          <div className="w-full px-3 py-2 rounded-lg text-xs opacity-50 cursor-not-allowed">
-            <div className="flex items-center gap-2">
-              <Cloud size={14} weight="duotone" className="text-purple-400" />
-              <div className="flex-1 min-w-0">
-                <span className="text-zinc-400 font-medium">Modal A100</span>
-              </div>
-              <span className="shrink-0 px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+          {modalConnected ? (
+            <button
+              onClick={() => {
+                onChange("modal")
+                setOpen(false)
+              }}
+              className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors flex items-center gap-2 ${
+                selected === "modal"
+                  ? "text-purple-400 bg-purple-500/10"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Cloud
+                size={14}
+                weight="duotone"
+                className="text-purple-400"
+              />
+              <span className="font-medium">Modal (Cloud)</span>
+              <span className="ml-auto shrink-0 px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
                 Cloud
               </span>
-              <span className="text-[10px] text-zinc-600">Coming Soon</span>
-            </div>
-          </div>
+            </button>
+          ) : (
+            <Link
+              href="/settings?tab=compute"
+              onClick={() => setOpen(false)}
+              className="block w-full px-3 py-2 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Cloud size={14} weight="duotone" className="text-purple-400 opacity-50" />
+                <span>Connect Modal in Settings &rarr;</span>
+              </div>
+            </Link>
+          )}
         </div>
       )}
     </div>

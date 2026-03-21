@@ -1022,7 +1022,7 @@ export default function CanvasSurface({
   );
 
   // Tool Execution Handlers
-  const handleRunGeneration = async (comfyPort?: number) => {
+  const handleRunGeneration = async (comfyPort?: number | "modal") => {
     if (!activeToolId) {
       console.warn("No tool selected");
       return;
