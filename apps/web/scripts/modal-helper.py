@@ -6,7 +6,7 @@ Called by the Node.js backend via child_process.spawn.
 All output is JSON to stdout for easy parsing.
 
 Usage:
-    python modal-helper.py deploy <plugin-dir> <gpu-tier>
+    python modal-helper.py deploy <plugin-dir> <gpu-tier> <app-name>
     python modal-helper.py undeploy <app-name>
     python modal-helper.py status <app-name>
     python modal-helper.py logs <plugin-dir>
@@ -34,7 +34,7 @@ def _save_log(plugin_dir: str, content: str, label: str = "deploy"):
     return log_path
 
 
-def cmd_deploy(plugin_dir: str, gpu: str):
+def cmd_deploy(plugin_dir: str, gpu: str, app_name: str):
     """Deploy the plugin's modal_app.py with the given GPU tier."""
     modal_app_path = os.path.join(plugin_dir, "modal_app.py")
     if not os.path.exists(modal_app_path):
@@ -46,7 +46,7 @@ def cmd_deploy(plugin_dir: str, gpu: str):
     with open(latest_path, "w") as f:
         f.write(f"[{datetime.now().isoformat()}] Deploying to Modal with GPU={gpu}...\n")
 
-    env = {**os.environ, "FLOWSCALE_GPU": gpu}
+    env = {**os.environ, "FLOWSCALE_GPU": gpu, "FLOWSCALE_APP_NAME": app_name}
     try:
         # Use Popen for streaming — write to log file as output arrives
         proc = subprocess.Popen(
@@ -94,12 +94,6 @@ def cmd_deploy(plugin_dir: str, gpu: str):
             m = re.search(r"https://\S+\.modal\.run\S*", full_output)
             if m:
                 url = m.group(0)
-
-        # Derive app name from manifest
-        manifest_path = os.path.join(plugin_dir, "manifest.json")
-        with open(manifest_path) as f:
-            manifest = json.load(f)
-        app_name = f"flowscale-{manifest['id']}"
 
         _json_out({"success": True, "appName": app_name, "url": url or "", "gpu": gpu})
 
@@ -226,8 +220,8 @@ if __name__ == "__main__":
 
     command = sys.argv[1]
 
-    if command == "deploy" and len(sys.argv) >= 4:
-        cmd_deploy(sys.argv[2], sys.argv[3])
+    if command == "deploy" and len(sys.argv) >= 5:
+        cmd_deploy(sys.argv[2], sys.argv[3], sys.argv[4])
     elif command == "undeploy" and len(sys.argv) >= 3:
         cmd_undeploy(sys.argv[2])
     elif command == "status" and len(sys.argv) >= 3:
