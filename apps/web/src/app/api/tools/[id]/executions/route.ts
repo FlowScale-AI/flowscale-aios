@@ -545,7 +545,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Poll ComfyUI history server-side until the prompt completes, then save
   // outputs to disk and return the finished execution. Used by the HTTP SDK so
   // external apps don't need a browser watching a WebSocket.
-  const waitMode = req.nextUrl.searchParams.get('wait') === 'true'
+  // Force wait mode for Modal ComfyUI — outputs live in the container's ephemeral
+  // filesystem and are lost when the container scales down. Server-side polling
+  // downloads outputs immediately while the container is still alive.
+  const waitMode = req.nextUrl.searchParams.get('wait') === 'true' || isModalComfyPort(comfyPort)
   if (waitMode) {
     const baseUrl = resolveComfyBaseUrl(comfyPort)
     const maxWait = 300_000
