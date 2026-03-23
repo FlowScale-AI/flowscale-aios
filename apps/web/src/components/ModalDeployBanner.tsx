@@ -1,9 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Cloud, CaretDown, Spinner, X } from 'phosphor-react'
-import { useModalDeployStatus } from '@/hooks/useModalDeployStatus'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Cloud, Spinner, X } from 'phosphor-react'
+import { useMutation } from '@tanstack/react-query'
 
 const GPU_OPTIONS = [
   { value: 'T4', label: 'T4 (16 GB)' },
@@ -13,23 +12,53 @@ const GPU_OPTIONS = [
   { value: 'H100', label: 'H100 (80 GB)' },
 ] as const
 
+interface ModalDeploymentStatus {
+  id: string
+  name: string
+  status: 'deploying' | 'deployed'
+  gpu: string
+  warm: boolean | null
+  url: string
+}
+
 interface ModalDeployBannerProps {
   pluginId: string
   defaultGpu: string
+  deployments: ModalDeploymentStatus[]
+  onDeployed?: () => void
 }
 
-export function ModalDeployBanner({ pluginId, defaultGpu }: ModalDeployBannerProps) {
-  const queryClient = useQueryClient()
-  const { data: status, isLoading } = useModalDeployStatus(pluginId)
-  const [selectedGpu, setSelectedGpu] = useState(defaultGpu || 'A10G')
-  const [gpuDropdownOpen, setGpuDropdownOpen] = useState(false)
+function generateDeployName(
+  pluginId: string,
+  gpu: string,
+  existing: ModalDeploymentStatus[],
+): string {
+  const prefix = `${pluginId}-${gpu.toLowerCase()}`
+  let n = 1
+  while (existing.some((d) => d.id === `${prefix}-${n}` || d.name === `${prefix}-${n}`)) n++
+  return `${prefix}-${n}`
+}
+
+export function ModalDeployBanner({
+  pluginId,
+  defaultGpu,
+  deployments,
+  onDeployed,
+}: ModalDeployBannerProps) {
+  const [showPopup, setShowPopup] = useState(false)
+  const [popupGpu, setPopupGpu] = useState(defaultGpu || 'A10G')
+  const [popupName, setPopupName] = useState(() =>
+    generateDeployName(pluginId, defaultGpu || 'A10G', deployments),
+  )
+
+  const isAnyDeploying = deployments.some((d) => d.status === 'deploying')
 
   const deployMutation = useMutation({
-    mutationFn: async (gpu: string) => {
+    mutationFn: async ({ gpu, name }: { gpu: string; name: string }) => {
       const res = await fetch(`/api/modal/deploy/${pluginId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'deploy', gpu }),
+        body: JSON.stringify({ action: 'deploy', gpu, name }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Deploy failed' }))
@@ -38,149 +67,160 @@ export function ModalDeployBanner({ pluginId, defaultGpu }: ModalDeployBannerPro
       return res.json()
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['modal-deploy-status', pluginId] })
+      setShowPopup(false)
+      onDeployed?.()
     },
   })
 
   const undeployMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (deployId: string) => {
       const res = await fetch(`/api/modal/deploy/${pluginId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'undeploy' }),
+        body: JSON.stringify({ action: 'undeploy', deployId }),
       })
       if (!res.ok) throw new Error('Undeploy failed')
       return res.json()
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['modal-deploy-status', pluginId] })
+      onDeployed?.()
     },
   })
 
-  if (isLoading || !status) {
-    return (
-      <div className="px-6 py-2.5 bg-purple-950/20 border-b border-purple-900/30 flex items-center gap-2 text-purple-300 text-sm">
-        <Spinner size={14} className="animate-spin" />
-        Checking Modal status...
-      </div>
-    )
+  function handleOpenPopup() {
+    const gpu = defaultGpu || 'A10G'
+    const name = generateDeployName(pluginId, gpu, deployments)
+    setPopupGpu(gpu)
+    setPopupName(name)
+    setShowPopup(true)
   }
 
-  // ── Not Deployed ──────────────────────────────────────────────────────────
-  if (status.status === 'not_deployed') {
-    return (
-      <div className="px-6 py-2.5 bg-purple-950/20 border-b border-purple-900/30 flex items-center gap-2 text-sm">
-        <Cloud size={16} weight="duotone" className="text-purple-400" />
-        <span className="text-purple-300">Not deployed to Modal</span>
-        <div className="ml-auto flex items-center gap-2">
-          {/* GPU picker */}
-          <div className="relative">
-            <button
-              onClick={() => setGpuDropdownOpen((v) => !v)}
-              className="flex items-center gap-1 px-2 py-1 text-xs bg-zinc-900 border border-zinc-700 rounded text-zinc-300 hover:border-zinc-500"
-            >
-              {selectedGpu}
-              <CaretDown size={10} className="opacity-50" />
-            </button>
-            {gpuDropdownOpen && (
-              <div className="absolute right-0 top-full mt-1 bg-zinc-900 border border-white/10 rounded-lg shadow-xl p-1 z-50 min-w-[140px]">
-                {GPU_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => { setSelectedGpu(opt.value); setGpuDropdownOpen(false) }}
-                    className={`w-full text-left px-3 py-1.5 rounded text-xs transition-colors ${
-                      selectedGpu === opt.value
-                        ? 'text-purple-400 bg-purple-500/10'
-                        : 'text-zinc-400 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <button
-            onClick={() => deployMutation.mutate(selectedGpu)}
-            disabled={deployMutation.isPending}
-            className="px-3 py-1 text-xs font-medium bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded transition-colors"
-          >
-            {deployMutation.isPending ? 'Deploying...' : 'Deploy'}
-          </button>
-        </div>
-        {deployMutation.error && (
-          <span className="text-red-400 text-xs ml-2">{deployMutation.error.message}</span>
-        )}
-      </div>
-    )
+  function handlePopupGpuChange(gpu: string) {
+    setPopupGpu(gpu)
+    setPopupName(generateDeployName(pluginId, gpu, deployments))
   }
 
-  // ── Deploying ─────────────────────────────────────────────────────────────
-  if (status.status === 'deploying') {
-    return (
-      <div className="px-6 py-2.5 bg-purple-950/20 border-b border-purple-900/30 flex items-center gap-2 text-sm">
-        <Spinner size={14} className="animate-spin text-purple-400" />
-        <span className="text-purple-300">Deploying to Modal...</span>
-        <span className="text-purple-400/60 text-xs ml-1">This can take a few minutes (building image + downloading model)</span>
-      </div>
-    )
-  }
-
-  // ── Deployed ──────────────────────────────────────────────────────────────
   return (
-    <div className="px-6 py-2.5 bg-purple-950/20 border-b border-purple-900/30 flex items-center gap-2 text-sm">
-      <Cloud size={16} weight="duotone" className="text-purple-400" />
-      <span className="text-purple-300">Modal Cloud</span>
-      {/* Warm/Cold indicator */}
-      <span className={`flex items-center gap-1 text-xs ${status.warm ? 'text-emerald-400' : 'text-zinc-500'}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${status.warm ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
-        {status.warm ? 'Warm' : 'Cold'}
-      </span>
-      {/* GPU selector (redeploys on change) */}
-      <div className="relative ml-2">
+    <div className="px-6 py-2.5 bg-purple-950/20 border-b border-purple-900/30 text-sm relative">
+      {/* Header row */}
+      <div className="flex items-center gap-2">
+        <Cloud size={16} weight="duotone" className="text-purple-400" />
+        <span className="text-purple-300 font-medium">Modal Cloud</span>
+        <span className="text-purple-400/60 text-xs">
+          {deployments.length} deployment{deployments.length !== 1 ? 's' : ''}
+        </span>
         <button
-          onClick={() => setGpuDropdownOpen((v) => !v)}
-          className="flex items-center gap-1 px-2 py-1 text-xs bg-zinc-900 border border-zinc-700 rounded text-zinc-300 hover:border-zinc-500"
+          onClick={handleOpenPopup}
+          disabled={isAnyDeploying}
+          className="ml-auto flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
         >
-          {status.gpu || selectedGpu}
-          <CaretDown size={10} className="opacity-50" />
+          + Deploy
         </button>
-        {gpuDropdownOpen && (
-          <div className="absolute right-0 top-full mt-1 bg-zinc-900 border border-white/10 rounded-lg shadow-xl p-1 z-50 min-w-[140px]">
-            {GPU_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => {
-                  setGpuDropdownOpen(false)
-                  if (opt.value !== (status.gpu || selectedGpu)) {
-                    setSelectedGpu(opt.value)
-                    deployMutation.mutate(opt.value)
-                  }
-                }}
-                className={`w-full text-left px-3 py-1.5 rounded text-xs transition-colors ${
-                  (status.gpu || selectedGpu) === opt.value
-                    ? 'text-purple-400 bg-purple-500/10'
-                    : 'text-zinc-400 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
-      {/* Undeploy button */}
-      <button
-        onClick={() => undeployMutation.mutate()}
-        disabled={undeployMutation.isPending}
-        className="ml-auto flex items-center gap-1 px-2 py-1 text-xs text-zinc-500 hover:text-red-400 transition-colors"
-      >
-        <X size={12} />
-        {undeployMutation.isPending ? 'Removing...' : 'Undeploy'}
-      </button>
-      {/* Cold start note */}
-      {!status.warm && (
-        <span className="text-zinc-600 text-[11px]">First request ~1-2 min</span>
+
+      {/* Deployment list */}
+      {deployments.length > 0 && (
+        <div className="mt-2 flex flex-col gap-1">
+          {deployments.map((deployment) => (
+            <div
+              key={deployment.id}
+              className="flex items-center gap-2 py-1 px-2 bg-purple-950/30 rounded border border-purple-900/20"
+            >
+              {/* Deploying spinner or name */}
+              {deployment.status === 'deploying' ? (
+                <Spinner size={12} className="animate-spin text-purple-400 shrink-0" />
+              ) : null}
+              <span className="text-purple-200 text-xs truncate flex-1">{deployment.name}</span>
+
+              {/* GPU badge */}
+              <span className="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-800 border border-zinc-700 text-zinc-400 rounded shrink-0">
+                {deployment.gpu}
+              </span>
+
+              {/* Warm/Cold indicator */}
+              {deployment.warm !== null && (
+                <span
+                  className={`flex items-center gap-1 text-xs shrink-0 ${
+                    deployment.warm ? 'text-emerald-400' : 'text-zinc-500'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                      deployment.warm ? 'bg-emerald-400' : 'bg-zinc-600'
+                    }`}
+                  />
+                  {deployment.warm ? 'Warm' : 'Cold'}
+                </span>
+              )}
+
+              {/* Undeploy button */}
+              <button
+                onClick={() => undeployMutation.mutate(deployment.id)}
+                disabled={deployment.status === 'deploying' || undeployMutation.isPending}
+                className="ml-1 text-zinc-600 hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                title="Undeploy"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Deploy popup */}
+      {showPopup && (
+        <div className="absolute right-6 top-full mt-2 z-50 w-72 bg-zinc-900 border border-white/10 rounded-lg shadow-xl p-4 flex flex-col gap-3">
+          <p className="text-zinc-200 text-sm font-medium font-tech">New Modal Deployment</p>
+
+          {/* Name input */}
+          <div className="flex flex-col gap-1">
+            <label className="text-zinc-400 text-xs">Name</label>
+            <input
+              type="text"
+              value={popupName}
+              onChange={(e) => setPopupName(e.target.value)}
+              className="px-2.5 py-1.5 text-xs bg-zinc-950 border border-zinc-800 focus:border-purple-500/50 rounded text-zinc-200 outline-none transition-colors"
+            />
+          </div>
+
+          {/* GPU selector */}
+          <div className="flex flex-col gap-1">
+            <label className="text-zinc-400 text-xs">GPU</label>
+            <select
+              value={popupGpu}
+              onChange={(e) => handlePopupGpuChange(e.target.value)}
+              className="px-2.5 py-1.5 text-xs bg-zinc-950 border border-zinc-800 focus:border-purple-500/50 rounded text-zinc-200 outline-none transition-colors"
+            >
+              {GPU_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {deployMutation.error && (
+            <p className="text-red-400 text-xs">{(deployMutation.error as Error).message}</p>
+          )}
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 justify-end">
+            <button
+              onClick={() => setShowPopup(false)}
+              disabled={deployMutation.isPending}
+              className="px-3 py-1 text-xs text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => deployMutation.mutate({ gpu: popupGpu, name: popupName })}
+              disabled={deployMutation.isPending || !popupName.trim()}
+              className="px-3 py-1 text-xs font-medium bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
+            >
+              {deployMutation.isPending ? 'Deploying...' : 'Deploy'}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )
