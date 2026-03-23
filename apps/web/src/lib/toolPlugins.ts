@@ -24,7 +24,7 @@ export interface PluginSchemaInput {
 
 export interface PluginSchemaOutput {
   paramName: string
-  paramType: 'image' | 'video'
+  paramType: 'image' | 'video' | 'file'
   label: string
 }
 
@@ -441,15 +441,20 @@ export function manifestToDbSchema(manifest: ToolPluginManifest): object[] {
     enabled: true,
   }))
 
-  const outputs = manifest.schema.outputs.map((output) => ({
-    nodeId: 'api_output',
-    nodeType: output.paramType === 'video' ? 'APIVideoOutput' : 'APIImageOutput',
-    nodeTitle: output.label,
-    paramName: output.paramName,
-    paramType: output.paramType === 'video' ? 'image' : output.paramType,
-    isInput: false,
-    enabled: true,
-  }))
+  const outputs = manifest.schema.outputs.map((output) => {
+    const nodeType = output.paramType === 'video' ? 'APIVideoOutput'
+      : output.paramType === 'file' ? 'APIFileOutput'
+      : 'APIImageOutput'
+    return {
+      nodeId: 'api_output',
+      nodeType,
+      nodeTitle: output.label,
+      paramName: output.paramName,
+      paramType: output.paramType,
+      isInput: false,
+      enabled: true,
+    }
+  })
 
   return [...inputs, ...outputs]
 }

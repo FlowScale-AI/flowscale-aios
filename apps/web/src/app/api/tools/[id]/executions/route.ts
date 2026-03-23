@@ -157,11 +157,26 @@ async function runLocalInference(
     const responseData = JSON.parse(inferRes.body) as Record<string, string>
     const outputDef = plugin.schema.outputs[0]
     const outputField = outputDef?.paramName ?? 'image'
-    const isVideo = outputDef?.paramType === 'video'
+    const outputType = outputDef?.paramType ?? 'image'
+
+    // Determine output kind and filename based on the output type
+    let kind: string
+    let filename: string
+    if (outputType === 'video') {
+      kind = 'video'
+      filename = 'output.mp4'
+    } else if (outputType === 'file') {
+      kind = 'file'
+      // Use server-provided filename if available (e.g. lora_file_filename)
+      filename = responseData[`${outputField}_filename`] || 'output.bin'
+    } else {
+      kind = 'image'
+      filename = 'output.png'
+    }
 
     await finalizeExecution(executionId, [{
-      kind: isVideo ? 'video' : 'image',
-      filename: isVideo ? 'output.mp4' : 'output.png',
+      kind,
+      filename,
       data: responseData[outputField],
     }])
   } catch (err) {
@@ -216,11 +231,24 @@ async function runModalInference(
     const responseData = await res.json() as Record<string, string>
     const outputDef = plugin.schema.outputs[0]
     const outputField = outputDef?.paramName ?? 'image'
-    const isVideo = outputDef?.paramType === 'video'
+    const outputType = outputDef?.paramType ?? 'image'
+
+    let kind: string
+    let filename: string
+    if (outputType === 'video') {
+      kind = 'video'
+      filename = 'output.mp4'
+    } else if (outputType === 'file') {
+      kind = 'file'
+      filename = responseData[`${outputField}_filename`] || 'output.bin'
+    } else {
+      kind = 'image'
+      filename = 'output.png'
+    }
 
     await finalizeExecution(executionId, [{
-      kind: isVideo ? 'video' : 'image',
-      filename: isVideo ? 'output.mp4' : 'output.png',
+      kind,
+      filename,
       data: responseData[outputField],
     }])
   } catch (err) {
