@@ -177,6 +177,7 @@ function inferKind(filename: string): 'image' | 'video' | 'audio' | 'model' | 'f
 }
 
 function resolveOutputUrl(out: Exclude<OutputItem, { kind: 'text' }>, comfyPort?: number | null): string {
+  if (!out.path) return `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename || '')}&type=output`
   if (out.path.startsWith('/')) return out.path
   const subfolder = out.path.includes('/') ? out.path.substring(0, out.path.lastIndexOf('/')) : ''
   return `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}${subfolder ? `&subfolder=${encodeURIComponent(subfolder)}` : ''}&type=output`
