@@ -25,11 +25,18 @@ export function ComfyLogsPanel({ port, instanceLabel }: { port: number; instance
   useEffect(() => {
     let cancelled = false
 
-    // Fetch historical logs
-    fetch(`/api/comfy/${port}/internal/logs/raw`)
-      .then((r) => r.json())
-      .then((d: { entries: { t: string; m: string }[] }) => appendEntries(d.entries))
-      .catch(() => {})
+    // Fetch historical logs and poll for updates
+    const fetchLogs = () => {
+      fetch(`/api/comfy/${port}/internal/logs/raw`)
+        .then((r) => r.json())
+        .then((d: { entries: { t: string; m: string }[] }) => {
+          if (!cancelled) appendEntries(d.entries)
+        })
+        .catch(() => {})
+    }
+    fetchLogs()
+    // Poll every 3s for new log entries (fallback when SSE/WS isn't available)
+    const logPollInterval = setInterval(fetchLogs, 3000)
 
     // Connect via server-side SSE proxy (avoids ComfyUI's origin check for direct WS)
     const controller = new AbortController()
@@ -73,6 +80,7 @@ export function ComfyLogsPanel({ port, instanceLabel }: { port: number; instance
     return () => {
       cancelled = true
       controller.abort()
+      clearInterval(logPollInterval)
     }
   }, [port])  // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -24,15 +24,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
       const ws = new WebSocket(`${wsProtocol}://${wsHost}/ws?clientId=${clientId}`)
 
       ws.on('open', () => {
-        // Subscribe to logs for this clientId
-        // Not available on cloud (Modal) instances — only local ComfyUI Manager exposes this
-        if (!isModalComfyPort(portNum)) {
-          fetch(`${baseUrl}/internal/logs/subscribe`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ clientId, enabled: true }),
-          }).catch(() => {})
-        }
+        // Subscribe to logs for this clientId (works on both local and Modal ComfyUI)
+        fetch(`${baseUrl}/internal/logs/subscribe`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId, enabled: true }),
+        }).catch(() => {})
       })
 
       ws.on('message', (data) => {
