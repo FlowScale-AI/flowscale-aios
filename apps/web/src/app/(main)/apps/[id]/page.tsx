@@ -1146,8 +1146,8 @@ export default function ToolPage() {
         </div>
       )}
 
-      {/* Local inference setup (API tools) */}
-      {tool.engine === 'api' && <LocalInferenceSetup />}
+      {/* Local inference setup (API tools — hidden when Modal is selected) */}
+      {tool.engine === 'api' && !isModalSelected && <LocalInferenceSetup />}
 
       {/* Modal deploy banner (API tools when Modal selected) */}
       {tool.engine === 'api' && isModalSelected && pluginId && modalSupported && (
