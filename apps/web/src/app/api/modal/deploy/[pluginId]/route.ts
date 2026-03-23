@@ -42,11 +42,17 @@ export async function GET(
 
   const rawDeployments = getDeployments(pluginId)
 
-  // Selective health-check: only probe the deployment specified by ?target=
+  // Health-check deployed instances. When ?target= is set, only check that one.
+  // When no target (Auto or initial load), check all deployed instances.
   const targetId = req.nextUrl.searchParams.get('target')
+  const skipHealth = req.nextUrl.searchParams.get('health') === 'false'
   const deployments = await Promise.all(
     rawDeployments.map(async (d) => {
-      if (targetId && d.id === targetId && d.status === 'deployed' && d.url) {
+      if (skipHealth || d.status !== 'deployed' || !d.url) {
+        return { ...d, warm: null as boolean | null }
+      }
+      // Check this deployment if: no target filter, or it matches the filter
+      if (!targetId || d.id === targetId) {
         const warm = await checkHealth(d.url)
         return { ...d, warm }
       }

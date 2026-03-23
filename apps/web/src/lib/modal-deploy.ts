@@ -281,11 +281,24 @@ export function getModalDeployLogs(pluginId: string): string {
   }
 }
 
-/** Fetch combined deploy + runtime logs via helper (spawns subprocess, ~3s). */
+/** Fetch combined deploy + runtime logs via helper for all deployments. */
 export async function getModalLogs(pluginId: string): Promise<string> {
-  const records = readDeployments()[pluginId] ?? []
+  const records = (readDeployments()[pluginId] ?? []).filter(r => r.status === 'deployed')
   const pluginDir = join(PLUGINS_DIR, pluginId)
-  const appName = records[0]?.appName ?? ''
-  const result = await runHelper(['logs', pluginDir, appName])
-  return (result.logs as string) ?? ''
+
+  if (records.length === 0) {
+    // No deployed apps — just return deploy logs from disk
+    return getModalDeployLogs(pluginId)
+  }
+
+  // Fetch runtime logs from each deployed app in parallel
+  const results = await Promise.all(
+    records.map(async (r) => {
+      const result = await runHelper(['logs', pluginDir, r.appName])
+      const logs = (result.logs as string) ?? ''
+      return logs ? `── ${r.name} (${r.gpu}) ──\n${logs}` : ''
+    })
+  )
+
+  return results.filter(Boolean).join('\n\n')
 }
