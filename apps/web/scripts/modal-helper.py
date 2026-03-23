@@ -191,9 +191,141 @@ def cmd_logs(plugin_dir: str, app_name: str = ""):
     _json_out({"logs": combined, "deployLogs": deploy_logs, "runtimeLogs": runtime_logs})
 
 
+def cmd_scan_comfyui(comfyui_path: str):
+    """Scan local ComfyUI installation for custom nodes and models."""
+    # Get ComfyUI version via git rev-parse HEAD
+    version = ""
+    try:
+        result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5, cwd=comfyui_path)
+        version = result.stdout.strip()
+    except Exception:
+        pass
+
+    # Scan custom_nodes/ for git repos
+    custom_nodes = []
+    cn_dir = os.path.join(comfyui_path, "custom_nodes")
+    if os.path.isdir(cn_dir):
+        for name in os.listdir(cn_dir):
+            node_path = os.path.join(cn_dir, name)
+            if not os.path.isdir(node_path) or name.startswith("."):
+                continue
+            if not os.path.exists(os.path.join(node_path, ".git")):
+                continue
+            try:
+                repo = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, timeout=5, cwd=node_path).stdout.strip()
+                commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5, cwd=node_path).stdout.strip()
+                custom_nodes.append({"name": name, "repo": repo, "commit": commit})
+            except Exception:
+                pass
+
+    # Scan models/ for model files
+    models = []
+    models_dir = os.path.join(comfyui_path, "models")
+    if os.path.isdir(models_dir):
+        for root, dirs, files in os.walk(models_dir):
+            for f in files:
+                if f.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                    full = os.path.join(root, f)
+                    rel = os.path.relpath(full, models_dir)
+                    size = os.path.getsize(full)
+                    models.append({"path": rel, "size": size})
+
+    _json_out({"comfyuiPath": comfyui_path, "version": version, "customNodes": custom_nodes, "models": models})
+
+
+def _generate_comfyui_modal_app(custom_nodes, gpu, app_name):
+    return f'''
+import modal
+import os
+
+app = modal.App("{app_name}")
+
+# TODO: Full template in Task 10
+@app.function(image=modal.Image.debian_slim())
+def placeholder():
+    print("ComfyUI Modal app template - to be implemented")
+'''
+
+
+def cmd_deploy_comfyui(config_json: str, gpu: str, app_name: str):
+    """Deploy a ComfyUI installation to Modal."""
+    try:
+        config = json.loads(config_json)
+    except Exception as e:
+        _json_out({"success": False, "error": f"Invalid config JSON: {e}"})
+        return
+
+    custom_nodes = config.get("customNodes", [])
+
+    # Generate the modal app file
+    app_content = _generate_comfyui_modal_app(custom_nodes, gpu, app_name)
+
+    # Write to a temp file and deploy
+    import tempfile
+    tmp_dir = tempfile.mkdtemp(prefix="flowscale-comfyui-")
+    modal_app_path = os.path.join(tmp_dir, "comfyui_modal_app.py")
+    try:
+        with open(modal_app_path, "w") as f:
+            f.write(app_content)
+
+        latest_path = os.path.join(tmp_dir, "modal-latest.log")
+        with open(latest_path, "w") as f:
+            f.write(f"[{datetime.now().isoformat()}] Deploying ComfyUI to Modal with GPU={gpu}...\n")
+
+        env = {**os.environ, "FLOWSCALE_GPU": gpu, "FLOWSCALE_APP_NAME": app_name}
+        proc = subprocess.Popen(
+            ["modal", "deploy", modal_app_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+            cwd=tmp_dir,
+        )
+
+        all_output = []
+        with open(latest_path, "a") as log_f:
+            for line in iter(proc.stdout.readline, ""):
+                all_output.append(line)
+                log_f.write(line)
+                log_f.flush()
+
+        proc.wait(timeout=600)
+        full_output = "".join(all_output)
+
+        if proc.returncode != 0:
+            _json_out({"success": False, "error": full_output.strip() or f"modal deploy exited with code {proc.returncode}", "logs": full_output})
+            return
+
+        # Parse the URL from modal deploy output
+        url = None
+        lines = full_output.splitlines()
+        for i, line in enumerate(lines):
+            if "=>" in line and "http" in line:
+                url = line.split("=>")[-1].strip()
+                break
+            if "=>" in line and i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                if next_line.startswith("http"):
+                    url = next_line
+                    break
+        if not url:
+            import re
+            m = re.search(r"https://\S+\.modal\.run\S*", full_output)
+            if m:
+                url = m.group(0)
+
+        _json_out({"success": True, "appName": app_name, "url": url or "", "gpu": gpu})
+
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        _json_out({"success": False, "error": "modal deploy timed out after 600s"})
+    except Exception as e:
+        _json_out({"success": False, "error": str(e)})
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: modal-helper.py <deploy|undeploy|status|logs> [args...]", file=sys.stderr)
+        print("Usage: modal-helper.py <deploy|undeploy|status|logs|scan-comfyui|deploy-comfyui> [args...]", file=sys.stderr)
         sys.exit(1)
 
     command = sys.argv[1]
@@ -208,6 +340,10 @@ if __name__ == "__main__":
     elif command == "logs" and len(sys.argv) >= 3:
         app_name = sys.argv[3] if len(sys.argv) >= 4 else ""
         cmd_logs(sys.argv[2], app_name)
+    elif command == "scan-comfyui" and len(sys.argv) >= 3:
+        cmd_scan_comfyui(sys.argv[2])
+    elif command == "deploy-comfyui" and len(sys.argv) >= 5:
+        cmd_deploy_comfyui(sys.argv[2], sys.argv[3], sys.argv[4])
     else:
         print(f"Unknown command or missing args: {sys.argv[1:]}", file=sys.stderr)
         sys.exit(1)
