@@ -233,6 +233,55 @@ def cmd_scan_comfyui(comfyui_path: str):
     _json_out({"comfyuiPath": comfyui_path, "version": version, "customNodes": custom_nodes, "models": models})
 
 
+def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-models"):
+    """Upload all local ComfyUI models to a Modal Volume."""
+    models_dir = os.path.join(comfyui_path, "models")
+    if not os.path.isdir(models_dir):
+        _json_out({"success": False, "error": f"Models directory not found: {models_dir}"})
+        return
+
+    # Collect model files
+    model_files = []
+    for root, dirs, files in os.walk(models_dir):
+        for f in files:
+            if f.endswith((".safetensors", ".ckpt", ".pt", ".pth", ".bin")):
+                full = os.path.join(root, f)
+                rel = os.path.relpath(full, models_dir)
+                model_files.append((full, rel))
+
+    if not model_files:
+        _json_out({"success": True, "synced": 0, "message": "No model files found"})
+        return
+
+    total = len(model_files)
+    synced = 0
+    errors = []
+
+    for i, (full_path, rel_path) in enumerate(model_files, 1):
+        size_mb = os.path.getsize(full_path) / 1024 / 1024
+        print(f"[{i}/{total}] Uploading {rel_path} ({size_mb:.0f} MB)...", flush=True)
+        try:
+            result = subprocess.run(
+                ["modal", "volume", "put", volume_name, full_path, rel_path],
+                capture_output=True, text=True, timeout=600,
+            )
+            if result.returncode == 0:
+                synced += 1
+                print(f"  Done.", flush=True)
+            else:
+                err = result.stderr.strip() or f"Exit code {result.returncode}"
+                errors.append(f"{rel_path}: {err}")
+                print(f"  Failed: {err}", flush=True)
+        except subprocess.TimeoutExpired:
+            errors.append(f"{rel_path}: upload timed out")
+            print(f"  Timed out.", flush=True)
+        except Exception as e:
+            errors.append(f"{rel_path}: {e}")
+            print(f"  Error: {e}", flush=True)
+
+    _json_out({"success": len(errors) == 0, "synced": synced, "total": total, "errors": errors})
+
+
 def _generate_comfyui_modal_app(custom_nodes, gpu, app_name):
     # Build the custom node clone+install commands for the image
     cn_commands = []
@@ -514,6 +563,13 @@ def cmd_deploy_comfyui(config_json: str, gpu: str, app_name: str):
             if m:
                 url = m.group(0)
 
+        # Auto-sync models from local ComfyUI to Volume after deploy
+        comfyui_path = config.get("comfyuiPath", "")
+        if comfyui_path and os.path.isdir(os.path.join(comfyui_path, "models")):
+            with open(latest_path, "a") as log_f:
+                log_f.write("\n[Syncing models to Modal Volume...]\n")
+            cmd_sync_models(comfyui_path)
+
         _json_out({"success": True, "appName": app_name, "url": url or "", "gpu": gpu})
 
     except subprocess.TimeoutExpired:
@@ -544,6 +600,9 @@ if __name__ == "__main__":
         cmd_scan_comfyui(sys.argv[2])
     elif command == "deploy-comfyui" and len(sys.argv) >= 5:
         cmd_deploy_comfyui(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif command == "sync-models" and len(sys.argv) >= 3:
+        volume = sys.argv[3] if len(sys.argv) >= 4 else "flowscale-comfyui-models"
+        cmd_sync_models(sys.argv[2], volume)
     else:
         print(f"Unknown command or missing args: {sys.argv[1:]}", file=sys.stderr)
         sys.exit(1)
