@@ -17,7 +17,6 @@ import {
   Copy,
   Check,
   Stop,
-  Cloud,
 } from 'phosphor-react'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
@@ -1096,7 +1095,7 @@ export default function ToolPage() {
             modalSupported={modalSupported}
           />
         )}
-        {/* Device selector for API tools */}
+        {/* Device selector for API tools (includes Modal cloud option) */}
         {!isArtist && tool.engine === 'api' && gpuDevices.length > 0 && (
           <select
             value={selectedDevice}
@@ -1112,21 +1111,10 @@ export default function ToolPage() {
                 </option>
               )
             })}
+            {modalSupported && modalStatus?.authenticated && (
+              <option value="modal">☁ Modal (Cloud)</option>
+            )}
           </select>
-        )}
-        {/* Modal option for API tools */}
-        {!isArtist && tool.engine === 'api' && modalSupported && modalStatus?.authenticated && (
-          <button
-            onClick={() => setSelectedDevice('modal')}
-            className={`px-2 py-2 text-xs border rounded-md transition-colors ${
-              selectedDevice === 'modal'
-                ? 'bg-purple-500/10 border-purple-500/30 text-purple-400'
-                : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
-            }`}
-          >
-            <Cloud size={13} weight="duotone" className="inline mr-1" />
-            Modal
-          </button>
         )}
         <button
           onClick={() => runMutation.mutate()}
