@@ -545,10 +545,51 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Poll ComfyUI history server-side until the prompt completes, then save
   // outputs to disk and return the finished execution. Used by the HTTP SDK so
   // external apps don't need a browser watching a WebSocket.
-  // Force wait mode for Modal ComfyUI — outputs live in the container's ephemeral
-  // filesystem and are lost when the container scales down. Server-side polling
-  // downloads outputs immediately while the container is still alive.
-  const waitMode = req.nextUrl.searchParams.get('wait') === 'true' || isModalComfyPort(comfyPort)
+  // For Modal ComfyUI, start a background poller that downloads outputs
+  // as soon as the prompt completes (before the container scales down).
+  if (isModalComfyPort(comfyPort)) {
+    const modalBaseUrl = resolveComfyBaseUrl(comfyPort)
+    ;(async () => {
+      const maxWait = 300_000
+      const started = Date.now()
+      while (Date.now() - started < maxWait) {
+        await new Promise((r) => setTimeout(r, 2000))
+        let history: Record<string, unknown>
+        try { history = await getHistory(promptId, modalBaseUrl) } catch { continue }
+        const entry = history[promptId] as {
+          status?: { completed?: boolean; status_str?: string }
+          outputs?: Record<string, { images?: { filename: string; subfolder: string }[] }>
+        } | undefined
+        if (!entry?.status?.completed) continue
+
+        const rawOutputs: OutputItem[] = []
+        for (const nodeOut of Object.values(entry.outputs ?? {})) {
+          for (const img of nodeOut.images ?? []) {
+            rawOutputs.push({ kind: 'image', filename: img.filename, subfolder: img.subfolder ?? '' })
+          }
+        }
+
+        if (entry.status?.status_str === 'error') {
+          trackExecEnd(comfyPort)
+          await db.update(executions).set({ status: 'error', errorMessage: 'ComfyUI reported an error', completedAt: Date.now() })
+            .where(eq(executions.id, executionId))
+          return
+        }
+
+        const savedOutputs = await saveComfyOutputsToDisk(rawOutputs, comfyPort, toolId, executionId)
+        trackExecEnd(comfyPort)
+        await db.update(executions).set({ status: 'completed', outputsJson: JSON.stringify(savedOutputs), completedAt: Date.now() })
+          .where(eq(executions.id, executionId))
+        return
+      }
+      // Timeout
+      trackExecEnd(comfyPort)
+      await db.update(executions).set({ status: 'error', errorMessage: 'Modal execution timed out', completedAt: Date.now() })
+        .where(eq(executions.id, executionId))
+    })().catch(console.error)
+  }
+
+  const waitMode = req.nextUrl.searchParams.get('wait') === 'true'
   if (waitMode) {
     const baseUrl = resolveComfyBaseUrl(comfyPort)
     const maxWait = 300_000
