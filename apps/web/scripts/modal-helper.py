@@ -234,16 +234,211 @@ def cmd_scan_comfyui(comfyui_path: str):
 
 
 def _generate_comfyui_modal_app(custom_nodes, gpu, app_name):
-    return f'''
-import modal
+    # Build the custom node clone+install commands for the image
+    cn_commands = []
+    for cn in custom_nodes:
+        repo = cn["repo"]
+        name = cn["name"]
+        commit = cn["commit"]
+        cn_commands.append(
+            f'    .run_commands(\n'
+            f'        "git clone {repo} /comfyui/custom_nodes/{name}",\n'
+            f'        "cd /comfyui/custom_nodes/{name} && git checkout {commit}",\n'
+            f'        "if [ -f /comfyui/custom_nodes/{name}/requirements.txt ]; then pip install -r /comfyui/custom_nodes/{name}/requirements.txt; fi",\n'
+            f'    )\n'
+        )
+    cn_block = "".join(cn_commands) if cn_commands else ""
+
+    # Build the extra_model_paths.yaml content
+    extra_model_paths_yaml = (
+        "flowscale_modal:\\n"
+        "  base_path: /models\\n"
+        "  checkpoints: checkpoints/\\n"
+        "  loras: loras/\\n"
+        "  vae: vae/\\n"
+        "  controlnet: controlnet/\\n"
+        "  upscale_models: upscale_models/\\n"
+    )
+
+    return f'''import modal
 import os
+import subprocess
+import time
 
-app = modal.App("{app_name}")
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+GPU = os.environ.get("FLOWSCALE_GPU", "{gpu}")
+APP_NAME = os.environ.get("FLOWSCALE_APP_NAME", "{app_name}")
 
-# TODO: Full template in Task 10
-@app.function(image=modal.Image.debian_slim())
-def placeholder():
-    print("ComfyUI Modal app template - to be implemented")
+app = modal.App(APP_NAME)
+
+# ---------------------------------------------------------------------------
+# Volume for model storage (persists across deploys)
+# ---------------------------------------------------------------------------
+models_volume = modal.Volume.from_name("flowscale-comfyui-models", create_if_missing=True)
+
+# ---------------------------------------------------------------------------
+# Build the ComfyUI image
+# ---------------------------------------------------------------------------
+comfyui_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git", "ffmpeg", "libgl1-mesa-glx", "libglib2.0-0")
+    .pip_install("httpx", "websockets", "starlette")
+    .run_commands(
+        "git clone https://github.com/comfyanonymous/ComfyUI.git /comfyui",
+        "cd /comfyui && pip install -r requirements.txt",
+    )
+{cn_block}    .run_commands(
+        "echo '{extra_model_paths_yaml}' > /comfyui/extra_model_paths.yaml",
+    )
+)
+
+# Map GPU string to Modal GPU class
+_GPU_MAP = {{
+    "T4": modal.gpu.T4(),
+    "L4": modal.gpu.L4(),
+    "A10G": modal.gpu.A10G(),
+    "A100": modal.gpu.A100(size="40GB"),
+    "A100-80GB": modal.gpu.A100(size="80GB"),
+    "H100": modal.gpu.H100(),
+}}
+
+
+def _resolve_gpu(gpu_str: str):
+    return _GPU_MAP.get(gpu_str, modal.gpu.T4())
+
+
+# ---------------------------------------------------------------------------
+# Optional HuggingFace secret (for gated models)
+# ---------------------------------------------------------------------------
+def _get_secrets():
+    try:
+        return [modal.Secret.from_name("huggingface")]
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# ComfyUI server class
+# ---------------------------------------------------------------------------
+@app.cls(
+    image=comfyui_image,
+    gpu=_resolve_gpu(GPU),
+    volumes={{"/models": models_volume}},
+    secrets=_get_secrets(),
+    container_idle_timeout=300,
+    timeout=600,
+    allow_concurrent_inputs=10,
+)
+class ComfyUIServer:
+    @modal.enter()
+    def start_comfyui(self):
+        """Start ComfyUI as a background subprocess and wait until ready."""
+        self.proc = subprocess.Popen(
+            [
+                "python", "main.py",
+                "--listen", "0.0.0.0",
+                "--port", "8188",
+                "--preview-method", "none",
+                "--extra-model-paths-config", "/comfyui/extra_model_paths.yaml",
+            ],
+            cwd="/comfyui",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+
+        # Poll until ComfyUI is ready (up to 120s)
+        import urllib.request
+        for _ in range(240):
+            try:
+                urllib.request.urlopen("http://127.0.0.1:8188/system_stats", timeout=2)
+                print("ComfyUI is ready.")
+                return
+            except Exception:
+                time.sleep(0.5)
+        raise RuntimeError("ComfyUI failed to start within 120 seconds")
+
+    @modal.asgi_app()
+    def serve(self):
+        import httpx
+        from starlette.applications import Starlette
+        from starlette.routing import Route, Mount
+        from starlette.requests import Request
+        from starlette.responses import StreamingResponse, Response
+        from starlette.websockets import WebSocket
+
+        COMFY = "http://127.0.0.1:8188"
+
+        async def _proxy_http(request: Request):
+            """Reverse-proxy any HTTP request to internal ComfyUI."""
+            async with httpx.AsyncClient(base_url=COMFY, timeout=300) as client:
+                url = request.url.path
+                if request.url.query:
+                    url = f"{{url}}?{{request.url.query}}"
+
+                body = await request.body()
+
+                resp = await client.request(
+                    method=request.method,
+                    url=url,
+                    headers={{
+                        k: v for k, v in request.headers.items()
+                        if k.lower() not in ("host", "transfer-encoding")
+                    }},
+                    content=body,
+                )
+
+                return Response(
+                    content=resp.content,
+                    status_code=resp.status_code,
+                    headers=dict(resp.headers),
+                )
+
+        async def _proxy_ws(ws: WebSocket):
+            """Reverse-proxy WebSocket connections to internal ComfyUI."""
+            import asyncio
+            import websockets as ws_lib
+
+            await ws.accept()
+
+            query = str(ws.url.query) if ws.url.query else ""
+            ws_url = f"ws://127.0.0.1:8188/ws"
+            if query:
+                ws_url = f"{{ws_url}}?{{query}}"
+
+            async with ws_lib.connect(ws_url) as comfy_ws:
+
+                async def client_to_comfy():
+                    try:
+                        async for message in ws.iter_text():
+                            await comfy_ws.send(message)
+                    except Exception:
+                        pass
+
+                async def comfy_to_client():
+                    try:
+                        async for message in comfy_ws:
+                            if isinstance(message, bytes):
+                                await ws.send_bytes(message)
+                            else:
+                                await ws.send_text(message)
+                    except Exception:
+                        pass
+
+                await asyncio.gather(client_to_comfy(), comfy_to_client())
+
+        starlette_app = Starlette(
+            routes=[
+                Route("/ws", _proxy_ws),
+                Mount("/", app=Starlette(routes=[
+                    Route("/{{path:path}}", _proxy_http, methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]),
+                    Route("/", _proxy_http, methods=["GET"]),
+                ])),
+            ],
+        )
+
+        return starlette_app
 '''
 
 
