@@ -3,13 +3,19 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
+export interface ModalDeploymentStatus {
+  id: string
+  name: string
+  status: 'deploying' | 'deployed'
+  gpu: string
+  warm: boolean | null
+  url: string
+}
+
 export interface ModalDeployStatusData {
-  status: 'not_deployed' | 'deploying' | 'deployed'
-  warm: boolean
-  gpu: string | null
-  url: string | null
-  supported?: boolean
-  defaultGpu?: string
+  supported: boolean
+  defaultGpu: string
+  deployments: ModalDeploymentStatus[]
   logs?: string
 }
 
@@ -18,7 +24,7 @@ export interface ModalDeployStatusData {
  * a subprocess on every poll. Used for the Modal button visibility
  * and deploy banner state.
  */
-export function useModalDeployStatus(pluginId: string | null) {
+export function useModalDeployStatus(pluginId: string | null, selectedTarget?: string) {
   const [visible, setVisible] = useState(true)
 
   useEffect(() => {
@@ -28,18 +34,19 @@ export function useModalDeployStatus(pluginId: string | null) {
   }, [])
 
   return useQuery<ModalDeployStatusData>({
-    queryKey: ['modal-deploy-status', pluginId],
+    queryKey: ['modal-deploy-status', pluginId, selectedTarget],
     queryFn: async () => {
-      // Skip logs on status polls — they're expensive (subprocess + 3s timeout)
-      const res = await fetch(`/api/modal/deploy/${pluginId}?logs=false`)
+      const params = new URLSearchParams()
+      params.set('logs', 'false')
+      if (selectedTarget && selectedTarget !== '') params.set('target', selectedTarget)
+      const res = await fetch(`/api/modal/deploy/${pluginId}?${params}`)
       if (!res.ok) throw new Error('Failed to fetch Modal deploy status')
       return res.json()
     },
     enabled: !!pluginId && visible,
     refetchInterval: pluginId && visible ? (query) => {
-      const status = query.state.data?.status
-      // Poll faster during deploy, slower when stable
-      return status === 'deploying' ? 5_000 : 60_000
+      const deployments = query.state.data?.deployments ?? []
+      return deployments.some(d => d.status === 'deploying') ? 5_000 : 60_000
     } : false,
     staleTime: 10_000,
   })
