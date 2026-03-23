@@ -17,6 +17,7 @@ import {
   Copy,
   Check,
   Stop,
+  Cloud,
 } from 'phosphor-react'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
@@ -25,6 +26,8 @@ import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadIn
 import { LocalInferenceSetup, useInferenceStatus } from '@/components/LocalInferenceSetup'
 import { ComputePicker } from '@/components/ComputePicker'
 import { useModalStatus } from '@/hooks/useModalStatus'
+import { ModalDeployBanner } from '@/components/ModalDeployBanner'
+import { useModalDeployStatus } from '@/hooks/useModalDeployStatus'
 
 interface WorkflowIO {
   nodeId: string
@@ -45,6 +48,7 @@ interface Tool {
   description: string | null
   engine: string
   schemaJson: string
+  workflowJson: string
   comfyPort: number | null
   status: string
   version: number | null
@@ -801,6 +805,18 @@ export default function ToolPage() {
   const runningInstances = comfyInstances.filter((i) => i.status === 'running')
   const [selectedComfyPort, setSelectedComfyPort] = useState<number | 'auto' | 'modal' | null>(null)
   const { data: modalStatus } = useModalStatus()
+
+  // Derive pluginId from API-engine tool's workflowJson
+  const pluginId = (() => {
+    if (tool?.engine !== 'api') return null
+    try {
+      return (JSON.parse(tool.workflowJson) as { pluginId?: string }).pluginId ?? null
+    } catch { return null }
+  })()
+
+  const { data: modalDeployData } = useModalDeployStatus(pluginId)
+  const modalSupported = modalDeployData?.supported ?? false
+
   // Default to tool's configured port or first running instance
   const effectiveComfyPort: number | null =
     selectedComfyPort === 'modal'
@@ -826,6 +842,7 @@ export default function ToolPage() {
   // Devices occupied by running ComfyUI instances
   const busyDevices = new Set(runningInstances.map((i) => i.device))
   const [selectedDevice, setSelectedDevice] = useState<string>('')
+  const isModalSelected = selectedDevice === 'modal'
   // If auto, pick the first available (non-busy) device
   const effectiveDevice = selectedDevice || (
     gpuDevices.find((d) => !busyDevices.has(d.device))?.device ?? ''
@@ -877,7 +894,14 @@ export default function ToolPage() {
       const res = await fetch(`/api/tools/${id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, ...(pinnedPort != null ? { comfyPort: pinnedPort } : {}), ...(effectiveDevice ? { device: effectiveDevice } : {}) }),
+        body: JSON.stringify({
+          inputs,
+          comfyOrgApiKey: getComfyOrgApiKey() || undefined,
+          ...(pinnedPort != null ? { comfyPort: pinnedPort } : {}),
+          ...(selectedDevice === 'modal'
+            ? { comfyPort: 'modal' }
+            : effectiveDevice ? { device: effectiveDevice } : {}),
+        }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -1053,6 +1077,7 @@ export default function ToolPage() {
             value={selectedComfyPort}
             onChange={setSelectedComfyPort}
             modalConnected={modalStatus?.authenticated}
+            modalSupported={modalSupported}
           />
         )}
         {/* Device selector for API tools */}
@@ -1072,6 +1097,20 @@ export default function ToolPage() {
               )
             })}
           </select>
+        )}
+        {/* Modal option for API tools */}
+        {!isArtist && tool.engine === 'api' && modalSupported && modalStatus?.authenticated && (
+          <button
+            onClick={() => setSelectedDevice('modal')}
+            className={`px-2 py-2 text-xs border rounded-md transition-colors ${
+              selectedDevice === 'modal'
+                ? 'bg-purple-500/10 border-purple-500/30 text-purple-400'
+                : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
+            }`}
+          >
+            <Cloud size={13} weight="duotone" className="inline mr-1" />
+            Modal
+          </button>
         )}
         <button
           onClick={() => runMutation.mutate()}
@@ -1107,8 +1146,16 @@ export default function ToolPage() {
         </div>
       )}
 
-      {/* Local inference setup (API tools) */}
-      {tool.engine === 'api' && <LocalInferenceSetup />}
+      {/* Local inference setup (API tools — hidden when Modal is selected) */}
+      {tool.engine === 'api' && !isModalSelected && <LocalInferenceSetup />}
+
+      {/* Modal deploy banner (API tools when Modal selected) */}
+      {tool.engine === 'api' && isModalSelected && pluginId && modalSupported && (
+        <ModalDeployBanner
+          pluginId={pluginId}
+          defaultGpu={modalDeployData?.defaultGpu ?? 'A10G'}
+        />
+      )}
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">

@@ -14,6 +14,7 @@ import { getHistory } from '@/lib/comfyui-client'
 import { getComfyOrgApiKey as getComfyOrgApiKeyServer, getComfyInstances } from '@/lib/providerSettings'
 import { getPlugin, type ToolPluginManifest } from '@/lib/toolPlugins'
 import { autoRouteComfyPort, trackExecStart, trackExecEnd } from '@/lib/comfyAutoRoute'
+import { getModalUrl } from '@/lib/modal-deploy'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
 
@@ -181,6 +182,66 @@ async function runLocalInference(
 }
 
 
+/** Run inference on a Modal cloud deployment. */
+async function runModalInference(
+  executionId: string,
+  plugin: ToolPluginManifest,
+  inputs: Record<string, unknown>,
+  seed: number,
+  signal: AbortSignal,
+  modalUrl: string,
+) {
+  try {
+    const db = getDb()
+    const body: Record<string, unknown> = { seed }
+    for (const input of plugin.schema.inputs) {
+      const value = inputs?.[`api__${input.paramName}`]
+      body[input.paramName] = value !== undefined && value !== '' ? value : input.defaultValue
+    }
+
+    const res = await fetch(`${modalUrl.replace(/\/$/, '')}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(600_000)]),
+    })
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => `HTTP ${res.status}`)
+      await db.update(executions).set({ status: 'error', errorMessage: errText, completedAt: Date.now() })
+        .where(eq(executions.id, executionId))
+      return
+    }
+
+    const responseData = await res.json() as Record<string, string>
+    const outputDef = plugin.schema.outputs[0]
+    const outputField = outputDef?.paramName ?? 'image'
+    const isVideo = outputDef?.paramType === 'video'
+
+    await finalizeExecution(executionId, [{
+      kind: isVideo ? 'video' : 'image',
+      filename: isVideo ? 'output.mp4' : 'output.png',
+      data: responseData[outputField],
+    }])
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error'
+    const isCancel = msg === 'AbortError' || (err instanceof Error && err.name === 'AbortError')
+    const isTimeout = msg.includes('TimeoutError') || msg.includes('timed out')
+    try {
+      await getDb().update(executions).set({
+        status: 'error',
+        errorMessage: isCancel ? 'Cancelled' : isTimeout ? 'Modal execution timed out (10 min)' : msg,
+        completedAt: Date.now(),
+      }).where(eq(executions.id, executionId))
+    } catch (dbErr) {
+      console.error(`Failed to mark execution ${executionId} as error:`, dbErr)
+    }
+  } finally {
+    inFlightControllers.delete(executionId)
+  }
+}
+
+
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const db = getDb()
   const { id } = await params
@@ -207,16 +268,54 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride, device: deviceOverride } = body
   const comfyOrgApiKey = comfyOrgApiKeyFromBody || getComfyOrgApiKeyServer()
 
-  // ── Modal cloud guard ───────────────────────────────────────────────────────
-  if (comfyPortOverride === 'modal') {
-    return NextResponse.json(
-      { error: 'Modal cloud execution coming soon. Select a local compute target.' },
-      { status: 501 }
-    )
-  }
-
   // ── API-engine tools (non-ComfyUI, plugin-driven) ───────────────────────────
   if (tool.engine === 'api') {
+    // ── Modal cloud execution ───────────────────────────────────────────────
+    if (comfyPortOverride === 'modal') {
+      const config = JSON.parse(tool.workflowJson) as { engine: string; model: string; pluginId: string }
+      const plugin = getPlugin(config.pluginId)
+      if (!plugin) {
+        return NextResponse.json({ error: `Unknown API plugin: ${config.pluginId}` }, { status: 400 })
+      }
+
+      const modalUrl = getModalUrl(config.pluginId)
+      if (!modalUrl) {
+        return NextResponse.json({ error: 'This tool is not deployed to Modal. Deploy it first from the tool page.' }, { status: 400 })
+      }
+
+      const currentUser = getRequestUser(req)
+      const seed = inputs?.['api__seed'] ?? Math.floor(Math.random() * 2 ** 32)
+      const executionId = uuidv4()
+
+      await db.insert(executions).values({
+        id: executionId,
+        toolId,
+        userId: currentUser?.id ?? null,
+        inputsJson: JSON.stringify({ ...inputs, seed }),
+        workflowHash: tool.workflowHash,
+        seed,
+        status: 'running',
+        createdAt: Date.now(),
+      })
+      db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()
+
+      const controller = new AbortController()
+      inFlightControllers.set(executionId, controller)
+
+      runModalInference(executionId, plugin, inputs, seed, controller.signal, modalUrl)
+        .catch(async (err) => {
+          console.error(`Unhandled error in runModalInference for ${executionId}:`, err)
+          try {
+            await db.update(executions).set({
+              status: 'error', errorMessage: err instanceof Error ? err.message : 'Unknown error', completedAt: Date.now(),
+            }).where(eq(executions.id, executionId))
+          } catch { /* already logged */ }
+          inFlightControllers.delete(executionId)
+        })
+
+      return NextResponse.json({ executionId, type: 'modal', status: 'running', seed }, { status: 202 })
+    }
+
     const currentUser = getRequestUser(req)
     const seed = inputs?.['api__seed'] ?? Math.floor(Math.random() * 2 ** 32)
     const executionId = uuidv4()

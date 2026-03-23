@@ -28,6 +28,16 @@ export interface PluginSchemaOutput {
   label: string
 }
 
+export interface ModalCloudConfig {
+  supported: boolean
+  defaultGpu?: string
+  containerIdleTimeout?: number
+}
+
+export interface CloudConfig {
+  modal?: ModalCloudConfig
+}
+
 export interface ToolPluginManifest {
   id: string
   version: string
@@ -51,7 +61,11 @@ export interface ToolPluginManifest {
     inputs: PluginSchemaInput[]
     outputs: PluginSchemaOutput[]
   }
+  cloud?: CloudConfig
 }
+
+export const VALID_GPU_TIERS = ['T4', 'A10G', 'L4', 'A100', 'H100'] as const
+export type GpuTier = typeof VALID_GPU_TIERS[number]
 
 // ── Registry types ───────────────────────────────────────────────────────────
 

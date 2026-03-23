@@ -28,6 +28,8 @@ export interface ComputePickerProps {
   compact?: boolean
   /** Whether Modal cloud compute is connected */
   modalConnected?: boolean
+  /** Whether this tool's plugin supports Modal deployment */
+  modalSupported?: boolean
 }
 
 function formatVram(mb: number): string {
@@ -55,6 +57,7 @@ export function ComputePicker({
   onChange,
   compact = false,
   modalConnected = false,
+  modalSupported = false,
 }: ComputePickerProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -256,7 +259,7 @@ export function ComputePicker({
 
           {/* Cloud option */}
           <div className="h-px bg-white/5 my-1" />
-          {modalConnected ? (
+          {modalConnected && modalSupported ? (
             <button
               onClick={() => {
                 onChange("modal")
@@ -278,7 +281,7 @@ export function ComputePicker({
                 Cloud
               </span>
             </button>
-          ) : (
+          ) : modalSupported && !modalConnected ? (
             <Link
               href="/settings?tab=compute"
               onClick={() => setOpen(false)}
@@ -289,7 +292,7 @@ export function ComputePicker({
                 <span>Connect Modal in Settings &rarr;</span>
               </div>
             </Link>
-          )}
+          ) : null}
         </div>
       )}
     </div>
