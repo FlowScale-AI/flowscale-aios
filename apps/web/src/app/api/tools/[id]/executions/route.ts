@@ -355,11 +355,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (comfyOrgApiKey) {
     promptPayload.extra_data = { api_key_comfy_org: comfyOrgApiKey }
   }
-  const queueRes = await fetch(`http://localhost:${comfyPort}/prompt`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(promptPayload),
-  })
+  let queueRes: Response
+  try {
+    queueRes = await fetch(`http://localhost:${comfyPort}/prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(promptPayload),
+    })
+  } catch {
+    const errorMessage = `ComfyUI is not reachable on port ${comfyPort}. Make sure it is running.`
+    trackExecEnd(comfyPort)
+    await db.update(executions).set({ status: 'error', errorMessage, completedAt: Date.now() })
+      .where(eq(executions.id, executionId))
+    return NextResponse.json({ error: errorMessage }, { status: 503 })
+  }
 
   if (!queueRes.ok) {
     let detail = ''
