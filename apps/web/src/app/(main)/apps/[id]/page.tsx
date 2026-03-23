@@ -643,6 +643,27 @@ function ServerLogsPanel() {
   )
 }
 
+function ModalLogsPanel({ logs }: { logs: string }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const prevLengthRef = useRef(0)
+
+  useEffect(() => {
+    // Auto-scroll to bottom when new content arrives
+    if (logs.length > prevLengthRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+    prevLengthRef.current = logs.length
+  }, [logs])
+
+  return (
+    <div ref={containerRef} className="h-full overflow-y-auto font-mono text-[11px] text-zinc-400 leading-relaxed">
+      {logs.split('\n').map((line, i) => <div key={i} className="whitespace-pre-wrap">{line}</div>)}
+      <div ref={bottomRef} />
+    </div>
+  )
+}
+
 function BottomTabs({
   tool,
   executions,
@@ -716,9 +737,7 @@ function BottomTabs({
         )}
 
         {tab === 'logs' && tool.engine === 'api' && isModalSelected && modalLogs && (
-          <div className="h-full overflow-y-auto font-mono text-[11px] text-zinc-400 leading-relaxed">
-            {modalLogs.split('\n').map((line, i) => <div key={i} className="whitespace-pre-wrap">{line}</div>)}
-          </div>
+          <ModalLogsPanel logs={modalLogs} />
         )}
         {tab === 'logs' && tool.engine === 'api' && isModalSelected && !modalLogs && (
           <p className="text-xs text-zinc-600 pt-2">No Modal logs yet.</p>

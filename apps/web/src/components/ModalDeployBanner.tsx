@@ -109,6 +109,12 @@ export function ModalDeployBanner({
         <span className="text-purple-400/60 text-xs">
           {deployments.length} deployment{deployments.length !== 1 ? 's' : ''}
         </span>
+        {isAnyDeploying && (
+          <span className="flex items-center gap-1 text-purple-400 text-xs">
+            <Spinner size={12} className="animate-spin" />
+            Deploying...
+          </span>
+        )}
         <button
           onClick={handleOpenPopup}
           disabled={isAnyDeploying}
