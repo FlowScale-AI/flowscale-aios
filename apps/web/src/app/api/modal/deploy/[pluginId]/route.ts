@@ -146,13 +146,6 @@ export async function POST(
       )
     }
 
-    if (record.status === 'deploying') {
-      return NextResponse.json(
-        { error: 'Cannot undeploy while deployment is in progress' },
-        { status: 409 },
-      )
-    }
-
     const result = await undeployFromModal(pluginId, deployId)
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 500 })

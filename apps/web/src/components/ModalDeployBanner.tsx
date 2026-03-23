@@ -198,7 +198,7 @@ export function ModalDeployBanner({
               {/* Undeploy button */}
               <button
                 onClick={() => handleUndeploy(deployment.id)}
-                disabled={deployment.status === 'deploying' || isStopping}
+                disabled={isStopping}
                 className="ml-1 text-zinc-600 hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
                 title="Undeploy"
               >
