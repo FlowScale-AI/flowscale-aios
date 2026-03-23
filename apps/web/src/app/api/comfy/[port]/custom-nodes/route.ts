@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { resolveComfyBaseUrl } from '@/lib/modal-comfyui'
 
 type Params = { params: Promise<{ port: string }> }
 
@@ -7,7 +8,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
   let files: string[]
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/models/custom_nodes`, {
+    const res = await fetch(`${resolveComfyBaseUrl(Number(port))}/models/custom_nodes`, {
       signal: AbortSignal.timeout(5000),
     })
     if (!res.ok) return NextResponse.json({ error: 'Cannot reach ComfyUI' }, { status: 503 })

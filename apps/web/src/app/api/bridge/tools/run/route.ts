@@ -10,6 +10,7 @@ import { isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@fl
 import { queuePrompt, getHistory } from '@/lib/comfyui-client'
 import { v4 as uuidv4 } from 'uuid'
 import { autoRouteComfyPort, trackExecStart, trackExecEndById } from '@/lib/comfyAutoRoute'
+import { resolveComfyBaseUrl } from '@/lib/modal-comfyui'
 
 // ── Image input resolution ────────────────────────────────────────────────────
 //
@@ -31,7 +32,7 @@ function isOutputRef(v: unknown): v is OutputRef {
 }
 
 async function resolveImageInput(value: unknown, comfyPort: number): Promise<string> {
-  const baseUrl = `http://127.0.0.1:${comfyPort}`
+  const baseUrl = resolveComfyBaseUrl(comfyPort)
 
   if (isDataUrl(value)) {
     const [header, b64] = value.split(',')
@@ -160,7 +161,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No running ComfyUI instance available' }, { status: 503 })
   }
 
-  const baseUrl = `http://127.0.0.1:${customPort}`
+  const baseUrl = resolveComfyBaseUrl(customPort)
 
   // Resolve image inputs (data URLs and output refs) server-side before workflow injection
   const resolvedInputs: Record<string, unknown> = {}

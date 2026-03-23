@@ -6,6 +6,7 @@ import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { trackExecEndById } from '@/lib/comfyAutoRoute'
+import { resolveComfyBaseUrl } from '@/lib/modal-comfyui'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
 
@@ -30,7 +31,7 @@ async function saveOutputsToDisk(
       if (!item.filename) return item
       try {
         const subfolder = item.subfolder ?? ''
-        const url = `http://localhost:${comfyPort}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
+        const url = `${resolveComfyBaseUrl(comfyPort)}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
         const res = await fetch(url)
         if (!res.ok) return item
         const buffer = Buffer.from(await res.arrayBuffer())
