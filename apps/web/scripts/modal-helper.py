@@ -76,11 +76,24 @@ def cmd_deploy(plugin_dir: str, gpu: str):
             return
 
         # Parse the URL from modal deploy output
+        # The URL may be on the same line as "=>" or on the next line
         url = None
-        for line in full_output.splitlines():
+        lines = full_output.splitlines()
+        for i, line in enumerate(lines):
             if "=>" in line and "http" in line:
                 url = line.split("=>")[-1].strip()
                 break
+            if "=>" in line and i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                if next_line.startswith("http"):
+                    url = next_line
+                    break
+        # Fallback: search for any Modal URL in the output
+        if not url:
+            import re
+            m = re.search(r"https://\S+\.modal\.run\S*", full_output)
+            if m:
+                url = m.group(0)
 
         # Derive app name from manifest
         manifest_path = os.path.join(plugin_dir, "manifest.json")
