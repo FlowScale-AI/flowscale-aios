@@ -825,22 +825,6 @@ export default function ToolPage() {
     } catch { return null }
   })()
 
-  // Always fetch to get `supported` flag for showing Modal button,
-  // but only do live status polling when Modal is actually selected
-  const { data: modalDeployData } = useModalDeployStatus(pluginId)
-  const modalSupported = modalDeployData?.supported ?? false
-
-  // Default to tool's configured port or first running instance
-  const effectiveComfyPort: number | null =
-    selectedComfyPort === 'modal'
-      ? null
-      : selectedComfyPort === 'auto' || selectedComfyPort === null
-      ? (tool?.comfyPort ?? runningInstances[0]?.port ?? null)
-      : selectedComfyPort
-  const comfyInstanceLabel = effectiveComfyPort
-    ? comfyInstances.find((i) => i.port === effectiveComfyPort)?.label ?? `:${effectiveComfyPort}`
-    : undefined
-
   // ── GPU/device selection for API tools ────────────────────────────────────────
   const { data: gpuData } = useQuery<{ instances: Array<{ id: string; device: string; label: string }> }>({
     queryKey: ['gpu-instances'],
@@ -854,14 +838,32 @@ export default function ToolPage() {
   const gpuDevices = gpuData?.instances ?? []
   // Devices occupied by running ComfyUI instances
   const busyDevices = new Set(runningInstances.map((i) => i.device))
-  const [selectedDevice, setSelectedDevice] = useState<string>('')
-  const isModalSelected = selectedDevice === 'modal'
+  const [selectedProvider, setSelectedProvider] = useState<'local' | 'modal'>('local')
+  const [selectedTarget, setSelectedTarget] = useState<string>('')  // '' = Auto
+  const isModalSelected = selectedProvider === 'modal'
+
+  // Always fetch to get `supported` flag for showing Modal button,
+  // but only do live status polling when Modal is actually selected
+  const { data: modalDeployData } = useModalDeployStatus(pluginId, isModalSelected ? selectedTarget : undefined)
+  const modalSupported = modalDeployData?.supported ?? false
+
   // Fetch Modal logs separately — only when Modal is selected (avoids expensive subprocess)
   const { data: modalLogsData } = useModalLogs(pluginId, isModalSelected)
   // If auto, pick the first available (non-busy) device
-  const effectiveDevice = selectedDevice || (
-    gpuDevices.find((d) => !busyDevices.has(d.device))?.device ?? ''
-  )
+  const effectiveDevice = selectedProvider === 'local'
+    ? (selectedTarget || (gpuDevices.find((d) => !busyDevices.has(d.device))?.device ?? ''))
+    : ''
+
+  // Default to tool's configured port or first running instance
+  const effectiveComfyPort: number | null =
+    selectedComfyPort === 'modal'
+      ? null
+      : selectedComfyPort === 'auto' || selectedComfyPort === null
+      ? (tool?.comfyPort ?? runningInstances[0]?.port ?? null)
+      : selectedComfyPort
+  const comfyInstanceLabel = effectiveComfyPort
+    ? comfyInstances.find((i) => i.port === effectiveComfyPort)?.label ?? `:${effectiveComfyPort}`
+    : undefined
 
   const [leftTab, setLeftTab] = useState<'form' | 'nodejs' | 'http'>('form')
   const [latestOutputs, setLatestOutputs] = useState<OutputItem[]>([])
@@ -913,8 +915,8 @@ export default function ToolPage() {
           inputs,
           comfyOrgApiKey: getComfyOrgApiKey() || undefined,
           ...(pinnedPort != null ? { comfyPort: pinnedPort } : {}),
-          ...(selectedDevice === 'modal'
-            ? { comfyPort: 'modal' }
+          ...(selectedProvider === 'modal'
+            ? { provider: 'modal', modalDeployId: selectedTarget || 'auto' }
             : effectiveDevice ? { device: effectiveDevice } : {}),
         }),
       })
@@ -1095,29 +1097,45 @@ export default function ToolPage() {
             modalSupported={modalSupported}
           />
         )}
-        {/* Device selector for API tools (includes Modal cloud option) */}
-        {!isArtist && tool.engine === 'api' && gpuDevices.length > 0 && (
-          <select
-            value={selectedDevice}
-            onChange={(e) => setSelectedDevice(e.target.value)}
-            className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
-          >
-            <option value="">Auto</option>
-            {gpuDevices.map((d) => {
-              const busy = busyDevices.has(d.device)
-              return (
-                <option key={d.id} value={d.device} disabled={busy}>
-                  {d.label}{busy ? ' — in use by ComfyUI' : ''}
-                </option>
-              )
-            })}
-            {modalSupported && modalStatus?.authenticated && (
-              <>
-                <option disabled>────────────</option>
-                <option value="modal">☁ Modal (Cloud)</option>
-              </>
-            )}
-          </select>
+        {/* Provider + Target selectors for API tools */}
+        {!isArtist && tool.engine === 'api' && (
+          <>
+            {/* Provider dropdown */}
+            <select
+              value={selectedProvider}
+              onChange={(e) => { setSelectedProvider(e.target.value as 'local' | 'modal'); setSelectedTarget('') }}
+              className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
+            >
+              <option value="local">Local</option>
+              {modalSupported && modalStatus?.authenticated && (
+                <option value="modal">Modal</option>
+              )}
+            </select>
+            {/* Target dropdown */}
+            <select
+              value={selectedTarget}
+              onChange={(e) => setSelectedTarget(e.target.value)}
+              className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
+            >
+              <option value="">Auto</option>
+              {selectedProvider === 'local' && gpuDevices.map((d) => {
+                const busy = busyDevices.has(d.device)
+                return (
+                  <option key={d.id} value={d.device} disabled={busy}>
+                    {d.label}{busy ? ' — in use' : ''}
+                  </option>
+                )
+              })}
+              {selectedProvider === 'modal' && (modalDeployData?.deployments ?? [])
+                .filter(d => d.status === 'deployed')
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.gpu})
+                  </option>
+                ))
+              }
+            </select>
+          </>
         )}
         <button
           onClick={() => runMutation.mutate()}
@@ -1161,6 +1179,8 @@ export default function ToolPage() {
         <ModalDeployBanner
           pluginId={pluginId}
           defaultGpu={modalDeployData?.defaultGpu ?? 'A10G'}
+          deployments={modalDeployData?.deployments ?? []}
+          onDeployed={() => void 0}
         />
       )}
 
