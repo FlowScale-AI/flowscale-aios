@@ -15,6 +15,7 @@ import { getComfyOrgApiKey as getComfyOrgApiKeyServer, getComfyInstances } from 
 import { getPlugin, type ToolPluginManifest } from '@/lib/toolPlugins'
 import { autoRouteComfyPort, trackExecStart, trackExecEnd } from '@/lib/comfyAutoRoute'
 import { getModalDeployUrl, autoRouteModalDeployment } from '@/lib/modal-deploy'
+import { isModalComfyPort, resolveComfyBaseUrl, getModalComfyByPort } from '@/lib/modal-comfyui'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
 
@@ -32,7 +33,8 @@ async function saveComfyOutputsToDisk(
       if (!item.filename) return item
       try {
         const subfolder = item.subfolder ?? ''
-        const url = `http://localhost:${comfyPort}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
+        const comfyBaseUrl = resolveComfyBaseUrl(comfyPort)
+        const url = `${comfyBaseUrl}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
         const res = await fetch(url)
         if (!res.ok) return item
         const buffer = Buffer.from(await res.arrayBuffer())
@@ -417,7 +419,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Validate comfyPort override against configured instances to prevent arbitrary port access
   if (comfyPortOverride != null) {
     const validPorts = new Set(getComfyInstances().map((i) => i.port))
-    if (!validPorts.has(comfyPortOverride)) {
+    const isValidModalComfyPort = isModalComfyPort(comfyPortOverride) && getModalComfyByPort(comfyPortOverride) != null
+    if (!validPorts.has(comfyPortOverride) && !isValidModalComfyPort) {
       return NextResponse.json({ error: 'Invalid ComfyUI port — not a configured instance' }, { status: 400 })
     }
   }
@@ -444,7 +447,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   let objectInfoMap: ObjectInfoMap | undefined
   try {
-    const infoRes = await fetch(`http://localhost:${comfyPort}/object_info`, {
+    const infoRes = await fetch(`${resolveComfyBaseUrl(comfyPort)}/object_info`, {
       signal: AbortSignal.timeout(3000),
     })
     if (infoRes.ok) objectInfoMap = await infoRes.json() as ObjectInfoMap
@@ -499,7 +502,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
   let queueRes: Response
   try {
-    queueRes = await fetch(`http://localhost:${comfyPort}/prompt`, {
+    queueRes = await fetch(`${resolveComfyBaseUrl(comfyPort)}/prompt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(promptPayload),
@@ -544,7 +547,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // external apps don't need a browser watching a WebSocket.
   const waitMode = req.nextUrl.searchParams.get('wait') === 'true'
   if (waitMode) {
-    const baseUrl = `http://localhost:${comfyPort}`
+    const baseUrl = resolveComfyBaseUrl(comfyPort)
     const maxWait = 300_000
     const started = Date.now()
 
