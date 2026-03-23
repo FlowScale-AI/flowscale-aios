@@ -23,10 +23,10 @@ import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
 import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
 import { LocalInferenceSetup, useInferenceStatus } from '@/components/LocalInferenceSetup'
-import { ComputePicker } from '@/components/ComputePicker'
 import { useModalStatus } from '@/hooks/useModalStatus'
 import { ModalDeployBanner } from '@/components/ModalDeployBanner'
 import { useModalDeployStatus, useModalLogs } from '@/hooks/useModalDeployStatus'
+import { useModalComfyInstances } from '@/hooks/useModalComfyInstances'
 
 interface WorkflowIO {
   nodeId: string
@@ -835,6 +835,8 @@ export default function ToolPage() {
   const runningInstances = comfyInstances.filter((i) => i.status === 'running')
   const [selectedComfyPort, setSelectedComfyPort] = useState<number | 'auto' | 'modal' | null>(null)
   const { data: modalStatus } = useModalStatus()
+  const { data: modalComfyData } = useModalComfyInstances()
+  const modalComfyInstances = modalComfyData?.instances ?? []
 
   // Derive pluginId from API-engine tool's workflowJson
   const pluginId = (() => {
@@ -874,8 +876,13 @@ export default function ToolPage() {
     : ''
 
   // Default to tool's configured port or first running instance
+  // When Modal provider is selected for ComfyUI tools, use the virtual port
   const effectiveComfyPort: number | null =
-    selectedComfyPort === 'modal'
+    tool?.engine === 'comfyui' && selectedProvider === 'modal'
+      ? (selectedTarget ? Number(selectedTarget) : (modalComfyInstances.find(i => i.status === 'deployed')?.virtualPort ?? null))
+      : tool?.engine === 'comfyui' && selectedProvider === 'local'
+      ? (selectedTarget ? Number(selectedTarget) : (tool?.comfyPort ?? runningInstances[0]?.port ?? null))
+      : selectedComfyPort === 'modal'
       ? null
       : selectedComfyPort === 'auto' || selectedComfyPort === null
       ? (tool?.comfyPort ?? runningInstances[0]?.port ?? null)
@@ -916,13 +923,23 @@ export default function ToolPage() {
     }
   }, [runningExecution, executions])
 
-  /** Resolve the port: pinned port if user selected one, 'modal' for cloud, undefined to let server auto-route. */
+  /** Resolve the port: pinned port if user selected one, Modal virtual port for cloud ComfyUI, undefined to let server auto-route. */
   const resolveComfyPort = useCallback((): number | 'modal' | undefined => {
+    // ComfyUI-engine tools with Modal provider: use virtual port
+    if (tool?.engine === 'comfyui' && selectedProvider === 'modal') {
+      return selectedTarget
+        ? Number(selectedTarget)
+        : (modalComfyInstances.find(i => i.status === 'deployed')?.virtualPort ?? undefined)
+    }
+    // ComfyUI-engine tools with local provider: use selected target port or auto-route
+    if (tool?.engine === 'comfyui' && selectedProvider === 'local') {
+      return selectedTarget ? Number(selectedTarget) : undefined
+    }
     if (selectedComfyPort === 'modal') return 'modal'
     if (selectedComfyPort !== null && selectedComfyPort !== 'auto') return selectedComfyPort
     // Let the server handle auto-routing (least-busy across all users)
     return undefined
-  }, [selectedComfyPort])
+  }, [selectedComfyPort, selectedProvider, selectedTarget, tool?.engine, modalComfyInstances])
 
   const runMutation = useMutation<ExecResult, Error>({
     mutationFn: async () => {
@@ -1106,15 +1123,39 @@ export default function ToolPage() {
           </button>
         )}
         {/* Instance selector for ComfyUI tools */}
-        {!isArtist && tool.engine === 'comfyui' && comfyInstances.length > 0 && (
-          <ComputePicker
-            instances={comfyInstances}
-            gpuInfo={gpuHardwareData?.gpus}
-            value={selectedComfyPort}
-            onChange={setSelectedComfyPort}
-            modalConnected={modalStatus?.authenticated}
-            modalSupported={modalSupported}
-          />
+        {!isArtist && tool.engine === 'comfyui' && (
+          <>
+            <select
+              value={selectedProvider}
+              onChange={(e) => { setSelectedProvider(e.target.value as 'local' | 'modal'); setSelectedTarget('') }}
+              className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
+            >
+              <option value="local">Local</option>
+              {modalComfyInstances.filter(i => i.status === 'deployed').length > 0 && (
+                <option value="modal">Modal</option>
+              )}
+            </select>
+            <select
+              value={selectedTarget}
+              onChange={(e) => setSelectedTarget(e.target.value)}
+              className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
+            >
+              <option value="">Auto</option>
+              {selectedProvider === 'local' && comfyInstances.map((inst) => (
+                <option key={inst.id} value={String(inst.port)} disabled={inst.status !== 'running'}>
+                  {inst.label}{inst.status !== 'running' ? ` (${inst.status})` : ''}
+                </option>
+              ))}
+              {selectedProvider === 'modal' && modalComfyInstances
+                .filter(i => i.status === 'deployed')
+                .map(i => (
+                  <option key={i.id} value={String(i.virtualPort)}>
+                    {i.name} ({i.gpu})
+                  </option>
+                ))
+              }
+            </select>
+          </>
         )}
         {/* Provider + Target selectors for API tools */}
         {!isArtist && tool.engine === 'api' && (
@@ -1158,7 +1199,7 @@ export default function ToolPage() {
         )}
         <button
           onClick={() => runMutation.mutate()}
-          disabled={isRunning || (tool.engine === 'comfyui' && runningInstances.length === 0 && !effectiveComfyPort)}
+          disabled={isRunning || (tool.engine === 'comfyui' && selectedProvider !== 'modal' && runningInstances.length === 0 && !effectiveComfyPort)}
           className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
         >
           {isRunning ? (
@@ -1184,7 +1225,7 @@ export default function ToolPage() {
       )}
 
       {/* No ComfyUI warning */}
-      {tool.engine === 'comfyui' && runningInstances.length === 0 && !effectiveComfyPort && (
+      {tool.engine === 'comfyui' && selectedProvider !== 'modal' && runningInstances.length === 0 && !effectiveComfyPort && (
         <div className="px-6 py-2.5 bg-amber-950/30 border-b border-amber-900/50 text-amber-400 text-sm">
           No running ComfyUI instance available. Start one from the Providers page.
         </div>
