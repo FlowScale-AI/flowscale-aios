@@ -56,11 +56,10 @@ export function ModalDeployBanner({
   const [undployingIds, setUndeployingIds] = useState<Set<string>>(new Set())
 
   // Merge server deployments with optimistic pending ones (remove pending once server has it)
-  // Filter out deployments that are being undeployed
   const allDeployments = [
     ...deployments,
     ...pendingDeploys.filter(p => !deployments.some(d => d.id === p.id)),
-  ].filter(d => !undployingIds.has(d.id))
+  ]
   const isAnyDeploying = allDeployments.some((d) => d.status === 'deploying')
 
   const deployMutation = useMutation({
@@ -159,16 +158,21 @@ export function ModalDeployBanner({
       {/* Deployment list */}
       {allDeployments.length > 0 && (
         <div className="mt-2 flex flex-col gap-1">
-          {allDeployments.map((deployment) => (
+          {allDeployments.map((deployment) => {
+            const isStopping = undployingIds.has(deployment.id)
+            return (
             <div
               key={deployment.id}
-              className="flex items-center gap-2 py-1 px-2 bg-purple-950/30 rounded border border-purple-900/20"
+              className={`flex items-center gap-2 py-1 px-2 bg-purple-950/30 rounded border border-purple-900/20 ${isStopping ? 'opacity-50' : ''}`}
             >
-              {/* Deploying spinner or name */}
-              {deployment.status === 'deploying' ? (
+              {/* Status spinner */}
+              {(deployment.status === 'deploying' || isStopping) && (
                 <Spinner size={12} className="animate-spin text-purple-400 shrink-0" />
-              ) : null}
-              <span className="text-purple-200 text-xs truncate flex-1">{deployment.name}</span>
+              )}
+              <span className="text-purple-200 text-xs truncate flex-1">
+                {deployment.name}
+                {isStopping && <span className="text-red-400 ml-1">Stopping...</span>}
+              </span>
 
               {/* GPU badge */}
               <span className="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-800 border border-zinc-700 text-zinc-400 rounded shrink-0">
@@ -194,14 +198,15 @@ export function ModalDeployBanner({
               {/* Undeploy button */}
               <button
                 onClick={() => handleUndeploy(deployment.id)}
-                disabled={deployment.status === 'deploying'}
+                disabled={deployment.status === 'deploying' || isStopping}
                 className="ml-1 text-zinc-600 hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
                 title="Undeploy"
               >
                 <X size={12} />
               </button>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
