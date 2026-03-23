@@ -50,8 +50,15 @@ export function ModalDeployBanner({
   const [popupName, setPopupName] = useState(() =>
     generateDeployName(pluginId, defaultGpu || 'A10G', deployments),
   )
+  // Optimistic: track deploys we've kicked off that may not be in the poll yet
+  const [pendingDeploys, setPendingDeploys] = useState<ModalDeploymentStatus[]>([])
 
-  const isAnyDeploying = deployments.some((d) => d.status === 'deploying')
+  // Merge server deployments with optimistic pending ones (remove pending once server has it)
+  const allDeployments = [
+    ...deployments,
+    ...pendingDeploys.filter(p => !deployments.some(d => d.id === p.id)),
+  ]
+  const isAnyDeploying = allDeployments.some((d) => d.status === 'deploying')
 
   const deployMutation = useMutation({
     mutationFn: async ({ gpu, name }: { gpu: string; name: string }) => {
@@ -66,7 +73,16 @@ export function ModalDeployBanner({
       }
       return res.json()
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      // Optimistically add the deploying entry so it shows immediately
+      setPendingDeploys(prev => [...prev, {
+        id: variables.name,
+        name: variables.name,
+        status: 'deploying' as const,
+        gpu: variables.gpu,
+        warm: null,
+        url: '',
+      }])
       setShowPopup(false)
       onDeployed?.()
     },
@@ -107,7 +123,7 @@ export function ModalDeployBanner({
         <Cloud size={16} weight="duotone" className="text-purple-400" />
         <span className="text-purple-300 font-medium">Modal Cloud</span>
         <span className="text-purple-400/60 text-xs">
-          {deployments.length} deployment{deployments.length !== 1 ? 's' : ''}
+          {allDeployments.length} deployment{allDeployments.length !== 1 ? 's' : ''}
         </span>
         {isAnyDeploying && (
           <span className="flex items-center gap-1 text-purple-400 text-xs">
@@ -125,9 +141,9 @@ export function ModalDeployBanner({
       </div>
 
       {/* Deployment list */}
-      {deployments.length > 0 && (
+      {allDeployments.length > 0 && (
         <div className="mt-2 flex flex-col gap-1">
-          {deployments.map((deployment) => (
+          {allDeployments.map((deployment) => (
             <div
               key={deployment.id}
               className="flex items-center gap-2 py-1 px-2 bg-purple-950/30 rounded border border-purple-900/20"
