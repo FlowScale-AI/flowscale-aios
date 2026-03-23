@@ -5,10 +5,14 @@ import {
   getModalComfyById,
   addModalComfyInstance,
   removeModalComfyInstance,
+  updateModalComfyInstance,
   allocateVirtualPort,
   isModalComfyDeploying,
 } from '@/lib/modal-comfyui'
 import { validateGpuTier } from '@/lib/modal-deploy'
+import { spawn } from 'child_process'
+import { join } from 'path'
+import { getComfyUIPath } from '@/lib/providerSettings'
 
 export async function GET(req: NextRequest) {
   const user = getRequestUser(req)
@@ -59,8 +63,57 @@ export async function POST(req: NextRequest) {
       deployedAt: Date.now(),
     })
 
-    // TODO: Fire and forget deploy via helper (Task 10 will implement the actual template)
-    // For now, just mark as deploying
+    // Fire and forget — scan local ComfyUI, generate config, deploy via helper
+    const helperScript = join(process.cwd(), 'scripts', 'modal-helper.py')
+    const comfyuiPath = getComfyUIPath()
+
+    ;(async () => {
+      try {
+        // Step 1: Scan local ComfyUI for custom nodes
+        const scanResult = await new Promise<string>((resolve, reject) => {
+          const proc = spawn('python3', [helperScript, 'scan-comfyui', comfyuiPath || ''], {
+            stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000,
+          })
+          let out = ''
+          proc.stdout.on('data', (d: Buffer) => { out += d.toString() })
+          proc.on('close', () => resolve(out.trim()))
+          proc.on('error', reject)
+        })
+
+        const scanData = JSON.parse(scanResult)
+
+        // Step 2: Deploy via helper with the scan config
+        const configJson = JSON.stringify(scanData)
+        const deployResult = await new Promise<string>((resolve, reject) => {
+          const proc = spawn('python3', [helperScript, 'deploy-comfyui', configJson, gpu, appName], {
+            stdio: ['ignore', 'pipe', 'pipe'], timeout: 660_000,
+          })
+          let out = ''
+          proc.stdout.on('data', (d: Buffer) => { out += d.toString() })
+          proc.on('close', () => resolve(out.trim()))
+          proc.on('error', reject)
+        })
+
+        const result = JSON.parse(deployResult)
+        if (result.success) {
+          updateModalComfyInstance(name, {
+            status: 'deployed',
+            url: result.url || '',
+          })
+        } else {
+          updateModalComfyInstance(name, {
+            status: 'error',
+            errorMessage: result.error || 'Deploy failed',
+          })
+        }
+      } catch (err) {
+        console.error(`Modal ComfyUI deploy failed for ${name}:`, err)
+        updateModalComfyInstance(name, {
+          status: 'error',
+          errorMessage: err instanceof Error ? err.message : 'Unknown error',
+        })
+      }
+    })()
 
     return NextResponse.json({ status: 'deploying', name, gpu, virtualPort }, { status: 202 })
   }
@@ -72,8 +125,17 @@ export async function POST(req: NextRequest) {
     const instance = getModalComfyById(instanceId)
     if (!instance) return NextResponse.json({ error: 'Instance not found' }, { status: 404 })
 
-    // Call modal helper to undeploy
-    // For now, just remove the record
+    // Call modal helper to undeploy, then remove record
+    const helperScript = join(process.cwd(), 'scripts', 'modal-helper.py')
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('python3', [helperScript, 'undeploy', instance.appName], {
+          stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000,
+        })
+        proc.on('close', () => resolve())
+        proc.on('error', reject)
+      })
+    } catch { /* best effort */ }
     removeModalComfyInstance(instanceId)
     return NextResponse.json({ success: true })
   }
