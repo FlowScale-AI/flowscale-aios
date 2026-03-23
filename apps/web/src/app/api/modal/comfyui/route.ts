@@ -12,6 +12,8 @@ import {
 import { validateGpuTier } from '@/lib/modal-deploy'
 import { spawn } from 'child_process'
 import { join } from 'path'
+import { writeFileSync, mkdirSync } from 'fs'
+import { tmpdir } from 'os'
 import { getComfyUIPath } from '@/lib/providerSettings'
 
 export async function GET(req: NextRequest) {
@@ -82,10 +84,12 @@ export async function POST(req: NextRequest) {
 
         const scanData = JSON.parse(scanResult)
 
-        // Step 2: Deploy via helper with the scan config
-        const configJson = JSON.stringify(scanData)
+        // Step 2: Write config to temp file (too large for CLI args)
+        const configFile = join(tmpdir(), `flowscale-comfyui-config-${Date.now()}.json`)
+        writeFileSync(configFile, JSON.stringify(scanData), 'utf-8')
+
         const deployResult = await new Promise<string>((resolve, reject) => {
-          const proc = spawn('python3', [helperScript, 'deploy-comfyui', configJson, gpu, appName], {
+          const proc = spawn('python3', [helperScript, 'deploy-comfyui', configFile, gpu, appName], {
             stdio: ['ignore', 'pipe', 'pipe'], timeout: 660_000,
           })
           let out = ''
@@ -146,10 +150,12 @@ export async function POST(req: NextRequest) {
         })
         const scanData = JSON.parse(scanResult)
 
-        // Step 2: Redeploy with same name and app name
-        const configJson = JSON.stringify(scanData)
+        // Step 2: Write config to temp file and redeploy
+        const configFile = join(tmpdir(), `flowscale-comfyui-resync-${Date.now()}.json`)
+        writeFileSync(configFile, JSON.stringify(scanData), 'utf-8')
+
         const deployResult = await new Promise<string>((resolve, reject) => {
-          const proc = spawn('python3', [helperScript, 'deploy-comfyui', configJson, instance.gpu, instance.appName], {
+          const proc = spawn('python3', [helperScript, 'deploy-comfyui', configFile, instance.gpu, instance.appName], {
             stdio: ['ignore', 'pipe', 'pipe'], timeout: 660_000,
           })
           let out = ''

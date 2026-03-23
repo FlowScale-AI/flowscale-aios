@@ -496,12 +496,20 @@ class ComfyUIServer:
 '''
 
 
-def cmd_deploy_comfyui(config_json: str, gpu: str, app_name: str):
-    """Deploy a ComfyUI installation to Modal."""
+def cmd_deploy_comfyui(config_source: str, gpu: str, app_name: str):
+    """Deploy a ComfyUI installation to Modal.
+
+    config_source can be a JSON string or a path to a JSON file.
+    """
     try:
-        config = json.loads(config_json)
+        # Try reading as file first, fall back to parsing as JSON string
+        if os.path.isfile(config_source):
+            with open(config_source) as f:
+                config = json.load(f)
+        else:
+            config = json.loads(config_source)
     except Exception as e:
-        _json_out({"success": False, "error": f"Invalid config JSON: {e}"})
+        _json_out({"success": False, "error": f"Invalid config: {e}"})
         return
 
     custom_nodes = config.get("customNodes", [])
