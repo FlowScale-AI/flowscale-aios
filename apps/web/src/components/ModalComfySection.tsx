@@ -104,6 +104,21 @@ export function ModalComfySection() {
     },
   })
 
+  const resyncMutation = useMutation({
+    mutationFn: async (instanceId: string) => {
+      const res = await fetch('/api/modal/comfyui', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'resync', instanceId }),
+      })
+      if (!res.ok) throw new Error('Resync failed')
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['modal-comfyui-instances'] })
+    },
+  })
+
   function handleOpenDeployPopup() {
     const name = generateInstanceName(popupGpu, instances)
     setPopupName(name)
@@ -196,6 +211,18 @@ export function ModalComfySection() {
                   >
                     {inst.status}
                   </span>
+                )}
+
+                {/* Sync & Redeploy button */}
+                {inst.status === 'deployed' && (
+                  <button
+                    onClick={() => resyncMutation.mutate(inst.id)}
+                    disabled={resyncMutation.isPending || isStopping}
+                    className="text-[10px] px-1.5 py-0.5 rounded text-purple-400 hover:text-purple-300 bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 disabled:opacity-40 transition-colors shrink-0"
+                    title="Re-scan local custom nodes & models, rebuild and redeploy"
+                  >
+                    {resyncMutation.isPending ? 'Syncing...' : 'Sync'}
+                  </button>
                 )}
 
                 {/* Undeploy button */}
