@@ -52,12 +52,15 @@ export function ModalDeployBanner({
   )
   // Optimistic: track deploys we've kicked off that may not be in the poll yet
   const [pendingDeploys, setPendingDeploys] = useState<ModalDeploymentStatus[]>([])
+  // Track which deployment IDs are being undeployed (for UI feedback)
+  const [undployingIds, setUndeployingIds] = useState<Set<string>>(new Set())
 
   // Merge server deployments with optimistic pending ones (remove pending once server has it)
+  // Filter out deployments that are being undeployed
   const allDeployments = [
     ...deployments,
     ...pendingDeploys.filter(p => !deployments.some(d => d.id === p.id)),
-  ]
+  ].filter(d => !undployingIds.has(d.id))
   const isAnyDeploying = allDeployments.some((d) => d.status === 'deploying')
 
   const deployMutation = useMutation({
@@ -88,8 +91,12 @@ export function ModalDeployBanner({
     },
   })
 
+  // Undeploy confirmation state
+  const [confirmUndeployId, setConfirmUndeployId] = useState<string | null>(null)
+
   const undeployMutation = useMutation({
     mutationFn: async (deployId: string) => {
+      setUndeployingIds(prev => new Set(prev).add(deployId))
       const res = await fetch(`/api/modal/deploy/${pluginId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -98,10 +105,19 @@ export function ModalDeployBanner({
       if (!res.ok) throw new Error('Undeploy failed')
       return res.json()
     },
-    onSuccess: () => {
+    onSuccess: (_data, deployId) => {
+      setUndeployingIds(prev => { const s = new Set(prev); s.delete(deployId); return s })
+      setConfirmUndeployId(null)
       onDeployed?.()
     },
+    onError: (_err, deployId) => {
+      setUndeployingIds(prev => { const s = new Set(prev); s.delete(deployId); return s })
+    },
   })
+
+  function handleUndeploy(deployId: string) {
+    setConfirmUndeployId(deployId)
+  }
 
   function handleOpenPopup() {
     const gpu = defaultGpu || 'A10G'
@@ -177,8 +193,8 @@ export function ModalDeployBanner({
 
               {/* Undeploy button */}
               <button
-                onClick={() => undeployMutation.mutate(deployment.id)}
-                disabled={deployment.status === 'deploying' || undeployMutation.isPending}
+                onClick={() => handleUndeploy(deployment.id)}
+                disabled={deployment.status === 'deploying'}
                 className="ml-1 text-zinc-600 hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
                 title="Undeploy"
               >
@@ -240,6 +256,30 @@ export function ModalDeployBanner({
               className="px-3 py-1 text-xs font-medium bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
             >
               {deployMutation.isPending ? 'Deploying...' : 'Deploy'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Undeploy confirmation popup */}
+      {confirmUndeployId && (
+        <div className="absolute right-6 top-full mt-2 z-50 w-72 bg-zinc-900 border border-red-500/20 rounded-lg shadow-xl p-4 flex flex-col gap-3">
+          <p className="text-zinc-200 text-sm font-medium">Undeploy {confirmUndeployId}?</p>
+          <p className="text-zinc-500 text-xs">This will stop and delete the Modal app. You can redeploy later.</p>
+          <div className="flex items-center gap-2 justify-end">
+            <button
+              onClick={() => setConfirmUndeployId(null)}
+              disabled={undeployMutation.isPending}
+              className="px-3 py-1 text-xs text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => undeployMutation.mutate(confirmUndeployId)}
+              disabled={undeployMutation.isPending}
+              className="px-3 py-1 text-xs font-medium bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded transition-colors"
+            >
+              {undeployMutation.isPending ? 'Stopping...' : 'Undeploy'}
             </button>
           </div>
         </div>
