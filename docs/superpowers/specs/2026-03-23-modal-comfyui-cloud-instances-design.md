@@ -138,13 +138,24 @@ const isValidModalPort = isModalComfyPort(comfyPortOverride) && getModalComfyUrl
 if (!validPorts.has(comfyPortOverride) && !isValidModalPort) { ... }
 ```
 
-### WebSocket handling for Modal
+### WebSocket support for Modal
 
-The WebSocket SSE bridge at `/api/comfy/[port]/ws` connects to `ws://127.0.0.1:${port}/ws`. For Modal ports, WebSocket is not available (Modal ASGI doesn't support WS).
+Modal's ASGI infrastructure supports WebSocket connections. The ComfyUI subprocess inside the container has full WS support. The ASGI reverse proxy forwards both HTTP and WebSocket to the internal ComfyUI process.
 
-**Implementation:** When `isModalComfyPort(port)`, the SSE route should return an immediate empty stream or 404. The tool page's `onSuccess` handler (line ~935) should skip the SSE connection when the port is a Modal virtual port and rely solely on the **history polling fallback** (lines ~974-1014 of page.tsx).
+**Implementation:** The `/api/comfy/[port]/ws` bridge uses `resolveComfyBaseUrl` to get the Modal URL, then connects to `wss://{modal-url}/ws` instead of `ws://127.0.0.1:${port}/ws` for virtual ports:
 
-**UI during Modal execution:** Show an indeterminate spinner with "Running on Modal..." text instead of the step-by-step progress bar. The execution completes when the history poll detects the prompt is done.
+```ts
+const isModal = isModalComfyPort(port)
+const wsUrl = isModal
+  ? `wss://${new URL(resolveComfyBaseUrl(port)).host}/ws?clientId=${clientId}`
+  : `ws://127.0.0.1:${port}/ws?clientId=${clientId}`
+```
+
+This gives full real-time progress: step-by-step denoising updates, node execution status, and live previews — same as local ComfyUI.
+
+**Lifecycle:** WebSocket connects only during execution (user clicks Run) and disconnects when the prompt completes. The container stays alive during execution, then scales down after `scaledown_window` (60s). No persistent WS connections keeping containers warm.
+
+**Log streaming:** The HTTP PATCH to `/internal/logs/subscribe` (line 16 of ws/route.ts) is skipped for Modal ports — it's a ComfyUI Manager-specific endpoint that may not be available on cloud instances.
 
 ### Proxy timeout for cold starts
 
@@ -324,7 +335,7 @@ Scans local ComfyUI installation and returns:
 | File | Change |
 |------|--------|
 | `apps/web/src/app/api/comfy/[port]/[...path]/route.ts` | Use `resolveComfyBaseUrl`, increase timeout for Modal ports |
-| `apps/web/src/app/api/comfy/[port]/ws/route.ts` | Return empty/404 for Modal virtual ports (no WS support) |
+| `apps/web/src/app/api/comfy/[port]/ws/route.ts` | Use `resolveComfyBaseUrl` for WS URL, skip log subscription for Modal |
 | `apps/web/src/app/api/tools/[id]/executions/route.ts` | Use `resolveComfyBaseUrl` for object_info, prompt, history, outputs. Allow virtual ports in validation. |
 | `apps/web/src/app/(main)/settings/page.tsx` | Add Cloud Instances section to ComfyUI tab |
 | `apps/web/src/app/(main)/apps/[id]/page.tsx` | Use provider/target dropdowns for ComfyUI tools. Skip SSE for Modal ports. Show indeterminate spinner. |
@@ -340,8 +351,7 @@ Scans local ComfyUI installation and returns:
 
 ## 10. Limitations (V1)
 
-- **No WebSocket progress** for Modal instances — uses history polling only (progress bar won't show step-by-step, just final completion)
-- **No live preview** for Modal instances (preview requires WebSocket)
 - **Model download on first cold start** — can take several minutes for large models
 - **Custom node compatibility** — some custom nodes with C++ extensions may not build on Modal's Debian image
 - **No model upload from local** — models must be downloadable from HuggingFace/Civitai (can't upload local-only models)
+- **Cold start latency** — first request after scaledown takes 30-120s (container boot + ComfyUI startup + model loading)
