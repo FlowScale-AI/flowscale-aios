@@ -14,7 +14,7 @@ import { getHistory } from '@/lib/comfyui-client'
 import { getComfyOrgApiKey as getComfyOrgApiKeyServer, getComfyInstances } from '@/lib/providerSettings'
 import { getPlugin, type ToolPluginManifest } from '@/lib/toolPlugins'
 import { autoRouteComfyPort, trackExecStart, trackExecEnd } from '@/lib/comfyAutoRoute'
-import { getModalUrl } from '@/lib/modal-deploy'
+import { getModalDeployUrl, autoRouteModalDeployment } from '@/lib/modal-deploy'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
 
@@ -293,22 +293,37 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!tool) return NextResponse.json({ error: 'Tool not found' }, { status: 404 })
 
   const body = await req.json()
-  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride, device: deviceOverride } = body
+  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride, device: deviceOverride, provider: providerOverride, modalDeployId } = body
   const comfyOrgApiKey = comfyOrgApiKeyFromBody || getComfyOrgApiKeyServer()
 
   // ── API-engine tools (non-ComfyUI, plugin-driven) ───────────────────────────
   if (tool.engine === 'api') {
     // ── Modal cloud execution ───────────────────────────────────────────────
-    if (comfyPortOverride === 'modal') {
+    // Support both old format (comfyPort: 'modal') and new (provider: 'modal', modalDeployId: '...')
+    const provider = providerOverride as string | undefined
+    const isModal = provider === 'modal' || comfyPortOverride === 'modal'
+
+    if (isModal) {
       const config = JSON.parse(tool.workflowJson) as { engine: string; model: string; pluginId: string }
       const plugin = getPlugin(config.pluginId)
       if (!plugin) {
         return NextResponse.json({ error: `Unknown API plugin: ${config.pluginId}` }, { status: 400 })
       }
 
-      const modalUrl = getModalUrl(config.pluginId)
-      if (!modalUrl) {
-        return NextResponse.json({ error: 'This tool is not deployed to Modal. Deploy it first from the tool page.' }, { status: 400 })
+      let modalUrl: string | null = null
+      const resolvedDeployId = (modalDeployId as string | undefined) ?? 'auto'
+
+      if (resolvedDeployId === 'auto') {
+        const deployment = autoRouteModalDeployment(config.pluginId)
+        if (!deployment) {
+          return NextResponse.json({ error: 'No Modal deployments available. Deploy from the tool page first.' }, { status: 400 })
+        }
+        modalUrl = deployment.url
+      } else {
+        modalUrl = getModalDeployUrl(config.pluginId, resolvedDeployId)
+        if (!modalUrl) {
+          return NextResponse.json({ error: `Modal deployment "${resolvedDeployId}" not found or not ready.` }, { status: 400 })
+        }
       }
 
       const currentUser = getRequestUser(req)
