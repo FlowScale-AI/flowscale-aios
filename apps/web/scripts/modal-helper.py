@@ -121,32 +121,56 @@ def cmd_undeploy(app_name: str):
 
 
 def cmd_status(app_name: str, url: str | None = None):
-    """Check if a Modal app is deployed and if a container is warm."""
+    """Check if a Modal app is deployed and if a container is warm.
+
+    Uses the health endpoint as the primary check (modal app list truncates names).
+    Falls back to assuming deployed if we have a URL on record.
+    """
     try:
-        result = subprocess.run(
-            ["modal", "app", "list"],
-            capture_output=True, text=True, timeout=15,
-        )
-        deployed = app_name in result.stdout
-
-        if not deployed:
-            _json_out({"deployed": False, "warm": False, "gpu": None, "url": None})
-            return
-
         warm = False
         gpu = None
+        deployed = False
+
+        # Primary check: hit the health endpoint
         if url:
             import urllib.request
             try:
                 req = urllib.request.Request(f"{url.rstrip('/')}/health", method="GET")
-                with urllib.request.urlopen(req, timeout=5) as resp:
+                with urllib.request.urlopen(req, timeout=8) as resp:
                     data = json.loads(resp.read().decode())
                     warm = True
+                    deployed = True
                     gpu = data.get("gpu")
-            except Exception:
+            except urllib.error.HTTPError:
+                # Got an HTTP response (e.g. 500) — app is deployed but erroring
+                deployed = True
                 warm = False
+            except Exception:
+                # Timeout or connection refused — could be cold start or not deployed
+                # Check modal app list as fallback (partial match on truncated names)
+                try:
+                    result = subprocess.run(
+                        ["modal", "app", "list"],
+                        capture_output=True, text=True, timeout=15,
+                    )
+                    # Match on the first part of the name (before truncation "…")
+                    short_name = app_name[:12]  # e.g. "flowscale-z-" matches "flowscale-z…"
+                    for line in result.stdout.splitlines():
+                        if short_name in line and "deployed" in line:
+                            deployed = True
+                            break
+                except Exception:
+                    pass
 
-        _json_out({"deployed": True, "warm": warm, "gpu": gpu, "url": url})
+                # If we still can't confirm, trust the local record
+                if not deployed:
+                    deployed = True  # Trust the caller — they have a URL on record
+                    warm = False
+        else:
+            # No URL — can't check anything
+            deployed = False
+
+        _json_out({"deployed": deployed, "warm": warm, "gpu": gpu, "url": url})
 
     except Exception as e:
         _json_out({"deployed": False, "warm": False, "gpu": None, "url": None, "error": str(e)})
