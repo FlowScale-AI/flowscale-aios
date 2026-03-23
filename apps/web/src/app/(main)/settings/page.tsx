@@ -43,6 +43,8 @@ import {
 } from "phosphor-react";
 import { PageTransition, Modal } from "@/components/ui";
 import { useUpdateStore } from "@/store/updateStore";
+import { useModalStatus } from "@/hooks/useModalStatus";
+import { ModalComfySection } from "@/components/ModalComfySection";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -996,6 +998,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const queryClient = useQueryClient();
   const [pathInput, setPathInput] = useState("");
   const [pathSaved, setPathSaved] = useState(false);
+  const { data: modalStatus } = useModalStatus();
 
   const { data: comfyManage, refetch: refetchManage } =
     useQuery<ComfyManageResponse>({
@@ -1277,6 +1280,9 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
             </p>
           </div>
         </div>
+
+        {/* Cloud Instances section — shown when Modal is authenticated */}
+        {modalStatus?.authenticated && <ModalComfySection />}
       </div>
     </div>
   );
