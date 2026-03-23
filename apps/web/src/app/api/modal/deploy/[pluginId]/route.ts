@@ -28,7 +28,11 @@ export async function GET(
     && existsSync(join(homedir(), '.flowscale', 'tool-plugins', pluginId, 'modal_app.py'))
 
   const status = await getModalDeployStatus(pluginId)
-  const logs = getModalLogs(pluginId)
+
+  // Only fetch full logs (deploy + runtime) when actively checking — costs ~3s subprocess
+  const includeLogs = req.nextUrl.searchParams.get('logs') !== 'false'
+  const logs = includeLogs ? await getModalLogs(pluginId) : ''
+
   return NextResponse.json({
     ...status,
     supported: modalSupported,

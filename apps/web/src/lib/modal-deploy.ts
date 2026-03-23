@@ -203,12 +203,21 @@ export function getModalUrl(pluginId: string): string | null {
   return record?.status === 'deployed' ? record.url : null
 }
 
-/** Read the latest Modal log file for a plugin (fast, reads from disk). */
-export function getModalLogs(pluginId: string): string {
+/** Read deploy logs from disk (fast, no subprocess). */
+export function getModalDeployLogs(pluginId: string): string {
   const logPath = join(PLUGINS_DIR, pluginId, 'modal-latest.log')
   try {
     return readFileSync(logPath, 'utf-8')
   } catch {
     return ''
   }
+}
+
+/** Fetch combined deploy + runtime logs via helper (spawns subprocess, ~3s). */
+export async function getModalLogs(pluginId: string): Promise<string> {
+  const record = readDeployments()[pluginId]
+  const pluginDir = join(PLUGINS_DIR, pluginId)
+  const appName = record?.appName ?? ''
+  const result = await runHelper(['logs', pluginDir, appName])
+  return (result.logs as string) ?? ''
 }

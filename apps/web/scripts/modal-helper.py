@@ -176,14 +176,47 @@ def cmd_status(app_name: str, url: str | None = None):
         _json_out({"deployed": False, "warm": False, "gpu": None, "url": None, "error": str(e)})
 
 
-def cmd_logs(plugin_dir: str):
-    """Read the latest Modal log file from the plugin directory."""
+def cmd_logs(plugin_dir: str, app_name: str = ""):
+    """Read deploy logs from disk + runtime logs from Modal CLI."""
+    # Deploy logs from disk
     latest_path = os.path.join(plugin_dir, "modal-latest.log")
-    if not os.path.exists(latest_path):
-        _json_out({"logs": ""})
-        return
-    with open(latest_path, "r") as f:
-        _json_out({"logs": f.read()})
+    deploy_logs = ""
+    if os.path.exists(latest_path):
+        with open(latest_path, "r") as f:
+            deploy_logs = f.read()
+
+    # Runtime logs from Modal CLI (streams forever — grab what we can in 3s)
+    runtime_logs = ""
+    if app_name:
+        try:
+            import select
+            proc = subprocess.Popen(
+                ["modal", "app", "logs", app_name],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+            lines = []
+            import time
+            deadline = time.time() + 3
+            while time.time() < deadline:
+                # Use select to check if data is available (non-blocking)
+                ready, _, _ = select.select([proc.stdout], [], [], 0.5)
+                if ready:
+                    line = proc.stdout.readline()
+                    if not line:
+                        break
+                    lines.append(line)
+            proc.kill()
+            proc.wait()
+            runtime_logs = "".join(lines).strip()
+        except Exception:
+            pass
+
+    # Combine: deploy logs first, then runtime logs separated by a marker
+    combined = deploy_logs
+    if runtime_logs:
+        combined += "\n\n── Runtime Logs ──────────────────────────────\n" + runtime_logs
+
+    _json_out({"logs": combined, "deployLogs": deploy_logs, "runtimeLogs": runtime_logs})
 
 
 if __name__ == "__main__":
@@ -201,7 +234,8 @@ if __name__ == "__main__":
         url = sys.argv[3] if len(sys.argv) >= 4 else None
         cmd_status(sys.argv[2], url)
     elif command == "logs" and len(sys.argv) >= 3:
-        cmd_logs(sys.argv[2])
+        app_name = sys.argv[3] if len(sys.argv) >= 4 else ""
+        cmd_logs(sys.argv[2], app_name)
     else:
         print(f"Unknown command or missing args: {sys.argv[1:]}", file=sys.stderr)
         sys.exit(1)

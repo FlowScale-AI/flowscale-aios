@@ -27,7 +27,7 @@ import { LocalInferenceSetup, useInferenceStatus } from '@/components/LocalInfer
 import { ComputePicker } from '@/components/ComputePicker'
 import { useModalStatus } from '@/hooks/useModalStatus'
 import { ModalDeployBanner } from '@/components/ModalDeployBanner'
-import { useModalDeployStatus } from '@/hooks/useModalDeployStatus'
+import { useModalDeployStatus, useModalLogs } from '@/hooks/useModalDeployStatus'
 
 interface WorkflowIO {
   nodeId: string
@@ -857,6 +857,8 @@ export default function ToolPage() {
   const busyDevices = new Set(runningInstances.map((i) => i.device))
   const [selectedDevice, setSelectedDevice] = useState<string>('')
   const isModalSelected = selectedDevice === 'modal'
+  // Fetch Modal logs separately — only when Modal is selected (avoids expensive subprocess)
+  const { data: modalLogsData } = useModalLogs(pluginId, isModalSelected)
   // If auto, pick the first available (non-busy) device
   const effectiveDevice = selectedDevice || (
     gpuDevices.find((d) => !busyDevices.has(d.device))?.device ?? ''
@@ -1269,7 +1271,7 @@ export default function ToolPage() {
                 effectiveComfyPort={effectiveComfyPort}
                 comfyInstanceLabel={comfyInstanceLabel}
                 isModalSelected={isModalSelected}
-                modalLogs={modalDeployData?.logs}
+                modalLogs={modalLogsData?.logs}
               />
             </div>
           </Panel>
