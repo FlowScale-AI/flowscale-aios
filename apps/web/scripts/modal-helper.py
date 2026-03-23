@@ -233,11 +233,15 @@ def cmd_scan_comfyui(comfyui_path: str):
     _json_out({"comfyuiPath": comfyui_path, "version": version, "customNodes": custom_nodes, "models": models})
 
 
-def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-models"):
-    """Upload all local ComfyUI models to a Modal Volume."""
+def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-models", silent: bool = False):
+    """Upload all local ComfyUI models to a Modal Volume.
+
+    When silent=True, don't write final JSON to stdout (used when called from deploy).
+    """
     models_dir = os.path.join(comfyui_path, "models")
     if not os.path.isdir(models_dir):
-        _json_out({"success": False, "error": f"Models directory not found: {models_dir}"})
+        if not silent:
+            _json_out({"success": False, "error": f"Models directory not found: {models_dir}"})
         return
 
     # Collect model files
@@ -262,7 +266,7 @@ def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-mod
         print(f"[{i}/{total}] Uploading {rel_path} ({size_mb:.0f} MB)...", flush=True)
         try:
             result = subprocess.run(
-                ["modal", "volume", "put", volume_name, full_path, rel_path],
+                ["modal", "volume", "put", "--force", volume_name, full_path, rel_path],
                 capture_output=True, text=True, timeout=600,
             )
             if result.returncode == 0:
@@ -279,7 +283,8 @@ def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-mod
             errors.append(f"{rel_path}: {e}")
             print(f"  Error: {e}", flush=True)
 
-    _json_out({"success": len(errors) == 0, "synced": synced, "total": total, "errors": errors})
+    if not silent:
+        _json_out({"success": len(errors) == 0, "synced": synced, "total": total, "errors": errors})
 
 
 def _generate_comfyui_modal_app(custom_nodes, gpu, app_name):
@@ -576,7 +581,7 @@ def cmd_deploy_comfyui(config_source: str, gpu: str, app_name: str):
         if comfyui_path and os.path.isdir(os.path.join(comfyui_path, "models")):
             with open(latest_path, "a") as log_f:
                 log_f.write("\n[Syncing models to Modal Volume...]\n")
-            cmd_sync_models(comfyui_path)
+            cmd_sync_models(comfyui_path, silent=True)
 
         _json_out({"success": True, "appName": app_name, "url": url or "", "gpu": gpu})
 
