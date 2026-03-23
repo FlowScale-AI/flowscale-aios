@@ -202,3 +202,13 @@ export function getModalUrl(pluginId: string): string | null {
   const record = readDeployments()[pluginId]
   return record?.status === 'deployed' ? record.url : null
 }
+
+/** Read the latest Modal log file for a plugin (fast, reads from disk). */
+export function getModalLogs(pluginId: string): string {
+  const logPath = join(PLUGINS_DIR, pluginId, 'modal-latest.log')
+  try {
+    return readFileSync(logPath, 'utf-8')
+  } catch {
+    return ''
+  }
+}

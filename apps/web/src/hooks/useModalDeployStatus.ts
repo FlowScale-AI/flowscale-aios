@@ -10,6 +10,7 @@ export interface ModalDeployStatusData {
   url: string | null
   supported?: boolean
   defaultGpu?: string
+  logs?: string
 }
 
 export function useModalDeployStatus(pluginId: string | null) {
@@ -29,7 +30,11 @@ export function useModalDeployStatus(pluginId: string | null) {
       return res.json()
     },
     enabled: !!pluginId && visible,
-    refetchInterval: pluginId && visible ? 30_000 : false,
-    staleTime: 10_000,
+    // Poll faster during deploy to show live logs, slower when stable
+    refetchInterval: pluginId && visible ? (query) => {
+      const status = query.state.data?.status
+      return status === 'deploying' ? 5_000 : 30_000
+    } : false,
+    staleTime: 5_000,
   })
 }

@@ -651,6 +651,8 @@ function BottomTabs({
   onRestore,
   effectiveComfyPort,
   comfyInstanceLabel,
+  isModalSelected,
+  modalLogs,
 }: {
   tool: Tool
   executions: Execution[]
@@ -658,6 +660,8 @@ function BottomTabs({
   onRestore: (inputs: Record<string, unknown>) => void
   effectiveComfyPort?: number | null
   comfyInstanceLabel?: string
+  isModalSelected?: boolean
+  modalLogs?: string
 }) {
   const inferenceStatus = useInferenceStatus()
   const availableTabs = (['logs', 'history'] as const)
@@ -712,7 +716,15 @@ function BottomTabs({
           </div>
         )}
 
-        {tab === 'logs' && tool.engine === 'api' && <ServerLogsPanel />}
+        {tab === 'logs' && tool.engine === 'api' && isModalSelected && modalLogs && (
+          <div className="h-full overflow-y-auto font-mono text-[11px] text-zinc-400 leading-relaxed">
+            {modalLogs.split('\n').map((line, i) => <div key={i} className="whitespace-pre-wrap">{line}</div>)}
+          </div>
+        )}
+        {tab === 'logs' && tool.engine === 'api' && isModalSelected && !modalLogs && (
+          <p className="text-xs text-zinc-600 pt-2">No Modal logs yet.</p>
+        )}
+        {tab === 'logs' && tool.engine === 'api' && !isModalSelected && <ServerLogsPanel />}
         {tab === 'logs' && tool.engine !== 'api' && (effectiveComfyPort ?? tool.comfyPort) && (
           <ComfyLogsPanel port={(effectiveComfyPort ?? tool.comfyPort)!} instanceLabel={comfyInstanceLabel} />
         )}
@@ -1254,6 +1266,8 @@ export default function ToolPage() {
                 onRestore={handleRestore}
                 effectiveComfyPort={effectiveComfyPort}
                 comfyInstanceLabel={comfyInstanceLabel}
+                isModalSelected={isModalSelected}
+                modalLogs={modalDeployData?.logs}
               />
             </div>
           </Panel>

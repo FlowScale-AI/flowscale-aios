@@ -9,15 +9,29 @@ Usage:
     python modal-helper.py deploy <plugin-dir> <gpu-tier>
     python modal-helper.py undeploy <app-name>
     python modal-helper.py status <app-name>
+    python modal-helper.py logs <plugin-dir>
 """
 import json
 import subprocess
 import sys
 import os
+from datetime import datetime
 
 
 def _json_out(data: dict):
     print(json.dumps(data), flush=True)
+
+
+def _save_log(plugin_dir: str, content: str, label: str = "deploy"):
+    """Save logs to plugin dir as logs-{timestamp}.txt and as latest-log.txt."""
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_path = os.path.join(plugin_dir, f"logs-{label}-{ts}.txt")
+    latest_path = os.path.join(plugin_dir, "modal-latest.log")
+    with open(log_path, "w") as f:
+        f.write(content)
+    with open(latest_path, "w") as f:
+        f.write(content)
+    return log_path
 
 
 def cmd_deploy(plugin_dir: str, gpu: str):
@@ -27,32 +41,46 @@ def cmd_deploy(plugin_dir: str, gpu: str):
         _json_out({"success": False, "error": f"modal_app.py not found in {plugin_dir}"})
         return
 
+    # Write initial log entry
+    latest_path = os.path.join(plugin_dir, "modal-latest.log")
+    with open(latest_path, "w") as f:
+        f.write(f"[{datetime.now().isoformat()}] Deploying to Modal with GPU={gpu}...\n")
+
     env = {**os.environ, "FLOWSCALE_GPU": gpu}
     try:
-        result = subprocess.run(
+        # Use Popen for streaming — write to log file as output arrives
+        proc = subprocess.Popen(
             ["modal", "deploy", modal_app_path],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             env=env,
-            timeout=600,
             cwd=plugin_dir,
         )
-        if result.returncode != 0:
-            _json_out({"success": False, "error": result.stderr.strip() or f"modal deploy exited with code {result.returncode}", "logs": result.stdout})
+
+        all_output = []
+        with open(latest_path, "a") as log_f:
+            for line in iter(proc.stdout.readline, ""):
+                all_output.append(line)
+                log_f.write(line)
+                log_f.flush()
+
+        proc.wait(timeout=600)
+        full_output = "".join(all_output)
+
+        # Save final log file with timestamp
+        _save_log(plugin_dir, full_output, "deploy")
+
+        if proc.returncode != 0:
+            _json_out({"success": False, "error": full_output.strip() or f"modal deploy exited with code {proc.returncode}", "logs": full_output})
             return
 
         # Parse the URL from modal deploy output
         url = None
-        for line in result.stdout.splitlines():
+        for line in full_output.splitlines():
             if "=>" in line and "http" in line:
                 url = line.split("=>")[-1].strip()
                 break
-
-        if not url:
-            for line in result.stderr.splitlines():
-                if "=>" in line and "http" in line:
-                    url = line.split("=>")[-1].strip()
-                    break
 
         # Derive app name from manifest
         manifest_path = os.path.join(plugin_dir, "manifest.json")
@@ -63,6 +91,7 @@ def cmd_deploy(plugin_dir: str, gpu: str):
         _json_out({"success": True, "appName": app_name, "url": url or "", "gpu": gpu})
 
     except subprocess.TimeoutExpired:
+        proc.kill()
         _json_out({"success": False, "error": "modal deploy timed out after 600s"})
     except Exception as e:
         _json_out({"success": False, "error": str(e)})
@@ -110,9 +139,19 @@ def cmd_status(app_name: str, url: str | None = None):
         _json_out({"deployed": False, "warm": False, "gpu": None, "url": None, "error": str(e)})
 
 
+def cmd_logs(plugin_dir: str):
+    """Read the latest Modal log file from the plugin directory."""
+    latest_path = os.path.join(plugin_dir, "modal-latest.log")
+    if not os.path.exists(latest_path):
+        _json_out({"logs": ""})
+        return
+    with open(latest_path, "r") as f:
+        _json_out({"logs": f.read()})
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: modal-helper.py <deploy|undeploy|status> [args...]", file=sys.stderr)
+        print("Usage: modal-helper.py <deploy|undeploy|status|logs> [args...]", file=sys.stderr)
         sys.exit(1)
 
     command = sys.argv[1]
@@ -124,6 +163,8 @@ if __name__ == "__main__":
     elif command == "status" and len(sys.argv) >= 3:
         url = sys.argv[3] if len(sys.argv) >= 4 else None
         cmd_status(sys.argv[2], url)
+    elif command == "logs" and len(sys.argv) >= 3:
+        cmd_logs(sys.argv[2])
     else:
         print(f"Unknown command or missing args: {sys.argv[1:]}", file=sys.stderr)
         sys.exit(1)

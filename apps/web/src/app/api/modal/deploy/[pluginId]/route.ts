@@ -4,6 +4,7 @@ import {
   deployToModal,
   undeployFromModal,
   getModalDeployStatus,
+  getModalLogs,
   isDeploying,
   validateGpuTier,
 } from '@/lib/modal-deploy'
@@ -27,10 +28,12 @@ export async function GET(
     && existsSync(join(homedir(), '.flowscale', 'tool-plugins', pluginId, 'modal_app.py'))
 
   const status = await getModalDeployStatus(pluginId)
+  const logs = getModalLogs(pluginId)
   return NextResponse.json({
     ...status,
     supported: modalSupported,
     defaultGpu: plugin?.cloud?.modal?.defaultGpu ?? 'A10G',
+    logs,
   })
 }
 
