@@ -111,6 +111,35 @@ export function isAuthInProgress(): boolean {
   return authProcess != null && !authProcess.killed
 }
 
+/**
+ * Sync a HuggingFace token to Modal as a secret named "huggingface-secret".
+ * Called automatically when the user saves their HF key in Settings > Providers.
+ */
+export function syncHfTokenToModal(token: string): { success: boolean; error?: string } {
+  if (!isModalInstalled()) return { success: false, error: 'Modal CLI not installed' }
+
+  try {
+    // Check if secret already exists
+    const listResult = execSync('modal secret list', { timeout: 10000, stdio: 'pipe' }).toString()
+    const secretExists = listResult.includes('huggingface-secret')
+
+    if (secretExists) {
+      // Delete and recreate (Modal doesn't have an update command)
+      execSync('modal secret delete huggingface-secret --yes', { timeout: 10000, stdio: 'pipe' })
+    }
+
+    // Create the secret
+    execSync(`modal secret create huggingface-secret HF_TOKEN=${token}`, {
+      timeout: 10000,
+      stdio: 'pipe',
+    })
+
+    return { success: true }
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
 export function disconnectModal(): { success: boolean; error?: string } {
   try {
     const tomlPath = getModalTomlPath()

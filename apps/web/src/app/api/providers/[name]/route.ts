@@ -6,6 +6,7 @@ import {
   type ProviderName,
 } from '@/lib/providerSettings'
 import { getRequestUser } from '@/lib/auth'
+import { syncHfTokenToModal } from '@/lib/modal-manager'
 
 type Params = { params: Promise<{ name: string }> }
 
@@ -26,8 +27,16 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'key is required' }, { status: 400 })
   }
 
-  setProviderKey(name as ProviderName, body.key.trim())
-  return NextResponse.json({ ok: true })
+  const key = body.key.trim()
+  setProviderKey(name as ProviderName, key)
+
+  // Auto-sync HuggingFace token to Modal (for gated model access)
+  let modalSync: { success: boolean; error?: string } | undefined
+  if (name === 'huggingface') {
+    modalSync = syncHfTokenToModal(key)
+  }
+
+  return NextResponse.json({ ok: true, modalSync })
 }
 
 export async function DELETE(req: NextRequest, { params }: Params) {
