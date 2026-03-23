@@ -95,23 +95,9 @@ def cmd_deploy(plugin_dir: str, gpu: str, app_name: str):
             if m:
                 url = m.group(0)
 
-        # Pre-download models to Volume (so first inference doesn't have cold download)
-        modal_app_path = os.path.join(plugin_dir, "modal_app.py")
-        with open(latest_path, "a") as log_f:
-            log_f.write("\n[Pre-downloading models to Volume...]\n")
-            log_f.flush()
-            try:
-                dl_proc = subprocess.Popen(
-                    ["modal", "run", f"{modal_app_path}::download_models"],
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, env=env, cwd=plugin_dir,
-                )
-                for line in iter(dl_proc.stdout.readline, ""):
-                    log_f.write(line)
-                    log_f.flush()
-                dl_proc.wait(timeout=600)
-            except Exception as dl_err:
-                log_f.write(f"[Model pre-download failed: {dl_err} — will download on first run]\n")
+        # Model download happens in @modal.enter() on first cold start.
+        # We removed the `modal run download_models` step because it stops
+        # the deployed app (modal run is for ephemeral apps, not deployed ones).
 
         _json_out({"success": True, "appName": app_name, "url": url or "", "gpu": gpu})
 
