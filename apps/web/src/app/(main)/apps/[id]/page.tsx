@@ -67,7 +67,7 @@ interface Execution {
 
 interface ExecResult {
   executionId: string
-  type?: 'api' | 'comfyui'
+  type?: 'api' | 'comfyui' | 'modal'
   status?: 'running' | 'completed' | 'error'
   outputs?: OutputItem[]
   seed: number
@@ -826,6 +826,8 @@ export default function ToolPage() {
     } catch { return null }
   })()
 
+  // Always fetch to get `supported` flag for showing Modal button,
+  // but only do live status polling when Modal is actually selected
   const { data: modalDeployData } = useModalDeployStatus(pluginId)
   const modalSupported = modalDeployData?.supported ?? false
 
@@ -925,9 +927,9 @@ export default function ToolPage() {
       setLatestOutputs([])
       myExecIds.current.add(result.executionId)
 
-      // API tools: fire-and-forget. The executions poll (every 2s while running)
+      // API / Modal tools: fire-and-forget. The executions poll (every 2s while running)
       // detects completion/error from the DB — no client-side tracking needed.
-      if (result.type === 'api') {
+      if (result.type === 'api' || result.type === 'modal') {
         qc.invalidateQueries({ queryKey: ['executions', id] })
         return
       }
