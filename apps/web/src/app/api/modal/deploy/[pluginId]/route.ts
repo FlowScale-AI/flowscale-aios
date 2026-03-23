@@ -3,7 +3,8 @@ import { getRequestUser } from '@/lib/auth'
 import {
   deployToModal,
   undeployFromModal,
-  getModalDeployStatus,
+  getDeployments,
+  getDeploymentById,
   getModalLogs,
   isDeploying,
   validateGpuTier,
@@ -12,6 +13,17 @@ import { getPlugin } from '@/lib/toolPlugins'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+
+async function checkHealth(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${url.replace(/\/$/, '')}/health`, {
+      signal: AbortSignal.timeout(5000),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
 
 export async function GET(
   req: NextRequest,
@@ -24,22 +36,37 @@ export async function GET(
 
   // Check if the plugin supports Modal
   const plugin = getPlugin(pluginId)
-  const modalSupported = plugin?.cloud?.modal?.supported === true
-    && existsSync(join(homedir(), '.flowscale', 'tool-plugins', pluginId, 'modal_app.py'))
+  const supported =
+    plugin?.cloud?.modal?.supported === true &&
+    existsSync(join(homedir(), '.flowscale', 'tool-plugins', pluginId, 'modal_app.py'))
 
-  const status = await getModalDeployStatus(pluginId)
+  const rawDeployments = getDeployments(pluginId)
+
+  // Selective health-check: only probe the deployment specified by ?target=
+  const targetId = req.nextUrl.searchParams.get('target')
+  const deployments = await Promise.all(
+    rawDeployments.map(async (d) => {
+      if (targetId && d.id === targetId && d.status === 'deployed' && d.url) {
+        const warm = await checkHealth(d.url)
+        return { ...d, warm }
+      }
+      return { ...d, warm: null as boolean | null }
+    }),
+  )
 
   // Only fetch full logs (deploy + runtime) when actively checking — costs ~3s subprocess
   const includeLogs = req.nextUrl.searchParams.get('logs') !== 'false'
   const logs = includeLogs ? await getModalLogs(pluginId) : ''
 
   return NextResponse.json({
-    ...status,
-    supported: modalSupported,
+    supported,
     defaultGpu: plugin?.cloud?.modal?.defaultGpu ?? 'A10G',
+    deployments,
     logs,
   })
 }
+
+const DEPLOY_NAME_RE = /^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/
 
 export async function POST(
   req: NextRequest,
@@ -50,9 +77,11 @@ export async function POST(
 
   const { pluginId } = await params
   const body = await req.json()
-  const { action, gpu } = body
+  const { action } = body
 
   if (action === 'deploy') {
+    const { gpu, name } = body as { gpu: string; name: string }
+
     if (!gpu || !validateGpuTier(gpu)) {
       return NextResponse.json(
         { error: `Invalid GPU tier. Valid: T4, A10G, L4, A100, H100` },
@@ -60,6 +89,27 @@ export async function POST(
       )
     }
 
+    if (!name || !DEPLOY_NAME_RE.test(name)) {
+      return NextResponse.json(
+        {
+          error:
+            'Invalid deployment name. Must match /^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/ (lowercase alphanumeric and hyphens, 2–64 chars).',
+        },
+        { status: 400 },
+      )
+    }
+
+    const existing = getDeployments(pluginId)
+
+    // Check name uniqueness
+    if (existing.some((d) => d.name === name)) {
+      return NextResponse.json(
+        { error: `A deployment named "${name}" already exists for this plugin.` },
+        { status: 409 },
+      )
+    }
+
+    // Check no deploying instances
     if (isDeploying(pluginId)) {
       return NextResponse.json(
         { error: 'Deployment already in progress' },
@@ -68,15 +118,36 @@ export async function POST(
     }
 
     // Fire and forget — status polling picks up progress
-    deployToModal(pluginId, gpu).catch((err) => {
+    deployToModal(pluginId, gpu, name, name).catch((err) => {
       console.error(`Modal deploy failed for ${pluginId}:`, err)
     })
 
-    return NextResponse.json({ status: 'deploying', gpu }, { status: 202 })
+    return NextResponse.json({ status: 'deploying', gpu, name }, { status: 202 })
   }
 
   if (action === 'undeploy') {
-    const result = await undeployFromModal(pluginId)
+    const { deployId } = body as { deployId: string }
+
+    if (!deployId) {
+      return NextResponse.json({ error: 'deployId is required' }, { status: 400 })
+    }
+
+    const record = getDeploymentById(pluginId, deployId)
+    if (!record) {
+      return NextResponse.json(
+        { error: `Deployment "${deployId}" not found` },
+        { status: 404 },
+      )
+    }
+
+    if (record.status === 'deploying') {
+      return NextResponse.json(
+        { error: 'Cannot undeploy while deployment is in progress' },
+        { status: 409 },
+      )
+    }
+
+    const result = await undeployFromModal(pluginId, deployId)
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 500 })
     }
