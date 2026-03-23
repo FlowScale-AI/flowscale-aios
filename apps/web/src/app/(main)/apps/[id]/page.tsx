@@ -1112,7 +1112,10 @@ export default function ToolPage() {
               )
             })}
             {modalSupported && modalStatus?.authenticated && (
-              <option value="modal">☁ Modal (Cloud)</option>
+              <>
+                <option disabled>────────────</option>
+                <option value="modal">☁ Modal (Cloud)</option>
+              </>
             )}
           </select>
         )}
