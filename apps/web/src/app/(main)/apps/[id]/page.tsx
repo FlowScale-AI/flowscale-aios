@@ -743,10 +743,10 @@ function BottomTabs({
           <p className="text-xs text-zinc-600 pt-2">No Modal logs yet.</p>
         )}
         {tab === 'logs' && tool.engine === 'api' && !isModalSelected && <ServerLogsPanel />}
-        {tab === 'logs' && tool.engine !== 'api' && (effectiveComfyPort ?? tool.comfyPort) && (
-          <ComfyLogsPanel port={(effectiveComfyPort ?? tool.comfyPort)!} instanceLabel={comfyInstanceLabel} />
+        {tab === 'logs' && tool.engine !== 'api' && effectiveComfyPort && (
+          <ComfyLogsPanel port={effectiveComfyPort} instanceLabel={comfyInstanceLabel} />
         )}
-        {tab === 'logs' && tool.engine !== 'api' && !(effectiveComfyPort ?? tool.comfyPort) && (
+        {tab === 'logs' && tool.engine !== 'api' && !effectiveComfyPort && (
           <p className="text-xs text-zinc-600 pt-2">No ComfyUI instance configured.</p>
         )}
       </div>

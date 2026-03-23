@@ -36,12 +36,16 @@ async function saveComfyOutputsToDisk(
         const comfyBaseUrl = resolveComfyBaseUrl(comfyPort)
         const url = `${comfyBaseUrl}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
         const res = await fetch(url)
-        if (!res.ok) return item
+        if (!res.ok) {
+          console.error(`Failed to download output from ${url}: HTTP ${res.status}`)
+          return item
+        }
         const buffer = Buffer.from(await res.arrayBuffer())
         const destName = `${executionId.slice(0, 8)}_${item.filename}`
         await writeFile(join(toolDir, destName), buffer)
         return { ...item, path: `/api/outputs/${toolId}/${destName}` }
-      } catch {
+      } catch (err) {
+        console.error(`Error downloading output ${item.filename}:`, err)
         return item
       }
     }),
