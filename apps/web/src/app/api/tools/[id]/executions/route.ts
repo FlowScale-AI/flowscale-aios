@@ -35,9 +35,15 @@ async function saveComfyOutputsToDisk(
         const subfolder = item.subfolder ?? ''
         const comfyBaseUrl = resolveComfyBaseUrl(comfyPort)
         const url = `${comfyBaseUrl}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
-        const res = await fetch(url)
-        if (!res.ok) {
-          console.error(`Failed to download output from ${url}: HTTP ${res.status}`)
+        // Retry up to 3 times for Modal (container may need a moment after prompt completion)
+        let res: Response | null = null
+        for (let attempt = 0; attempt < 3; attempt++) {
+          res = await fetch(url)
+          if (res.ok) break
+          if (attempt < 2) await new Promise(r => setTimeout(r, 1000))
+        }
+        if (!res || !res.ok) {
+          console.error(`Failed to download output from ${url}: HTTP ${res?.status}`)
           return item
         }
         const buffer = Buffer.from(await res.arrayBuffer())

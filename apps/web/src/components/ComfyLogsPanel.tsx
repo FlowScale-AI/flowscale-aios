@@ -26,16 +26,23 @@ export function ComfyLogsPanel({ port, instanceLabel }: { port: number; instance
     let cancelled = false
 
     // Fetch historical logs and poll for updates
+    let lastEntryCount = 0
     const fetchLogs = () => {
       fetch(`/api/comfy/${port}/internal/logs/raw`)
         .then((r) => r.json())
         .then((d: { entries: { t: string; m: string }[] }) => {
-          if (!cancelled) appendEntries(d.entries)
+          if (cancelled) return
+          // Only append entries we haven't seen yet
+          if (d.entries.length > lastEntryCount) {
+            const newEntries = d.entries.slice(lastEntryCount)
+            lastEntryCount = d.entries.length
+            appendEntries(newEntries)
+          }
         })
         .catch(() => {})
     }
     fetchLogs()
-    // Poll every 3s for new log entries (fallback when SSE/WS isn't available)
+    // Poll every 3s for new log entries (catches generation progress)
     const logPollInterval = setInterval(fetchLogs, 3000)
 
     // Connect via server-side SSE proxy (avoids ComfyUI's origin check for direct WS)
