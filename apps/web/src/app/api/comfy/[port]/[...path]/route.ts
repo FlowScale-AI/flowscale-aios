@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isModalComfyPort, resolveComfyBaseUrl } from '@/lib/modal-comfyui'
 
 type Params = { port: string; path: string[] }
 
@@ -9,7 +10,15 @@ async function proxyRequest(req: NextRequest, port: string): Promise<NextRespons
   // like /userdata/workflows%2Ffile.json that ComfyUI expects as a single segment.
   const prefix = `/api/comfy/${port}/`
   const rawPath = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : ''
-  const upstream = `http://127.0.0.1:${port}/${rawPath}${url.search}`
+
+  let baseUrl: string
+  try {
+    baseUrl = resolveComfyBaseUrl(Number(port))
+  } catch {
+    return NextResponse.json({ error: `ComfyUI instance on port ${port} not found` }, { status: 404 })
+  }
+
+  const upstream = `${baseUrl}/${rawPath}${url.search}`
 
   const headers = new Headers(req.headers)
   headers.delete('host')
@@ -18,13 +27,15 @@ async function proxyRequest(req: NextRequest, port: string): Promise<NextRespons
 
   const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.arrayBuffer()
 
+  const timeoutMs = isModalComfyPort(Number(port)) ? 180_000 : 30_000
+
   let upstreamRes: Response
   try {
     upstreamRes = await fetch(upstream, {
       method: req.method,
       headers,
       body: body ? body : undefined,
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(timeoutMs),
       // @ts-expect-error — Next.js fetch polyfill, duplex needed for streaming bodies
       duplex: 'half',
     })
