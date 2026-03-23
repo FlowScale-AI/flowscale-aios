@@ -348,8 +348,9 @@ class ComfyUIServer:
                 "--extra-model-paths-config", "/comfyui/extra_model_paths.yaml",
             ],
             cwd="/comfyui",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            # Let stdout/stderr flow to Modal's logger (not PIPE)
+            stdout=None,
+            stderr=None,
         )
 
         # Poll until ComfyUI is ready (up to 120s)
