@@ -249,16 +249,7 @@ def _generate_comfyui_modal_app(custom_nodes, gpu, app_name):
         )
     cn_block = "".join(cn_commands) if cn_commands else ""
 
-    # Build the extra_model_paths.yaml content
-    extra_model_paths_yaml = (
-        "flowscale_modal:\\n"
-        "  base_path: /models\\n"
-        "  checkpoints: checkpoints/\\n"
-        "  loras: loras/\\n"
-        "  vae: vae/\\n"
-        "  controlnet: controlnet/\\n"
-        "  upscale_models: upscale_models/\\n"
-    )
+    # extra_model_paths.yaml written via Python in image build (not shell echo)
 
     return f'''import modal
 import os
@@ -289,24 +280,38 @@ comfyui_image = (
         "git clone https://github.com/comfyanonymous/ComfyUI.git /comfyui",
         "cd /comfyui && pip install -r requirements.txt",
     )
-{cn_block}    .run_commands(
-        "echo '{extra_model_paths_yaml}' > /comfyui/extra_model_paths.yaml",
-    )
-)
+{cn_block})
 
-# Map GPU string to Modal GPU class
+
+def _write_extra_model_paths():
+    """Write extra_model_paths.yaml to the ComfyUI directory."""
+    import pathlib
+    yaml_content = """flowscale_modal:
+  base_path: /models
+  checkpoints: checkpoints/
+  loras: loras/
+  vae: vae/
+  controlnet: controlnet/
+  upscale_models: upscale_models/
+"""
+    pathlib.Path("/comfyui/extra_model_paths.yaml").write_text(yaml_content)
+
+
+comfyui_image = comfyui_image.run_function(_write_extra_model_paths)
+
+# Map GPU string names (Modal 1.0 API)
 _GPU_MAP = {{
-    "T4": modal.gpu.T4(),
-    "L4": modal.gpu.L4(),
-    "A10G": modal.gpu.A10G(),
-    "A100": modal.gpu.A100(size="40GB"),
-    "A100-80GB": modal.gpu.A100(size="80GB"),
-    "H100": modal.gpu.H100(),
+    "T4": "T4",
+    "L4": "L4",
+    "A10G": "A10G",
+    "A100": "A100-40GB",
+    "A100-80GB": "A100-80GB",
+    "H100": "H100",
 }}
 
 
 def _resolve_gpu(gpu_str: str):
-    return _GPU_MAP.get(gpu_str, modal.gpu.T4())
+    return _GPU_MAP.get(gpu_str, "T4")
 
 
 # ---------------------------------------------------------------------------
@@ -327,9 +332,8 @@ def _get_secrets():
     gpu=_resolve_gpu(GPU),
     volumes={{"/models": models_volume}},
     secrets=_get_secrets(),
-    container_idle_timeout=300,
+    scaledown_window=60,
     timeout=600,
-    allow_concurrent_inputs=10,
 )
 class ComfyUIServer:
     @modal.enter()
