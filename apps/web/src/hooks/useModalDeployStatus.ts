@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export interface ModalDeploymentStatus {
   id: string
@@ -33,11 +33,18 @@ export function useModalDeployStatus(pluginId: string | null, selectedTarget?: s
     return () => document.removeEventListener('visibilitychange', handler)
   }, [])
 
+  // Track poll count to only health-check every Nth poll
+  const pollCount = useRef(0)
+
   return useQuery<ModalDeployStatusData>({
     queryKey: ['modal-deploy-status', pluginId, selectedTarget],
     queryFn: async () => {
+      pollCount.current++
       const params = new URLSearchParams()
       params.set('logs', 'false')
+      // Only health-check every 3rd poll (~3 min at 60s interval) to avoid
+      // keeping Modal containers alive with constant /health hits
+      if (pollCount.current % 3 !== 1) params.set('health', 'false')
       if (selectedTarget && selectedTarget !== '') params.set('target', selectedTarget)
       const res = await fetch(`/api/modal/deploy/${pluginId}?${params}`)
       if (!res.ok) throw new Error('Failed to fetch Modal deploy status')
