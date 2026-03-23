@@ -1239,7 +1239,7 @@ export default function ToolPage() {
       {tool.engine === 'api' && isModalSelected && pluginId && modalSupported && (
         <ModalDeployBanner
           pluginId={pluginId}
-          defaultGpu={modalDeployData?.defaultGpu ?? 'A10G'}
+          defaultGpu={modalDeployData?.defaultGpu ?? 'A10'}
           deployments={modalDeployData?.deployments ?? []}
           onDeployed={() => void 0}
         />

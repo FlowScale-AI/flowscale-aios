@@ -9,7 +9,7 @@ import {
   isDeploying,
   validateGpuTier,
 } from '@/lib/modal-deploy'
-import { getPlugin } from '@/lib/toolPlugins'
+import { getPlugin, VALID_GPU_TIERS } from '@/lib/toolPlugins'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -66,7 +66,7 @@ export async function GET(
 
   return NextResponse.json({
     supported,
-    defaultGpu: plugin?.cloud?.modal?.defaultGpu ?? 'A10G',
+    defaultGpu: plugin?.cloud?.modal?.defaultGpu ?? 'A10',
     deployments,
     logs,
   })
@@ -90,7 +90,7 @@ export async function POST(
 
     if (!gpu || !validateGpuTier(gpu)) {
       return NextResponse.json(
-        { error: `Invalid GPU tier. Valid: T4, A10G, L4, A100, H100` },
+        { error: `Invalid GPU tier. Valid: ${VALID_GPU_TIERS.join(', ')}` },
         { status: 400 },
       )
     }

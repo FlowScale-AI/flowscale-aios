@@ -64,7 +64,7 @@ export interface ToolPluginManifest {
   cloud?: CloudConfig
 }
 
-export const VALID_GPU_TIERS = ['T4', 'A10G', 'L4', 'A100', 'H100'] as const
+export const VALID_GPU_TIERS = ['T4', 'L4', 'A10', 'L40S', 'A100-40GB', 'A100-80GB', 'RTX-PRO-6000', 'H100', 'H200', 'B200'] as const
 export type GpuTier = typeof VALID_GPU_TIERS[number]
 
 // ── Registry types ───────────────────────────────────────────────────────────

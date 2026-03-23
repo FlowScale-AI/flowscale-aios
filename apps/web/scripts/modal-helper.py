@@ -357,10 +357,14 @@ comfyui_image = comfyui_image.run_function(_write_extra_model_paths)
 _GPU_MAP = {{
     "T4": "T4",
     "L4": "L4",
-    "A10G": "A10G",
-    "A100": "A100-40GB",
+    "A10": "A10G",
+    "L40S": "L40S",
+    "A100-40GB": "A100-40GB",
     "A100-80GB": "A100-80GB",
+    "RTX-PRO-6000": "RTXPRO6000",
     "H100": "H100",
+    "H200": "H200",
+    "B200": "B200",
 }}
 
 

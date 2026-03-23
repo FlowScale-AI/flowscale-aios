@@ -6,10 +6,15 @@ import { useMutation } from '@tanstack/react-query'
 
 const GPU_OPTIONS = [
   { value: 'T4', label: 'T4 (16 GB)' },
-  { value: 'A10G', label: 'A10G (24 GB)' },
   { value: 'L4', label: 'L4 (24 GB)' },
-  { value: 'A100', label: 'A100 (80 GB)' },
+  { value: 'A10', label: 'A10 (24 GB)' },
+  { value: 'L40S', label: 'L40S (48 GB)' },
+  { value: 'A100-40GB', label: 'A100 40 GB' },
+  { value: 'A100-80GB', label: 'A100 80 GB' },
+  { value: 'RTX-PRO-6000', label: 'RTX PRO 6000 (48 GB)' },
   { value: 'H100', label: 'H100 (80 GB)' },
+  { value: 'H200', label: 'H200 (141 GB)' },
+  { value: 'B200', label: 'B200 (192 GB)' },
 ] as const
 
 interface ModalDeploymentStatus {
@@ -46,9 +51,9 @@ export function ModalDeployBanner({
   onDeployed,
 }: ModalDeployBannerProps) {
   const [showPopup, setShowPopup] = useState(false)
-  const [popupGpu, setPopupGpu] = useState(defaultGpu || 'A10G')
+  const [popupGpu, setPopupGpu] = useState(defaultGpu || 'A10')
   const [popupName, setPopupName] = useState(() =>
-    generateDeployName(pluginId, defaultGpu || 'A10G', deployments),
+    generateDeployName(pluginId, defaultGpu || 'A10', deployments),
   )
   // Optimistic: track deploys we've kicked off that may not be in the poll yet
   const [pendingDeploys, setPendingDeploys] = useState<ModalDeploymentStatus[]>([])
@@ -119,7 +124,7 @@ export function ModalDeployBanner({
   }
 
   function handleOpenPopup() {
-    const gpu = defaultGpu || 'A10G'
+    const gpu = defaultGpu || 'A10'
     const name = generateDeployName(pluginId, gpu, deployments)
     setPopupGpu(gpu)
     setPopupName(name)
