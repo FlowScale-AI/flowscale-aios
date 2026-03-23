@@ -7,6 +7,10 @@ import {
   isDeploying,
   validateGpuTier,
 } from '@/lib/modal-deploy'
+import { getPlugin } from '@/lib/toolPlugins'
+import { existsSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
 
 export async function GET(
   req: NextRequest,
@@ -16,8 +20,18 @@ export async function GET(
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { pluginId } = await params
+
+  // Check if the plugin supports Modal
+  const plugin = getPlugin(pluginId)
+  const modalSupported = plugin?.cloud?.modal?.supported === true
+    && existsSync(join(homedir(), '.flowscale', 'tool-plugins', pluginId, 'modal_app.py'))
+
   const status = await getModalDeployStatus(pluginId)
-  return NextResponse.json(status)
+  return NextResponse.json({
+    ...status,
+    supported: modalSupported,
+    defaultGpu: plugin?.cloud?.modal?.defaultGpu ?? 'A10G',
+  })
 }
 
 export async function POST(
