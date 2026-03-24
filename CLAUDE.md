@@ -10,6 +10,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
+# Install dependencies
+pnpm install
+
 # Start web app (Next.js, port 14173)
 pnpm --filter @flowscale/aios-web dev
 
@@ -19,6 +22,10 @@ pnpm typecheck
 # Run tests (vitest)
 pnpm --filter @flowscale/aios-web test
 pnpm --filter @flowscale/workflow test
+
+# Run a single test file
+pnpm --filter @flowscale/aios-web test -- src/lib/someFile.test.ts
+pnpm --filter @flowscale/workflow test -- src/someFile.test.ts
 
 # Run tests with coverage
 pnpm test:coverage
@@ -47,6 +54,19 @@ pnpm release:win      # Windows NSIS installer
 Typecheck is the primary correctness tool — always run after changes. `packages/workflow` also has vitest tests.
 
 > **Next.js route exports:** Route files (`route.ts`) can only export HTTP method handlers (`GET`, `POST`, etc.). Never export helper functions from route files — move shared utilities to a separate module (e.g. `utils.ts` in the same directory). Next.js will fail the build otherwise.
+
+## Branching strategy
+
+- Create feature branches from `dev`: `git checkout -b feat/my-feature dev`
+- PRs should target `dev`, not `main`. PRs targeting `main` directly will not be merged without prior discussion.
+
+## Code style
+
+- TypeScript strict mode is enabled — avoid `any`.
+- Use named exports; avoid default exports for components.
+- Import UI primitives from `@flowscale/ui` (the barrel at `apps/web/src/components/ui/index.ts`), not from shadcn paths directly.
+- Tailwind for styling; avoid inline `style` props.
+- Keep API routes thin — move logic into `lib/` utilities.
 
 ## Repo Structure
 
@@ -172,14 +192,36 @@ API-engine tools are backed by plugins in `~/.flowscale/tool-plugins/{id}/`, eac
 - `POST /api/gpu` — re-detect (clears cache)
 - `POST /api/comfy/instances/detect` — detects GPUs, generates instance configs (one per GPU + CPU), saves to settings
 
-### Auto-routing (instance selection)
+### Modal cloud GPU integration
 
-When multiple ComfyUI instances are running, the UI shows an instance selector dropdown (`InstanceSelector` component). Three surfaces use it:
+Modal is a cloud GPU provider used for remote execution of both API-engine tool plugins and ComfyUI instances. Core modules:
+
+- **`apps/web/src/lib/modal-manager.ts`** — Modal CLI installation, authentication, status checks
+- **`apps/web/src/lib/modal-deploy.ts`** — Deploy/undeploy API-engine tool plugins to Modal; persistent state in `~/.flowscale/aios/modal-deployments.json`
+- **`apps/web/src/lib/modal-comfyui.ts`** — Manages shared ComfyUI instances on Modal using virtual port mapping (ports 50000–50999)
+- **`apps/web/scripts/modal-helper.py`** — Python bridge to Modal SDK, called by `modal-deploy.ts`
+
+**API routes:**
+- `POST /api/modal/setup` — install Modal CLI and authenticate
+- `GET /api/modal/status` — Modal auth/install status
+- `POST /api/modal/deploy/[pluginId]` — deploy/undeploy API-engine plugins
+- `GET /api/modal/comfyui` — list deployed cloud ComfyUI instances
+- `POST /api/modal/comfyui/scan` — scan for deployable instances
+
+**GPU tiers:** `T4 | L4 | A10 | L40S | A100-40GB | A100-80GB | RTX-PRO-6000 | H100 | H200 | B200` (default: A10). Plugins can declare Modal support and a default GPU tier in their manifest via `ModalCloudConfig`.
+
+### Compute picker (instance selection)
+
+The `ComputePicker` component (`apps/web/src/components/ComputePicker.tsx`) is a unified UI for selecting execution targets: a specific local ComfyUI instance, "Auto" (round-robin across running instances), or "Modal" (cloud). Three surfaces use it:
 - **Tool page** (`apps/[id]/page.tsx`) — dropdown in the toolbar
 - **Build-tool test step** (`ToolTestPlayground.tsx`) — dropdown in the topbar
 - **Canvas** (`ExecutionMenu.tsx`) — compact dropdown in the floating control bar
 
 When "Auto" is selected (default with 2+ running instances), executions are distributed across running instances via **round-robin** (ref counter in a `useRef`). The resolved port is passed as `comfyPort` in the `POST /api/tools/[id]/executions` body.
+
+### Local inference plugin management
+
+`apps/web/src/lib/localInference.ts` manages local API-engine plugin processes via `child_process.spawn()`. Handles health checks, port allocation, lifecycle management, and stdio log capture.
 
 ### Workflow analysis (`packages/workflow`)
 
@@ -237,6 +279,7 @@ These logs are automatically attached to issue reports submitted via the "Report
 
 - **14173** — `apps/web` Next.js dev server
 - **41188–41200** — AIOS-managed ComfyUI instances (base port `41188`, one per GPU + CPU)
+- **50000–50999** — Virtual ports for Modal cloud ComfyUI instances
 - **5173** and **3001** — occupied by other services on the host; never use these
 
 ### `@flowscale/ui` barrel
