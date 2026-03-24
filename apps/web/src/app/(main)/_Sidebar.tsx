@@ -11,6 +11,7 @@ import {
   GearSix,
   SignOut,
   Bug,
+  Brain,
 } from "phosphor-react";
 import type { Role } from "@/lib/auth";
 import { useUpdateStore } from "@/store/updateStore";
@@ -132,6 +133,13 @@ export default function Sidebar({
           icon={Wrench}
           label="Tools"
           active={pathname === "/tools" || pathname.startsWith("/tools/") || pathname === "/build-tool"}
+        />
+
+        <NavItem
+          href="/training"
+          icon={Brain}
+          label="Training"
+          active={pathname === "/training" || pathname.startsWith("/training/")}
         />
 
         <NavItem
