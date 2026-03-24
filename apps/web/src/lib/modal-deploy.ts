@@ -137,7 +137,8 @@ function removeDeployment(pluginId: string, deployId: string): void {
 
 function runHelper(args: string[]): Promise<{ success: boolean; [key: string]: unknown }> {
   return new Promise((resolve) => {
-    const proc = spawn('python3', [HELPER_SCRIPT, ...args], {
+    const pythonBin = process.platform === 'win32' ? 'python' : 'python3'
+    const proc = spawn(pythonBin, [HELPER_SCRIPT, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 660_000, // 11 min (deploy can take 10)
     })
