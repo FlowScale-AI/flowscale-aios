@@ -558,8 +558,6 @@ export default function ToolsPage() {
                 {[
                   { id: 'coming-flux-lora', name: 'Flux LoRA Trainer', type: 'training' as ToolType, description: 'Train Flux LoRA models on your images' },
                   { id: 'coming-sdxl-lora', name: 'SDXL LoRA Trainer', type: 'training' as ToolType, description: 'Train SDXL LoRA models with AI-Toolkit' },
-                  { id: 'coming-qwen-image', name: 'Qwen Image', type: 'image-gen' as ToolType, description: 'Generate images with Qwen Image model via cloud API' },
-                  { id: 'coming-qwen-image-edit', name: 'Qwen Image Edit', type: 'edit' as ToolType, description: 'Edit and modify images using Qwen\'s image editing model' },
                 ].filter((p) => !search.trim() || p.name.toLowerCase().includes(search.toLowerCase()) || p.description.toLowerCase().includes(search.toLowerCase()))
                 .map((placeholder) => {
                   const cfg = TOOL_TYPE_CONFIG[placeholder.type]
