@@ -32,6 +32,8 @@ export interface ModalCloudConfig {
   supported: boolean
   defaultGpu?: string
   containerIdleTimeout?: number
+  /** Modal secret names required for deployment (e.g. gated HuggingFace models). */
+  requiredSecrets?: string[]
 }
 
 export interface CloudConfig {
@@ -265,6 +267,40 @@ export async function registerPluginInDb(
 
   const [tool] = await db.select().from(tools).where(eq(tools.id, toolId))
   return tool
+}
+
+/**
+ * Update an installed registry plugin by re-downloading from S3 and refreshing the DB record.
+ */
+export async function updateRegistryPlugin(
+  pluginId: string,
+  db: DbType,
+) {
+  const registry = await fetchRegistry()
+  const entry = registry.find((e) => e.id === pluginId)
+  if (!entry) throw new Error('Plugin not found in registry')
+
+  // Re-download and extract (overwrites existing files)
+  const manifest = await downloadAndExtractPlugin(entry)
+
+  // Update the DB record
+  const { tools } = await import('@/lib/db/schema')
+  const { eq } = await import('drizzle-orm')
+
+  const toolId = `${pluginId}-builtin`
+  const workflowJson = JSON.stringify({ engine: 'api', model: manifest.model, pluginId: manifest.id })
+  const workflowHash = crypto.createHash('sha256').update(workflowJson).digest('hex')
+
+  await db.update(tools).set({
+    name: manifest.name,
+    description: manifest.description,
+    workflowJson,
+    workflowHash,
+    schemaJson: JSON.stringify(manifestToDbSchema(manifest)),
+  }).where(eq(tools.id, toolId))
+
+  const [updated] = await db.select().from(tools).where(eq(tools.id, toolId))
+  return updated
 }
 
 // ── Auto-register custom plugins ─────────────────────────────────────────────

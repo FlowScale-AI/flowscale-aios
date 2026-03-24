@@ -15,6 +15,7 @@ export interface ModalDeploymentStatus {
 export interface ModalDeployStatusData {
   supported: boolean
   defaultGpu: string
+  requiredSecrets?: string[]
   deployments: ModalDeploymentStatus[]
   logs?: string
 }

@@ -390,23 +390,12 @@ def _resolve_gpu(gpu_str: str):
 
 
 # ---------------------------------------------------------------------------
-# Optional HuggingFace secret (for gated models)
-# ---------------------------------------------------------------------------
-def _get_secrets():
-    try:
-        return [modal.Secret.from_name("huggingface")]
-    except Exception:
-        return []
-
-
-# ---------------------------------------------------------------------------
 # ComfyUI server class
 # ---------------------------------------------------------------------------
 @app.cls(
     image=comfyui_image,
     gpu=_resolve_gpu(GPU),
     volumes={{"/models": models_volume}},
-    secrets=_get_secrets(),
     scaledown_window=60,
     timeout=600,
 )

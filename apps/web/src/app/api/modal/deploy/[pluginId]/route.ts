@@ -8,6 +8,7 @@ import {
   getModalLogs,
   isDeploying,
   validateGpuTier,
+  checkModalSecrets,
 } from '@/lib/modal-deploy'
 import { getPlugin, VALID_GPU_TIERS } from '@/lib/toolPlugins'
 import { existsSync } from 'fs'
@@ -67,6 +68,7 @@ export async function GET(
   return NextResponse.json({
     supported,
     defaultGpu: plugin?.cloud?.modal?.defaultGpu ?? 'A10',
+    requiredSecrets: plugin?.cloud?.modal?.requiredSecrets ?? [],
     deployments,
     logs,
   })
@@ -121,6 +123,22 @@ export async function POST(
         { error: 'Deployment already in progress' },
         { status: 409 },
       )
+    }
+
+    // Pre-validate required Modal secrets before deploying
+    const plugin = getPlugin(pluginId)
+    const requiredSecrets = plugin?.cloud?.modal?.requiredSecrets ?? []
+    if (requiredSecrets.length > 0) {
+      const missing = await checkModalSecrets(requiredSecrets)
+      if (missing.length > 0) {
+        return NextResponse.json(
+          {
+            error: `Missing Modal secrets required for this model: ${missing.join(', ')}. This model is gated and requires authentication.`,
+            missingSecrets: missing,
+          },
+          { status: 400 },
+        )
+      }
     }
 
     // Fire and forget — status polling picks up progress

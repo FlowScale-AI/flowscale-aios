@@ -26,9 +26,15 @@ interface ModalDeploymentStatus {
   url: string
 }
 
+interface MissingSecretsError {
+  message: string
+  missingSecrets: string[]
+}
+
 interface ModalDeployBannerProps {
   pluginId: string
   defaultGpu: string
+  requiredSecrets?: string[]
   deployments: ModalDeploymentStatus[]
   onDeployed?: () => void
 }
@@ -47,6 +53,7 @@ function generateDeployName(
 export function ModalDeployBanner({
   pluginId,
   defaultGpu,
+  requiredSecrets,
   deployments,
   onDeployed,
 }: ModalDeployBannerProps) {
@@ -84,7 +91,9 @@ export function ModalDeployBanner({
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Deploy failed' }))
-        throw new Error(err.error)
+        const error = new Error(err.error) as Error & { missingSecrets?: string[] }
+        if (err.missingSecrets) error.missingSecrets = err.missingSecrets
+        throw error
       }
       return res.json()
     },
@@ -229,6 +238,25 @@ export function ModalDeployBanner({
         <div className="absolute right-6 top-full mt-2 z-50 w-72 bg-zinc-900 border border-white/10 rounded-lg shadow-xl p-4 flex flex-col gap-3">
           <p className="text-zinc-200 text-sm font-medium font-tech">New Modal Deployment</p>
 
+          {/* Required secrets warning */}
+          {requiredSecrets && requiredSecrets.length > 0 && (
+            <div className="bg-amber-950/30 border border-amber-500/20 rounded p-2.5 flex flex-col gap-1">
+              <p className="text-amber-400 text-xs font-medium">Requires Modal Secrets</p>
+              <p className="text-amber-400/70 text-xs">This model is gated. Ensure these secrets exist in your Modal dashboard before deploying:</p>
+              {requiredSecrets.map((s) => (
+                <a
+                  key={s}
+                  href={`https://modal.com/secrets/create?secret_name=${s}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-purple-400 hover:text-purple-300 text-xs underline underline-offset-2"
+                >
+                  {s} →
+                </a>
+              ))}
+            </div>
+          )}
+
           {/* Name input */}
           <div className="flex flex-col gap-1">
             <label className="text-zinc-400 text-xs">Name</label>
@@ -256,9 +284,30 @@ export function ModalDeployBanner({
             </select>
           </div>
 
-          {deployMutation.error && (
-            <p className="text-red-400 text-xs">{(deployMutation.error as Error).message}</p>
-          )}
+          {deployMutation.error && (() => {
+            const err = deployMutation.error as Error & { missingSecrets?: string[] }
+            const secrets = err.missingSecrets
+            if (secrets?.length) {
+              return (
+                <div className="bg-red-950/40 border border-red-500/20 rounded p-2.5 flex flex-col gap-1.5">
+                  <p className="text-red-400 text-xs font-medium">Missing Modal Secrets</p>
+                  <p className="text-red-400/80 text-xs">This model is gated and requires authentication. Create the following secrets in your Modal dashboard:</p>
+                  {secrets.map((s) => (
+                    <a
+                      key={s}
+                      href={`https://modal.com/secrets/create?secret_name=${s}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-purple-400 hover:text-purple-300 text-xs underline underline-offset-2"
+                    >
+                      Create &quot;{s}&quot; secret →
+                    </a>
+                  ))}
+                </div>
+              )
+            }
+            return <p className="text-red-400 text-xs">{err.message}</p>
+          })()}
 
           {/* Actions */}
           <div className="flex items-center gap-2 justify-end">

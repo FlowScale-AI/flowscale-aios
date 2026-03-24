@@ -163,6 +163,35 @@ function runHelper(args: string[]): Promise<{ success: boolean; [key: string]: u
   })
 }
 
+// ── Secret validation ────────────────────────────────────────────────────
+
+/** Check which of the required Modal secrets are missing. Returns the missing names. */
+export async function checkModalSecrets(secretNames: string[]): Promise<string[]> {
+  if (secretNames.length === 0) return []
+
+  const missing: string[] = []
+  for (const name of secretNames) {
+    try {
+      const proc = spawn('modal', ['secret', 'list'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 15_000,
+      })
+      let stdout = ''
+      proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
+      const exitCode = await new Promise<number | null>((resolve) => {
+        proc.on('close', resolve)
+        proc.on('error', () => resolve(null))
+      })
+      if (exitCode !== 0 || !stdout.includes(name)) {
+        missing.push(name)
+      }
+    } catch {
+      missing.push(name)
+    }
+  }
+  return missing
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export function validateGpuTier(gpu: string): gpu is GpuTier {

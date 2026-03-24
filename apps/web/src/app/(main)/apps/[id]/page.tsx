@@ -1240,6 +1240,7 @@ export default function ToolPage() {
         <ModalDeployBanner
           pluginId={pluginId}
           defaultGpu={modalDeployData?.defaultGpu ?? 'A10'}
+          requiredSecrets={modalDeployData?.requiredSecrets}
           deployments={modalDeployData?.deployments ?? []}
           onDeployed={() => qc.invalidateQueries({ queryKey: ['modal-deploy-status', pluginId] })}
         />

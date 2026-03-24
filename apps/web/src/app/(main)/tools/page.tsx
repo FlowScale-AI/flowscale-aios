@@ -168,13 +168,19 @@ function CustomToolCard({
 function CatalogCard({
   entry,
   onInstall,
+  onUpdate,
   installing,
   installed,
+  hasUpdate,
+  updating,
 }: {
   entry: CatalogEntry
   onInstall: () => void
+  onUpdate?: () => void
   installing: boolean
   installed: boolean
+  hasUpdate?: boolean
+  updating?: boolean
 }) {
   return (
     <div className="group flex flex-col rounded-xl border border-white/5 bg-[var(--color-background-panel)] hover:border-zinc-700 transition-all duration-150 overflow-hidden">
@@ -194,8 +200,21 @@ function CatalogCard({
           {entry.description}
         </p>
       </div>
-      <div className="flex items-center justify-end px-4 py-2 border-t border-white/5">
-        {installed ? (
+      <div className="flex items-center justify-end gap-2 px-4 py-2 border-t border-white/5">
+        {installed && hasUpdate && onUpdate ? (
+          <button
+            onClick={onUpdate}
+            disabled={updating}
+            className="flex items-center gap-1.5 text-xs font-medium text-amber-400 hover:text-amber-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {updating ? (
+              <SpinnerGap size={12} className="animate-spin" />
+            ) : (
+              <ArrowsClockwise size={12} />
+            )}
+            {updating ? 'Updating…' : 'Update available'}
+          </button>
+        ) : installed ? (
           <span className="text-xs text-zinc-500 flex items-center gap-1.5">
             <span className="size-1.5 rounded-full bg-emerald-500 inline-block" />
             Installed
@@ -251,26 +270,37 @@ export default function ToolsPage() {
   })
 
   // Fetch official tools from the remote registry
-  const { data: registryData, isLoading: registryLoading } = useQuery<{ registry: CatalogEntry[]; installedPluginIds: string[] }>({
+  const { data: registryData, isLoading: registryLoading, refetch: refetchRegistry } = useQuery<{
+    registry: (CatalogEntry & { version?: string })[]
+    installedPluginIds: string[]
+    installedVersions: Record<string, string>
+  }>({
     queryKey: ['tool-plugins'],
     queryFn: async () => {
       const res = await fetch('/api/tool-plugins')
-      if (!res.ok) return { registry: [], installedPluginIds: [] }
-      const data = await res.json() as { registry: Array<{ id: string; name: string; description: string; badge: string }>; installedPluginIds: string[] }
+      if (!res.ok) return { registry: [], installedPluginIds: [], installedVersions: {} }
+      const data = await res.json() as {
+        registry: Array<{ id: string; name: string; description: string; badge: string; version?: string }>
+        installedPluginIds: string[]
+        installedVersions?: Record<string, string>
+      }
       return {
         registry: data.registry.map((r) => ({
           id: r.id,
           name: r.name,
           description: r.description,
           badge: r.badge ?? 'Local AI',
+          version: r.version,
         })),
         installedPluginIds: data.installedPluginIds,
+        installedVersions: data.installedVersions ?? {},
       }
     },
   })
 
   const catalogEntries = registryData?.registry ?? []
   const installedPluginIds = new Set(registryData?.installedPluginIds ?? [])
+  const installedVersions = registryData?.installedVersions ?? {}
   const installedToolIds = new Set(myTools.map((t) => t.id))
 
   const filteredMyTools = myTools.filter(
@@ -310,6 +340,26 @@ export default function ToolsPage() {
   }
 
   const [refreshing, setRefreshing] = useState(false)
+  const [updating, setUpdating] = useState<Set<string>>(new Set())
+
+  async function handleUpdatePlugin(pluginId: string) {
+    setUpdating((prev) => new Set(prev).add(pluginId))
+    try {
+      await fetch('/api/tool-plugins/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pluginId }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['custom-tools'] })
+      queryClient.invalidateQueries({ queryKey: ['tool-plugins'] })
+    } finally {
+      setUpdating((prev) => {
+        const next = new Set(prev)
+        next.delete(pluginId)
+        return next
+      })
+    }
+  }
 
   async function handleInstall(id: string) {
     setInstalling((prev) => new Set(prev).add(id))
@@ -586,15 +636,24 @@ export default function ToolsPage() {
                     </div>
                   )
                 })}
-                {filteredCatalog.map((entry) => (
-                  <CatalogCard
-                    key={entry.id}
-                    entry={entry}
-                    installed={installedPluginIds.has(entry.id) || installedToolIds.has(`${entry.id}-builtin`)}
-                    installing={installing.has(entry.id)}
-                    onInstall={() => handleInstall(entry.id)}
-                  />
-                ))}
+                {filteredCatalog.map((entry) => {
+                  const isInstalled = installedPluginIds.has(entry.id) || installedToolIds.has(`${entry.id}-builtin`)
+                  const localVersion = installedVersions[entry.id]
+                  const registryVersion = entry.version
+                  const hasPluginUpdate = isInstalled && !!registryVersion && !!localVersion && registryVersion !== localVersion
+                  return (
+                    <CatalogCard
+                      key={entry.id}
+                      entry={entry}
+                      installed={isInstalled}
+                      hasUpdate={hasPluginUpdate}
+                      installing={installing.has(entry.id)}
+                      updating={updating.has(entry.id)}
+                      onInstall={() => handleInstall(entry.id)}
+                      onUpdate={() => handleUpdatePlugin(entry.id)}
+                    />
+                  )
+                })}
               </div>
             )}
           </>
