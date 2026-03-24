@@ -208,6 +208,10 @@ export function getDb() {
     try { sqlite.exec('ALTER TABLE executions ADD COLUMN comfy_port INTEGER') } catch { /* column may already exist */ }
   }
 
+  if (!execColumns.some((col) => col.name === 'progress_json')) {
+    try { sqlite.exec('ALTER TABLE executions ADD COLUMN progress_json TEXT') } catch { /* column may already exist */ }
+  }
+
   // First-run: seed admin user if no users exist.
   // Uses a transaction with INSERT OR IGNORE to be fully idempotent — safe
   // even if next build prerenders the login page across multiple workers.
