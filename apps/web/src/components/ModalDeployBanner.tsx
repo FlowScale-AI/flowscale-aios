@@ -60,10 +60,23 @@ export function ModalDeployBanner({
   // Track which deployment IDs are being undeployed (for UI feedback)
   const [undployingIds, setUndeployingIds] = useState<Set<string>>(new Set())
 
-  // Merge server deployments with optimistic pending ones (remove pending once server has it)
+  // Merge server deployments with optimistic pending ones.
+  // Remove pending entries once the server either has them OR has confirmed they don't exist
+  // (i.e., the deploy failed and the record was cleaned up server-side).
+  const activePending = pendingDeploys.filter(p => {
+    // If server already has this deployment, the pending entry is no longer needed
+    if (deployments.some(d => d.id === p.id)) return false
+    // If pending for more than 30s and server doesn't have it, it failed — remove it
+    if (Date.now() - (p as ModalDeploymentStatus & { _createdAt?: number })._createdAt! > 30_000) return false
+    return true
+  })
+  if (activePending.length !== pendingDeploys.length) {
+    // Clean up stale pending entries on next tick to avoid re-render loop
+    setTimeout(() => setPendingDeploys(activePending), 0)
+  }
   const allDeployments = [
     ...deployments,
-    ...pendingDeploys.filter(p => !deployments.some(d => d.id === p.id)),
+    ...activePending,
   ]
   const isAnyDeploying = allDeployments.some((d) => d.status === 'deploying')
 
@@ -89,7 +102,8 @@ export function ModalDeployBanner({
         gpu: variables.gpu,
         warm: null,
         url: '',
-      }])
+        _createdAt: Date.now(),
+      } as ModalDeploymentStatus & { _createdAt: number }])
       setShowPopup(false)
       onDeployed?.()
     },
