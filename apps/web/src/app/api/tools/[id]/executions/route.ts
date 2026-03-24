@@ -15,6 +15,7 @@ import { getComfyOrgApiKey as getComfyOrgApiKeyServer, getComfyInstances } from 
 import { getPlugin, type ToolPluginManifest } from '@/lib/toolPlugins'
 import { autoRouteComfyPort, trackExecStart, trackExecEnd } from '@/lib/comfyAutoRoute'
 import { getModalDeployUrl, autoRouteModalDeployment } from '@/lib/modal-deploy'
+import { runTraining } from '@/lib/trainingExecution'
 import { isModalComfyPort, resolveComfyBaseUrl, getModalComfyByPort } from '@/lib/modal-comfyui'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
@@ -310,14 +311,57 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   // ── API-engine tools (non-ComfyUI, plugin-driven) ───────────────────────────
   if (tool.engine === 'api') {
+    const config = JSON.parse(tool.workflowJson) as { engine: string; model: string; pluginId: string }
+    const plugin = getPlugin(config.pluginId)
+
+    // ── Training execution branch ───────────────────────────────────────────
+    if (plugin?.server.type === 'training') {
+      const currentUser = getRequestUser(req)
+      const executionId = uuidv4()
+
+      const trainingConfig = {
+        ...inputs,
+        device: deviceOverride,
+      }
+
+      await db.insert(executions).values({
+        id: executionId,
+        toolId,
+        userId: currentUser?.id ?? null,
+        inputsJson: JSON.stringify(trainingConfig),
+        outputsJson: null,
+        seed: 0,
+        promptId: null,
+        workflowHash: tool.workflowHash,
+        status: 'running',
+        comfyPort: null,
+        createdAt: Date.now(),
+      })
+
+      try {
+        const { jobId } = await runTraining(executionId, config.pluginId, trainingConfig)
+        await db.update(executions).set({
+          metadataJson: JSON.stringify({ jobId, pluginId: config.pluginId }),
+        }).where(eq(executions.id, executionId))
+
+        return NextResponse.json({ executionId, jobId }, { status: 202 })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to start training'
+        await db.update(executions).set({
+          status: 'error',
+          errorMessage: msg,
+          completedAt: Date.now(),
+        }).where(eq(executions.id, executionId))
+        return NextResponse.json({ error: msg }, { status: 500 })
+      }
+    }
+
     // ── Modal cloud execution ───────────────────────────────────────────────
     // Support both old format (comfyPort: 'modal') and new (provider: 'modal', modalDeployId: '...')
     const provider = providerOverride as string | undefined
     const isModal = provider === 'modal' || comfyPortOverride === 'modal'
 
     if (isModal) {
-      const config = JSON.parse(tool.workflowJson) as { engine: string; model: string; pluginId: string }
-      const plugin = getPlugin(config.pluginId)
       if (!plugin) {
         return NextResponse.json({ error: `Unknown API plugin: ${config.pluginId}` }, { status: 400 })
       }
@@ -387,10 +431,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       createdAt: now,
     })
     db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()
-
-    const config = JSON.parse(tool.workflowJson) as { engine: string; model: string; pluginId: string }
-
-    const plugin = getPlugin(config.pluginId)
 
     if (!plugin) {
       await db.update(executions).set({ status: 'error', errorMessage: `Unknown API plugin: ${config.pluginId}`, completedAt: Date.now() }).where(eq(executions.id, executionId))
