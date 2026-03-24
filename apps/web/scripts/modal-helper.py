@@ -76,22 +76,39 @@ def cmd_deploy(plugin_dir: str, gpu: str, app_name: str):
             return
 
         # Parse the URL from modal deploy output
-        # The URL may be on the same line as "=>" or on the next line
+        # The URL may be on the same line as "=>" or split across lines
         url = None
         lines = full_output.splitlines()
         for i, line in enumerate(lines):
             if "=>" in line and "http" in line:
                 url = line.split("=>")[-1].strip()
+                # URL may be wrapped across lines — keep appending continuation lines
+                while url and not url.endswith(".run") and i + 1 < len(lines):
+                    i += 1
+                    continuation = lines[i].strip()
+                    if continuation and not continuation.startswith("✓") and not continuation.startswith("View"):
+                        url += continuation
+                    else:
+                        break
                 break
             if "=>" in line and i + 1 < len(lines):
                 next_line = lines[i + 1].strip()
                 if next_line.startswith("http"):
                     url = next_line
+                    # Also check for continuation
+                    while url and not url.endswith(".run") and i + 2 < len(lines):
+                        i += 1
+                        continuation = lines[i + 1].strip()
+                        if continuation and not continuation.startswith("✓") and not continuation.startswith("View"):
+                            url += continuation
+                        else:
+                            break
                     break
-        # Fallback: search for any Modal URL in the output
-        if not url:
+        # Fallback: search for any Modal URL in the output (join lines first to handle wrapping)
+        if not url or not url.endswith(".run"):
             import re
-            m = re.search(r"https://\S+\.modal\.run\S*", full_output)
+            joined = full_output.replace("\n", "").replace("\r", "")
+            m = re.search(r"https://\S+\.modal\.run", joined)
             if m:
                 url = m.group(0)
 
@@ -562,23 +579,13 @@ def cmd_deploy_comfyui(config_source: str, gpu: str, app_name: str):
             _json_out({"success": False, "error": full_output.strip() or f"modal deploy exited with code {proc.returncode}", "logs": full_output})
             return
 
-        # Parse the URL from modal deploy output
+        # Parse the URL from modal deploy output (handles line-wrapped URLs)
         url = None
-        lines = full_output.splitlines()
-        for i, line in enumerate(lines):
-            if "=>" in line and "http" in line:
-                url = line.split("=>")[-1].strip()
-                break
-            if "=>" in line and i + 1 < len(lines):
-                next_line = lines[i + 1].strip()
-                if next_line.startswith("http"):
-                    url = next_line
-                    break
-        if not url:
-            import re
-            m = re.search(r"https://\S+\.modal\.run\S*", full_output)
-            if m:
-                url = m.group(0)
+        import re
+        joined = full_output.replace("\n", "").replace("\r", "")
+        m = re.search(r"https://\S+\.modal\.run", joined)
+        if m:
+            url = m.group(0)
 
         # Auto-sync models from local ComfyUI to Volume after deploy
         comfyui_path = config.get("comfyuiPath", "")
