@@ -14,7 +14,7 @@ interface DatasetMeta {
 interface TrainingConfigFormProps {
   toolId: string
   defaultModel: 'flux-dev' | 'sdxl'
-  onStart: (executionId: string, jobId: string) => void
+  onStart: (executionId: string, jobId: string, meta: { outputName: string; steps: number }) => void
 }
 
 const LORA_RANKS = [16, 32, 64, 128, 256] as const
@@ -76,7 +76,7 @@ export function TrainingConfigForm({ toolId, defaultModel, onStart }: TrainingCo
       }
 
       const data = await res.json() as { id: string; jobId?: string }
-      onStart(data.id, data.jobId ?? '')
+      onStart(data.id, data.jobId ?? '', { outputName, steps })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start training')
     } finally {

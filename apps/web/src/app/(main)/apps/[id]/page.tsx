@@ -27,6 +27,9 @@ import { useModalStatus } from '@/hooks/useModalStatus'
 import { ModalDeployBanner } from '@/components/ModalDeployBanner'
 import { useModalDeployStatus, useModalLogs } from '@/hooks/useModalDeployStatus'
 import { useModalComfyInstances } from '@/hooks/useModalComfyInstances'
+import { TrainingConfigForm } from '@/components/training/TrainingConfigForm'
+import { TrainingProgress } from '@/components/training/TrainingProgress'
+import { TrainingComplete } from '@/components/training/TrainingComplete'
 
 interface WorkflowIO {
   nodeId: string
@@ -51,6 +54,7 @@ interface Tool {
   comfyPort: number | null
   status: string
   version: number | null
+  toolType: string | null
 }
 
 interface Execution {
@@ -847,6 +851,17 @@ export default function ToolPage() {
     } catch { return null }
   })()
 
+  // Derive training model from workflowJson for training tools
+  const trainingDefaultModel = (() => {
+    if (tool?.toolType !== 'training') return 'flux-dev' as const
+    try {
+      const wf = JSON.parse(tool.workflowJson) as { model?: string }
+      return (wf.model === 'sdxl' ? 'sdxl' : 'flux-dev') as 'flux-dev' | 'sdxl'
+    } catch { return 'flux-dev' as const }
+  })()
+
+  const isTrainingTool = tool?.toolType === 'training'
+
   // ── GPU/device selection for API tools ────────────────────────────────────────
   const { data: gpuData } = useQuery<{ instances: Array<{ id: string; device: string; label: string }> }>({
     queryKey: ['gpu-instances'],
@@ -891,6 +906,14 @@ export default function ToolPage() {
   const comfyInstanceLabel = effectiveComfyPort
     ? comfyInstances.find((i) => i.port === effectiveComfyPort)?.label ?? `:${effectiveComfyPort}`
     : undefined
+
+  // ── Training state machine ────────────────────────────────────────────────────
+  const [trainingState, setTrainingState] = useState<'config' | 'progress' | 'complete'>('config')
+  const [trainingExecutionId, setTrainingExecutionId] = useState<string>('')
+  const [trainingJobId, setTrainingJobId] = useState<string>('')
+  const [trainingOutputName, setTrainingOutputName] = useState<string>('')
+  const [trainingStartTime, setTrainingStartTime] = useState<number>(0)
+  const [trainingSteps, setTrainingSteps] = useState<number>(0)
 
   const [leftTab, setLeftTab] = useState<'form' | 'nodejs' | 'http'>('form')
   const [latestOutputs, setLatestOutputs] = useState<OutputItem[]>([])
@@ -1246,7 +1269,44 @@ export default function ToolPage() {
         />
       )}
 
+      {/* Training UI — replaces standard content for training tools */}
+      {isTrainingTool && (
+        <div className="flex-1 overflow-y-auto px-8 py-6">
+          {trainingState === 'config' && (
+            <TrainingConfigForm
+              toolId={tool.id}
+              defaultModel={trainingDefaultModel}
+              onStart={(executionId, jobId, meta) => {
+                setTrainingExecutionId(executionId)
+                setTrainingJobId(jobId)
+                setTrainingOutputName(meta.outputName)
+                setTrainingSteps(meta.steps)
+                setTrainingStartTime(Date.now())
+                setTrainingState('progress')
+              }}
+            />
+          )}
+          {trainingState === 'progress' && (
+            <TrainingProgress
+              toolId={tool.id}
+              executionId={trainingExecutionId}
+              onComplete={() => setTrainingState('complete')}
+              onError={(_message) => setTrainingState('config')}
+            />
+          )}
+          {trainingState === 'complete' && (
+            <TrainingComplete
+              outputName={trainingOutputName}
+              duration={Math.round((Date.now() - trainingStartTime) / 1000)}
+              steps={trainingSteps}
+              onRetrain={() => setTrainingState('config')}
+            />
+          )}
+        </div>
+      )}
+
       {/* Content */}
+      {!isTrainingTool && (
       <div className="flex-1 overflow-hidden">
         <PanelGroup orientation="horizontal">
           {/* Left: Form / Node.js tabs */}
@@ -1350,6 +1410,7 @@ export default function ToolPage() {
           </Panel>
         </PanelGroup>
       </div>
+      )}
     </FadeIn>
   )
 }
