@@ -4,8 +4,12 @@ import { probePort } from '@/lib/comfy-probe'
 
 export type { ComfyInstance } from '@/lib/comfy-probe'
 
+/** Well-known ports where ComfyUI commonly runs (desktop app, default, etc.) */
+const WELL_KNOWN_PORTS = [8000, 8188]
+
 export async function GET() {
   const instances = getComfyInstances()
+  const configuredPorts = new Set(instances.map((i) => i.port))
 
   // Probe all configured instance ports in parallel
   const results = await Promise.all(
@@ -16,7 +20,17 @@ export async function GET() {
     }),
   )
 
-  const alive = results.filter(Boolean)
+  // Also probe well-known ports that aren't already configured
+  const extraPorts = WELL_KNOWN_PORTS.filter((p) => !configuredPorts.has(p))
+  const extraResults = await Promise.all(
+    extraPorts.map(async (port) => {
+      const probe = await probePort(port)
+      if (!probe) return null
+      return { ...probe, instanceId: `external-${port}`, device: 'auto', label: `ComfyUI :${port}` }
+    }),
+  )
+
+  const alive = [...results, ...extraResults].filter(Boolean)
 
   // Fire-and-forget model scan for each discovered instance
   for (const inst of alive) {
