@@ -46,7 +46,7 @@ def cmd_deploy(plugin_dir: str, gpu: str, app_name: str):
     with open(latest_path, "w") as f:
         f.write(f"[{datetime.now().isoformat()}] Deploying to Modal with GPU={gpu}...\n")
 
-    env = {**os.environ, "FLOWSCALE_GPU": gpu, "FLOWSCALE_APP_NAME": app_name}
+    env = {**os.environ, "FLOWSCALE_GPU": gpu, "FLOWSCALE_APP_NAME": app_name, "PYTHONIOENCODING": "utf-8"}
     try:
         # Use Popen for streaming — write to log file as output arrives
         proc = subprocess.Popen(
@@ -538,7 +538,7 @@ def cmd_deploy_comfyui(config_source: str, gpu: str, app_name: str):
         with open(latest_path, "w") as f:
             f.write(f"[{datetime.now().isoformat()}] Deploying ComfyUI to Modal with GPU={gpu}...\n")
 
-        env = {**os.environ, "FLOWSCALE_GPU": gpu, "FLOWSCALE_APP_NAME": app_name}
+        env = {**os.environ, "FLOWSCALE_GPU": gpu, "FLOWSCALE_APP_NAME": app_name, "PYTHONIOENCODING": "utf-8"}
         proc = subprocess.Popen(
             ["modal", "deploy", modal_app_path],
             stdout=subprocess.PIPE,
