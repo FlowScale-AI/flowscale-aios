@@ -61,23 +61,18 @@ export function ModalDeployBanner({
   const [undployingIds, setUndeployingIds] = useState<Set<string>>(new Set())
 
   // Merge server deployments with optimistic pending ones.
-  // Remove pending entries once the server either has them OR has confirmed they don't exist
-  // (i.e., the deploy failed and the record was cleaned up server-side).
+  // Drop pending entries that: (a) the server now has, or (b) are older than 15s
+  // without the server confirming them (deploy failed/cleaned up server-side).
+  const now = Date.now()
   const activePending = pendingDeploys.filter(p => {
-    // If server already has this deployment, the pending entry is no longer needed
     if (deployments.some(d => d.id === p.id)) return false
-    // If pending for more than 30s and server doesn't have it, it failed — remove it
-    if (Date.now() - (p as ModalDeploymentStatus & { _createdAt?: number })._createdAt! > 30_000) return false
-    return true
+    const age = now - ((p as unknown as Record<string, unknown>)._createdAt as number || 0)
+    return age < 15_000
   })
   if (activePending.length !== pendingDeploys.length) {
-    // Clean up stale pending entries on next tick to avoid re-render loop
     setTimeout(() => setPendingDeploys(activePending), 0)
   }
-  const allDeployments = [
-    ...deployments,
-    ...activePending,
-  ]
+  const allDeployments = [...deployments, ...activePending]
   const isAnyDeploying = allDeployments.some((d) => d.status === 'deploying')
 
   const deployMutation = useMutation({

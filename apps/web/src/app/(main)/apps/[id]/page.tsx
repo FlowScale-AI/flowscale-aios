@@ -1241,7 +1241,7 @@ export default function ToolPage() {
           pluginId={pluginId}
           defaultGpu={modalDeployData?.defaultGpu ?? 'A10'}
           deployments={modalDeployData?.deployments ?? []}
-          onDeployed={() => void 0}
+          onDeployed={() => qc.invalidateQueries({ queryKey: ['modal-deploy-status', pluginId] })}
         />
       )}
 
