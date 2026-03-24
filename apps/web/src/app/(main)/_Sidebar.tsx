@@ -8,6 +8,7 @@ import {
   House,
   Wrench,
   ClockCounterClockwise,
+  ImageSquare,
   GearSix,
   SignOut,
   Bug,
@@ -132,6 +133,13 @@ export default function Sidebar({
           icon={Wrench}
           label="Tools"
           active={pathname === "/tools" || pathname.startsWith("/tools/") || pathname === "/build-tool"}
+        />
+
+        <NavItem
+          href="/outputs"
+          icon={ImageSquare}
+          label="Assets"
+          active={pathname === "/outputs" || pathname.startsWith("/outputs/")}
         />
 
         <NavItem
