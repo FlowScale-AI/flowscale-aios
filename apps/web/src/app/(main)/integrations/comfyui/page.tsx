@@ -125,8 +125,12 @@ function SetupWizard({ onComplete }: { onComplete: () => void }) {
     setDesktopPathValidating(true)
     try {
       const res = await fetch(`/api/comfy/setup/validate-path?path=${encodeURIComponent(p.trim())}`)
-      const data = await res.json() as { valid: boolean }
+      const data = await res.json() as { valid: boolean; resolvedPath?: string }
       setDesktopPathValid(data.valid)
+      // Auto-correct the path if the API resolved it (e.g. .app bundle → nested ComfyUI dir)
+      if (data.valid && data.resolvedPath) {
+        setDesktopComfyPath(data.resolvedPath)
+      }
     } catch {
       setDesktopPathValid(false)
     } finally {
@@ -161,7 +165,15 @@ function SetupWizard({ onComplete }: { onComplete: () => void }) {
   const handleGithubSave = async () => {
     if (!githubPath.trim()) return
     setSaving(true)
-    await saveSettings('github', githubPath.trim())
+    // Resolve the path in case user selected a parent dir or .app bundle
+    try {
+      const res = await fetch(`/api/comfy/setup/validate-path?path=${encodeURIComponent(githubPath.trim())}`)
+      const data = await res.json() as { valid: boolean; resolvedPath?: string }
+      const resolvedPath = data.resolvedPath ?? githubPath.trim()
+      await saveSettings('github', resolvedPath)
+    } catch {
+      await saveSettings('github', githubPath.trim())
+    }
     setSaving(false)
     onComplete()
   }
