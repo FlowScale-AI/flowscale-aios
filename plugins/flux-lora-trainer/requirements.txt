@@ -1,0 +1,9 @@
+flask
+torch
+transformers
+safetensors
+pyyaml
+accelerate
+peft
+bitsandbytes
+Pillow
