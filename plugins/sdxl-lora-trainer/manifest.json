@@ -1,0 +1,44 @@
+{
+  "id": "sdxl-lora-trainer",
+  "version": "0.1.0",
+  "name": "SDXL LoRA Trainer",
+  "description": "Train SDXL LoRA models on your images using ai-toolkit",
+  "badge": "Training",
+  "model": "SDXL",
+  "engine": "api",
+  "server": {
+    "type": "training",
+    "script": "server.py",
+    "port": 41301,
+    "healthEndpoint": "/health",
+    "generateEndpoint": "/generate",
+    "trainEndpoint": "/train",
+    "progressEndpoint": "/train/{jobId}/progress",
+    "cancelEndpoint": "/train/{jobId}/cancel"
+  },
+  "dependencies": {
+    "python": ">=3.10",
+    "packages": ["torch", "transformers", "safetensors", "pyyaml"]
+  },
+  "schema": {
+    "inputs": [
+      { "paramName": "datasetId", "paramType": "string", "label": "Dataset ID" },
+      { "paramName": "outputName", "paramType": "string", "label": "Output Name" },
+      { "paramName": "triggerWord", "paramType": "string", "label": "Trigger Word", "defaultValue": "ohwx" },
+      { "paramName": "steps", "paramType": "number", "label": "Training Steps", "defaultValue": 800 },
+      { "paramName": "lr", "paramType": "string", "label": "Learning Rate", "defaultValue": "1e-4" },
+      { "paramName": "rank", "paramType": "number", "label": "LoRA Rank", "defaultValue": 128 },
+      { "paramName": "resolution", "paramType": "number", "label": "Resolution", "defaultValue": 1024 }
+    ],
+    "outputs": [
+      { "paramName": "lora_file", "paramType": "file", "label": "Trained LoRA" }
+    ]
+  },
+  "cloud": {
+    "modal": {
+      "supported": true,
+      "defaultGpu": "A10",
+      "containerIdleTimeout": 120
+    }
+  }
+}
