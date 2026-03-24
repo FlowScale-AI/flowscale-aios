@@ -49,11 +49,14 @@ export interface ToolPluginManifest {
   model: string
   engine: 'api'
   server: {
-    type: 'local'
+    type: 'local' | 'training'
     script: string
     port: number
     healthEndpoint: string
     generateEndpoint: string
+    trainEndpoint?: string        // POST — starts a training job
+    progressEndpoint?: string     // GET — SSE progress stream
+    cancelEndpoint?: string       // POST — graceful cancel
   }
   dependencies?: {
     python: string
