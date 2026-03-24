@@ -1168,7 +1168,7 @@ export default function ToolPage() {
               className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
             >
               <option value="local">Local</option>
-              {modalSupported && modalStatus?.authenticated && (
+              {(modalSupported || selectedProvider === 'modal') && modalStatus?.authenticated && (
                 <option value="modal">Modal</option>
               )}
             </select>
