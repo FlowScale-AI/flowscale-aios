@@ -255,12 +255,26 @@ export function spawnServer(python: string, pluginId: string = DEFAULT_PLUGIN_ID
   proc.unref()
 }
 
-export function stopServer(pluginId: string = DEFAULT_PLUGIN_ID): boolean {
+export async function stopServer(pluginId: string = DEFAULT_PLUGIN_ID): Promise<boolean> {
+  const plugin = getPlugin(pluginId)
   const port = getPluginPort(pluginId)
   let stopped = false
   const pid = storedPid(pluginId)
+
   if (pid && isAlive(pid) && isPythonProcess(pid)) {
-    try { process.kill(pid, 'SIGKILL'); stopped = true } catch { /* ignore */ }
+    if (plugin?.server.type === 'training') {
+      try { process.kill(pid, 'SIGTERM') } catch { /* ignore */ }
+      const start = Date.now()
+      while (Date.now() - start < 30_000 && isAlive(pid)) {
+        await new Promise(r => setTimeout(r, 500))
+      }
+      if (isAlive(pid)) {
+        try { process.kill(pid, 'SIGKILL') } catch { /* ignore */ }
+      }
+      stopped = true
+    } else {
+      try { process.kill(pid, 'SIGKILL'); stopped = true } catch { /* ignore */ }
+    }
   }
   clearPid(pluginId)
   killPort(port)

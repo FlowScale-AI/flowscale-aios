@@ -3,6 +3,6 @@ import { stopServer } from '@/lib/localInference'
 
 export async function POST(req: NextRequest) {
   const pluginId = req.nextUrl.searchParams.get('pluginId') ?? undefined
-  const stopped = stopServer(pluginId)
+  const stopped = await stopServer(pluginId)
   return NextResponse.json({ stopped })
 }
