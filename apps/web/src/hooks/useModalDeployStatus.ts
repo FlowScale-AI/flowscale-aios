@@ -6,10 +6,11 @@ import { useEffect, useState } from 'react'
 export interface ModalDeploymentStatus {
   id: string
   name: string
-  status: 'deploying' | 'deployed'
+  status: 'deploying' | 'deployed' | 'failed'
   gpu: string
   warm: boolean | null
   url: string
+  error?: string
 }
 
 export interface ModalDeployStatusData {

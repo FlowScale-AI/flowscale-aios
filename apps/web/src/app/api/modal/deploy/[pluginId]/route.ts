@@ -141,9 +141,11 @@ export async function POST(
       }
     }
 
-    // Fire and forget — status polling picks up progress
+    // Fire and forget — status polling picks up progress.
+    // On unhandled rejection, the deployment record is already marked as 'failed'
+    // by deployToModal, so the UI will show the error.
     deployToModal(pluginId, gpu, name, name).catch((err) => {
-      console.error(`Modal deploy failed for ${pluginId}:`, err)
+      console.error(`[Modal Deploy] ${pluginId}/${name}:`, err)
     })
 
     return NextResponse.json({ status: 'deploying', gpu, name }, { status: 202 })

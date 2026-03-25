@@ -14,17 +14,19 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { VALID_GPU_TIERS, type GpuTier } from './toolPlugins'
+import { modalBin } from './modal-manager'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface ModalDeploymentRecord {
   id: string
   name: string
-  status: 'deploying' | 'deployed'
+  status: 'deploying' | 'deployed' | 'failed'
   appName: string
   url: string
   gpu: string
   deployedAt: number
+  error?: string
 }
 
 type DeploymentsFile = Record<string, ModalDeploymentRecord[]>
@@ -172,7 +174,7 @@ export async function checkModalSecrets(secretNames: string[]): Promise<string[]
   const missing: string[] = []
   for (const name of secretNames) {
     try {
-      const proc = spawn('modal', ['secret', 'list'], {
+      const proc = spawn(modalBin(), ['secret', 'list'], {
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 15_000,
       })
@@ -244,13 +246,25 @@ export async function deployToModal(
         appName: result.appName as string,
         url: result.url as string,
         deployedAt: Date.now(),
+        error: undefined,
       })
       return { success: true, appName: result.appName as string, url: result.url as string }
     } else {
-      // Deploy failed — remove the deploying record
-      removeDeployment(pluginId, deployId)
-      return { success: false, error: result.error as string }
+      const errorMsg = (result.error as string) || 'Unknown deployment error'
+      // Keep the record but mark it as failed so the UI can display the error
+      updateDeployment(pluginId, deployId, {
+        status: 'failed',
+        error: errorMsg,
+      })
+      return { success: false, error: errorMsg }
     }
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err)
+    updateDeployment(pluginId, deployId, {
+      status: 'failed',
+      error: `Unexpected error: ${errorMsg}`,
+    })
+    return { success: false, error: errorMsg }
   } finally {
     _deployingPlugins.delete(`${pluginId}:${deployId}`)
   }

@@ -367,9 +367,27 @@ function ModalComputeCard() {
           return;
         }
       }
-      // Step 2: Authenticate
+      // Step 2: Authenticate — the API spawns `modal token new` and returns the auth URL
       setPhase("authenticating");
-      await setupMutation.mutateAsync("authenticate");
+      const authResult = await setupMutation.mutateAsync("authenticate");
+      // Open the auth URL in the browser so the user can complete the flow
+      let authUrl = authResult.url;
+      // If the URL wasn't ready yet, poll for it a few times
+      if (!authUrl) {
+        for (let i = 0; i < 5; i++) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const poll = await fetch("/api/modal/setup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "auth-url" }),
+          });
+          const data = await poll.json();
+          if (data.url) { authUrl = data.url; break; }
+        }
+      }
+      if (authUrl) {
+        window.open(authUrl, "_blank");
+      }
       // Polling will detect when auth completes
     } catch (err: any) {
       setPhase("error");

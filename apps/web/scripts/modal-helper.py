@@ -11,6 +11,8 @@ Usage:
     python modal-helper.py status <app-name>
     python modal-helper.py logs <plugin-dir>
 """
+from __future__ import annotations
+
 import json
 import subprocess
 import sys
