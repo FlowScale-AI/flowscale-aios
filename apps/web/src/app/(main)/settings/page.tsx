@@ -1,6 +1,12 @@
 "use client";
 
-import { Suspense, useState, useEffect, useCallback, type FormEvent } from "react";
+import {
+  Suspense,
+  useState,
+  useEffect,
+  useCallback,
+  type FormEvent,
+} from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -139,15 +145,56 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
     "Access the HuggingFace Inference API to run models from the Hub.",
 };
 
-type Tab = "compute" | "providers" | "comfyui" | "storage" | "users" | "general";
+type Tab =
+  | "compute"
+  | "providers"
+  | "comfyui"
+  | "storage"
+  | "users"
+  | "general";
 
-const TAB_CONFIG: { id: Tab; label: string; icon: typeof Cpu; description: string }[] = [
-  { id: "general", label: "General", icon: Globe, description: "App preferences, updates, and system info" },
-  { id: "compute", label: "Compute", icon: Lightning, description: "Manage GPUs, devices, and cloud compute" },
-  { id: "users", label: "Users", icon: UsersThree, description: "Manage users, roles, and permissions" },
-  { id: "storage", label: "Storage", icon: Database, description: "Output storage and disk usage" },
-  { id: "comfyui", label: "ComfyUI", icon: GearSix, description: "ComfyUI instances and configuration" },
-  { id: "providers", label: "Providers", icon: Plugs, description: "API keys for cloud inference providers" },
+const TAB_CONFIG: {
+  id: Tab;
+  label: string;
+  icon: typeof Cpu;
+  description: string;
+}[] = [
+  {
+    id: "general",
+    label: "General",
+    icon: Globe,
+    description: "App preferences, updates, and system info",
+  },
+  {
+    id: "compute",
+    label: "Compute",
+    icon: Lightning,
+    description: "Manage GPUs, devices, and cloud compute",
+  },
+  {
+    id: "users",
+    label: "Users",
+    icon: UsersThree,
+    description: "Manage users, roles, and permissions",
+  },
+  {
+    id: "storage",
+    label: "Storage",
+    icon: Database,
+    description: "Output storage and disk usage",
+  },
+  {
+    id: "comfyui",
+    label: "ComfyUI",
+    icon: GearSix,
+    description: "ComfyUI instances and configuration",
+  },
+  {
+    id: "providers",
+    label: "Providers",
+    icon: Plugs,
+    description: "API keys for cloud inference providers",
+  },
 ];
 
 function formatDate(ms: number | null) {
@@ -249,9 +296,13 @@ function SettingsPageInner() {
               <div className="px-10 pt-8 pb-6">
                 <div className="flex items-center gap-2.5">
                   <Icon size={20} className="text-zinc-400" />
-                  <h2 className="font-tech text-lg font-semibold text-zinc-100">{current.label}</h2>
+                  <h2 className="font-tech text-lg font-semibold text-zinc-100">
+                    {current.label}
+                  </h2>
                 </div>
-                <p className="text-sm text-zinc-500 mt-1 ml-[30px]">{current.description}</p>
+                <p className="text-sm text-zinc-500 mt-1 ml-[30px]">
+                  {current.description}
+                </p>
               </div>
             );
           })()}
@@ -303,7 +354,9 @@ interface GpuUtilization {
 
 function ModalComputeCard() {
   const queryClient = useQueryClient();
-  const [phase, setPhase] = useState<"idle" | "installing" | "authenticating" | "connected" | "error">("idle");
+  const [phase, setPhase] = useState<
+    "idle" | "installing" | "authenticating" | "connected" | "error"
+  >("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const { data: modalStatus } = useQuery<{
@@ -372,9 +425,10 @@ function ModalComputeCard() {
       const authResult = await setupMutation.mutateAsync("authenticate");
       // Open the auth URL in the browser so the user can complete the flow
       let authUrl = authResult.url;
+      let debugInfo = authResult.debug;
       // If the URL wasn't ready yet, poll for it a few times
       if (!authUrl) {
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 8; i++) {
           await new Promise((r) => setTimeout(r, 1500));
           const poll = await fetch("/api/modal/setup", {
             method: "POST",
@@ -382,11 +436,25 @@ function ModalComputeCard() {
             body: JSON.stringify({ action: "auth-url" }),
           });
           const data = await poll.json();
-          if (data.url) { authUrl = data.url; break; }
+          debugInfo = data.debug;
+          if (data.url) {
+            authUrl = data.url;
+            break;
+          }
         }
       }
       if (authUrl) {
         window.open(authUrl, "_blank");
+      } else {
+        // Failed to get URL — show debug info
+        setPhase("error");
+        const errParts = ["Failed to get auth URL from Modal CLI."];
+        if (debugInfo?.error) errParts.push(`Error: ${debugInfo.error}`);
+        if (debugInfo?.output)
+          errParts.push(`Output: ${debugInfo.output.slice(0, 200)}`);
+        if (debugInfo?.modalBin) errParts.push(`Binary: ${debugInfo.modalBin}`);
+        setErrorMsg(errParts.join(" "));
+        return;
       }
       // Polling will detect when auth completes
     } catch (err: any) {
@@ -406,7 +474,9 @@ function ModalComputeCard() {
 
   return (
     <section>
-      <div className={`p-5 rounded-xl border transition-colors ${phase === "connected" ? "border-purple-500/20 bg-[var(--color-background-panel)]" : "border-white/5 bg-[var(--color-background-panel)]/50"}`}>
+      <div
+        className={`p-5 rounded-xl border transition-colors ${phase === "connected" ? "border-purple-500/20 bg-[var(--color-background-panel)]" : "border-white/5 bg-[var(--color-background-panel)]/50"}`}
+      >
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
             <div className="size-9 rounded-lg border border-purple-500/20 bg-purple-500/10 flex items-center justify-center overflow-hidden shrink-0">
@@ -414,7 +484,9 @@ function ModalComputeCard() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-zinc-200">Modal.com</span>
+                <span className="text-sm font-semibold text-zinc-200">
+                  Modal.com
+                </span>
                 {phase === "connected" && (
                   <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
                     <span className="size-1.5 rounded-full bg-emerald-400" />
@@ -432,7 +504,7 @@ function ModalComputeCard() {
         </div>
 
         {/* Disconnected / idle */}
-        {(phase === "idle") && (
+        {phase === "idle" && (
           <button
             onClick={handleLogin}
             disabled={setupMutation.isPending}
@@ -447,7 +519,9 @@ function ModalComputeCard() {
         {phase === "installing" && (
           <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-zinc-900/50 border border-white/5">
             <CircleNotch size={14} className="animate-spin text-purple-400" />
-            <span className="text-sm text-zinc-300">Installing Modal CLI...</span>
+            <span className="text-sm text-zinc-300">
+              Installing Modal CLI...
+            </span>
           </div>
         )}
 
@@ -455,7 +529,9 @@ function ModalComputeCard() {
         {phase === "authenticating" && (
           <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-zinc-900/50 border border-white/5">
             <CircleNotch size={14} className="animate-spin text-purple-400" />
-            <span className="text-sm text-zinc-300">Waiting for browser authentication...</span>
+            <span className="text-sm text-zinc-300">
+              Waiting for browser authentication...
+            </span>
           </div>
         )}
 
@@ -481,7 +557,10 @@ function ModalComputeCard() {
               <span className="text-xs text-red-300">{errorMsg}</span>
             </div>
             <button
-              onClick={() => { setPhase("idle"); setErrorMsg(null); }}
+              onClick={() => {
+                setPhase("idle");
+                setErrorMsg(null);
+              }}
               className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
             >
               <ArrowCounterClockwise size={12} />
@@ -507,7 +586,15 @@ interface PluginDeployRecord {
 
 function ModalDeploymentsSection() {
   const { data: modalStatus } = useModalStatus();
-  const { data: modalComfyData } = useQuery<{ instances: Array<{ id: string; name: string; status: string; gpu: string; virtualPort: number }> }>({
+  const { data: modalComfyData } = useQuery<{
+    instances: Array<{
+      id: string;
+      name: string;
+      status: string;
+      gpu: string;
+      virtualPort: number;
+    }>;
+  }>({
     queryKey: ["modal-comfyui-instances"],
     queryFn: async () => {
       const res = await fetch("/api/modal/comfyui");
@@ -516,7 +603,9 @@ function ModalDeploymentsSection() {
     },
     enabled: modalStatus?.authenticated === true,
   });
-  const { data: pluginDeployData } = useQuery<{ deployments: Record<string, PluginDeployRecord[]> }>({
+  const { data: pluginDeployData } = useQuery<{
+    deployments: Record<string, PluginDeployRecord[]>;
+  }>({
     queryKey: ["modal-all-deployments"],
     queryFn: async () => {
       const res = await fetch("/api/modal/deployments");
@@ -532,10 +621,11 @@ function ModalDeploymentsSection() {
   const comfyInstances = modalComfyData?.instances ?? [];
   const pluginDeployments = pluginDeployData?.deployments ?? {};
   const allPluginDeploys = Object.entries(pluginDeployments).flatMap(
-    ([pluginId, records]) => records.map((r) => ({ ...r, pluginId }))
+    ([pluginId, records]) => records.map((r) => ({ ...r, pluginId })),
   );
 
-  const hasAnyDeployments = comfyInstances.length > 0 || allPluginDeploys.length > 0;
+  const hasAnyDeployments =
+    comfyInstances.length > 0 || allPluginDeploys.length > 0;
 
   if (!modalStatus?.authenticated) return null;
 
@@ -566,7 +656,9 @@ function ModalDeploymentsSection() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-zinc-200">Cloud Deployments</span>
+              <span className="text-sm font-semibold text-zinc-200">
+                Cloud Deployments
+              </span>
               {hasAnyDeployments && (
                 <span className="px-1.5 py-0.5 text-[10px] font-semibold text-purple-400 bg-purple-400/10 rounded-full border border-purple-400/20">
                   {comfyInstances.length + allPluginDeploys.length} active
@@ -580,7 +672,9 @@ function ModalDeploymentsSection() {
         </div>
 
         {!hasAnyDeployments ? (
-          <p className="text-xs text-zinc-600 py-2">No active cloud deployments.</p>
+          <p className="text-xs text-zinc-600 py-2">
+            No active cloud deployments.
+          </p>
         ) : (
           <div className="space-y-1.5">
             {/* ComfyUI instances */}
@@ -591,14 +685,20 @@ function ModalDeploymentsSection() {
               >
                 <div className="flex items-center gap-2.5">
                   <Monitor size={13} className="text-purple-400/70" />
-                  <span className="text-xs font-medium text-zinc-300">{inst.name}</span>
-                  <span className="text-[10px] font-mono text-zinc-600">{inst.gpu}</span>
+                  <span className="text-xs font-medium text-zinc-300">
+                    {inst.name}
+                  </span>
+                  <span className="text-[10px] font-mono text-zinc-600">
+                    {inst.gpu}
+                  </span>
                   <span className="px-1.5 py-0.5 text-[9px] font-semibold text-zinc-500 bg-zinc-800 rounded-full">
                     ComfyUI
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-[10px] ${inst.status === "deployed" ? "text-emerald-400" : inst.status === "deploying" ? "text-amber-400" : "text-red-400"}`}>
+                  <span
+                    className={`text-[10px] ${inst.status === "deployed" ? "text-emerald-400" : inst.status === "deploying" ? "text-amber-400" : "text-red-400"}`}
+                  >
                     {inst.status}
                   </span>
                   {inst.status === "deployed" && (
@@ -622,18 +722,27 @@ function ModalDeploymentsSection() {
               >
                 <div className="flex items-center gap-2.5">
                   <Lightning size={13} className="text-purple-400/70" />
-                  <span className="text-xs font-medium text-zinc-300">{d.name}</span>
-                  <span className="text-[10px] font-mono text-zinc-600">{d.gpu}</span>
+                  <span className="text-xs font-medium text-zinc-300">
+                    {d.name}
+                  </span>
+                  <span className="text-[10px] font-mono text-zinc-600">
+                    {d.gpu}
+                  </span>
                   <span className="px-1.5 py-0.5 text-[9px] font-semibold text-zinc-500 bg-zinc-800 rounded-full">
                     {d.pluginId}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-[10px] ${d.status === "deployed" ? "text-emerald-400" : d.status === "deploying" ? "text-amber-400" : "text-red-400"}`}>
+                  <span
+                    className={`text-[10px] ${d.status === "deployed" ? "text-emerald-400" : d.status === "deploying" ? "text-amber-400" : "text-red-400"}`}
+                  >
                     {d.status}
                   </span>
                   {d.status === "failed" && d.error && (
-                    <span className="text-[10px] text-red-400 max-w-[150px] truncate" title={d.error}>
+                    <span
+                      className="text-[10px] text-red-400 max-w-[150px] truncate"
+                      title={d.error}
+                    >
                       {d.error}
                     </span>
                   )}
@@ -641,9 +750,15 @@ function ModalDeploymentsSection() {
                     <button
                       onClick={() => undeployPlugin(d.pluginId, d.id)}
                       className="text-zinc-600 hover:text-red-400 transition-colors"
-                      title={d.status === "failed" ? "Remove" : "Stop deployment"}
+                      title={
+                        d.status === "failed" ? "Remove" : "Stop deployment"
+                      }
                     >
-                      {d.status === "failed" ? <Trash size={12} /> : <Stop size={12} />}
+                      {d.status === "failed" ? (
+                        <Trash size={12} />
+                      ) : (
+                        <Stop size={12} />
+                      )}
                     </button>
                   )}
                 </div>
@@ -660,13 +775,17 @@ function ComputeTab() {
   const queryClient = useQueryClient();
 
   // Per-GPU "Available for jobs" toggle — UI-only, stored in localStorage
-  const [gpuAvailability, setGpuAvailability] = useState<Record<string, boolean>>({});
+  const [gpuAvailability, setGpuAvailability] = useState<
+    Record<string, boolean>
+  >({});
 
   useEffect(() => {
     try {
       const stored = localStorage.getItem("flowscale-gpu-availability");
       if (stored) setGpuAvailability(JSON.parse(stored));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const toggleGpuAvailability = (key: string) => {
@@ -779,10 +898,13 @@ function ComputeTab() {
                 {detectedGpus.map((gpu) => {
                   const key = `${gpu.backend}:${gpu.index}`;
                   const available = isGpuAvailable(key);
-                  const util = gpuUtilization.find((u) => u.index === gpu.index);
-                  const vramPct = util && util.vramTotalMB > 0
-                    ? Math.round((util.vramUsedMB / util.vramTotalMB) * 100)
-                    : 0;
+                  const util = gpuUtilization.find(
+                    (u) => u.index === gpu.index,
+                  );
+                  const vramPct =
+                    util && util.vramTotalMB > 0
+                      ? Math.round((util.vramUsedMB / util.vramTotalMB) * 100)
+                      : 0;
                   return (
                     <div
                       key={gpu.index}
@@ -793,7 +915,10 @@ function ComputeTab() {
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2.5">
-                          <Lightning size={13} className="text-emerald-400/70" />
+                          <Lightning
+                            size={13}
+                            className="text-emerald-400/70"
+                          />
                           <span className="text-xs font-medium text-zinc-300">
                             {gpu.name}
                           </span>
@@ -807,19 +932,27 @@ function ComputeTab() {
                               ? `${(gpu.vramMB / 1024).toFixed(1)} GB`
                               : `${gpu.vramMB} MB`}
                           </span>
-                          <span className="text-[10px] text-zinc-600">{available ? "Available" : "Disabled"}</span>
+                          <span className="text-[10px] text-zinc-600">
+                            {available ? "Available" : "Disabled"}
+                          </span>
                           <button
                             onClick={() => toggleGpuAvailability(key)}
                             className={[
                               "relative inline-flex h-4 w-7 items-center rounded-full transition-colors shrink-0",
                               available ? "bg-emerald-500" : "bg-zinc-700",
                             ].join(" ")}
-                            title={available ? "Available for jobs — click to disable" : "Disabled for jobs — click to enable"}
+                            title={
+                              available
+                                ? "Available for jobs — click to disable"
+                                : "Disabled for jobs — click to enable"
+                            }
                           >
                             <span
                               className={[
                                 "inline-block size-3 rounded-full bg-white transition-transform",
-                                available ? "translate-x-3.5" : "translate-x-0.5",
+                                available
+                                  ? "translate-x-3.5"
+                                  : "translate-x-0.5",
                               ].join(" ")}
                             />
                           </button>
@@ -834,7 +967,8 @@ function ComputeTab() {
                             />
                           </div>
                           <span className="text-[10px] font-mono text-zinc-600">
-                            {(util.vramUsedMB / 1024).toFixed(1)}/{(util.vramTotalMB / 1024).toFixed(0)} GB
+                            {(util.vramUsedMB / 1024).toFixed(1)}/
+                            {(util.vramTotalMB / 1024).toFixed(0)} GB
                           </span>
                           <span className="text-[10px] font-mono text-zinc-600">
                             GPU {util.gpuUtil}%
@@ -864,19 +998,29 @@ function ComputeTab() {
                       <span className="text-[10px] font-mono text-zinc-500">
                         {cpuInfo.ramGB} GB RAM
                       </span>
-                      <span className="text-[10px] text-zinc-600">{isGpuAvailable("cpu") ? "Available" : "Disabled"}</span>
+                      <span className="text-[10px] text-zinc-600">
+                        {isGpuAvailable("cpu") ? "Available" : "Disabled"}
+                      </span>
                       <button
                         onClick={() => toggleGpuAvailability("cpu")}
                         className={[
                           "relative inline-flex h-4 w-7 items-center rounded-full transition-colors shrink-0",
-                          isGpuAvailable("cpu") ? "bg-emerald-500" : "bg-zinc-700",
+                          isGpuAvailable("cpu")
+                            ? "bg-emerald-500"
+                            : "bg-zinc-700",
                         ].join(" ")}
-                        title={isGpuAvailable("cpu") ? "Available for jobs — click to disable" : "Disabled for jobs — click to enable"}
+                        title={
+                          isGpuAvailable("cpu")
+                            ? "Available for jobs — click to disable"
+                            : "Disabled for jobs — click to enable"
+                        }
                       >
                         <span
                           className={[
                             "inline-block size-3 rounded-full bg-white transition-transform",
-                            isGpuAvailable("cpu") ? "translate-x-3.5" : "translate-x-0.5",
+                            isGpuAvailable("cpu")
+                              ? "translate-x-3.5"
+                              : "translate-x-0.5",
                           ].join(" ")}
                         />
                       </button>
@@ -1057,7 +1201,9 @@ function ProviderCard({ provider }: { provider: ProviderStatus }) {
           <input
             type={showKey ? "text" : "password"}
             placeholder={
-              provider.configured ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "Paste API key\u2026"
+              provider.configured
+                ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+                : "Paste API key\u2026"
             }
             value={keyInput}
             onChange={(e) => setKeyInput(e.target.value)}
@@ -1214,7 +1360,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
         const data = q.state.data;
         if (!data) return false;
         const anyStarting = data.instances?.some(
-          (i: ComfyManagedInstance) => i.status === "starting"
+          (i: ComfyManagedInstance) => i.status === "starting",
         );
         return anyStarting ? 2000 : false;
       },
@@ -1308,9 +1454,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                   )}
                 </div>
                 {!comfyManage?.isSetup && (
-                  <p className="text-xs text-zinc-600 mt-0.5">
-                    Setup required
-                  </p>
+                  <p className="text-xs text-zinc-600 mt-0.5">Setup required</p>
                 )}
               </div>
             </div>
@@ -1470,8 +1614,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
             </div>
             <p className="text-[11px] text-zinc-600 mt-1.5">
               The root directory of your ComfyUI install. Models will be
-              downloaded into{" "}
-              <span className="font-mono-custom">models/</span>{" "}
+              downloaded into <span className="font-mono-custom">models/</span>{" "}
               subdirectories.
             </p>
           </div>
@@ -1660,7 +1803,9 @@ function UpdatesSection() {
         {status === "downloading" && !isMac && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-zinc-400">Downloading v{version}\u2026</span>
+              <span className="text-zinc-400">
+                Downloading v{version}\u2026
+              </span>
               <span className="text-zinc-500 font-mono-custom text-xs">
                 {progress}%
               </span>
@@ -1783,7 +1928,9 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
           </div>
           <div className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg">
             <div>
-              <div className="text-sm text-zinc-300">Auto-start ComfyUI on launch</div>
+              <div className="text-sm text-zinc-300">
+                Auto-start ComfyUI on launch
+              </div>
               <p className="text-xs text-zinc-600 mt-0.5">
                 Automatically start all ComfyUI instances when the app launches
               </p>
@@ -1795,7 +1942,9 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
                 "relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 disabled:opacity-50",
                 autoStartEnabled ? "bg-emerald-500" : "bg-zinc-700",
               ].join(" ")}
-              title={autoStartEnabled ? "Disable auto-start" : "Enable auto-start"}
+              title={
+                autoStartEnabled ? "Disable auto-start" : "Enable auto-start"
+              }
             >
               <span
                 className={[
@@ -1831,8 +1980,7 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
                   className="p-1.5 text-zinc-500 hover:text-white transition-colors"
                   title="Copy URL"
                 >
-                  {copied ===
-                  `http://localhost:${network?.port ?? 14173}` ? (
+                  {copied === `http://localhost:${network?.port ?? 14173}` ? (
                     <Check size={14} className="text-emerald-400" />
                   ) : (
                     <Copy size={14} />
@@ -1840,9 +1988,7 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
                 </button>
                 <button
                   onClick={() =>
-                    openInBrowser(
-                      `http://localhost:${network?.port ?? 14173}`
-                    )
+                    openInBrowser(`http://localhost:${network?.port ?? 14173}`)
                   }
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
                 >
@@ -1936,7 +2082,7 @@ function UsersPanel({
   const [approveId, setApproveId] = useState<string | null>(null);
   const [approveRole, setApproveRole] = useState("artist");
   const [pendingDeleteUser, setPendingDeleteUser] = useState<UserRow | null>(
-    null
+    null,
   );
   const isAdmin = currentUserRole === "admin";
 
