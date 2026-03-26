@@ -27,10 +27,17 @@ export function TrainingHistory({ toolId }: TrainingHistoryProps) {
     refetchInterval: 10_000,
   })
 
-  if (!executions || executions.length === 0) return null
+  if (!executions || executions.length === 0) {
+    return (
+      <div>
+        <h3 className="text-xs font-medium uppercase tracking-wide text-zinc-500 mb-3">Training History</h3>
+        <p className="text-xs text-zinc-600">No training runs yet</p>
+      </div>
+    )
+  }
 
   return (
-    <div className="border-t border-white/5 pt-5 mt-6">
+    <div>
       <h3 className="text-xs font-medium uppercase tracking-wide text-zinc-500 mb-3">Training History</h3>
       <div className="flex flex-col gap-2">
         {executions.map((exec) => {

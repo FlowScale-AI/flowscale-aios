@@ -1397,40 +1397,46 @@ export default function ToolPage() {
 
       {/* Training UI — replaces standard content for training tools */}
       {isTrainingTool && (
-        <div className="flex-1 overflow-y-auto px-8 py-6">
-          {trainingState === 'config' && (
-            <TrainingConfigForm
-              toolId={tool.id}
-              defaultModel={trainingDefaultModel}
-              provider={selectedProvider}
-              modalDeployId={selectedTarget || undefined}
-              onStart={(executionId, jobId, meta) => {
-                setTrainingExecutionId(executionId)
-                setTrainingJobId(jobId)
-                setTrainingOutputName(meta.outputName)
-                setTrainingSteps(meta.steps)
-                setTrainingStartTime(Date.now())
-                setTrainingState('progress')
-              }}
-            />
-          )}
-          {trainingState === 'progress' && (
-            <TrainingProgress
-              toolId={tool.id}
-              executionId={trainingExecutionId}
-              onComplete={() => setTrainingState('complete')}
-              onError={(_message) => setTrainingState('config')}
-            />
-          )}
-          {trainingState === 'complete' && (
-            <TrainingComplete
-              outputName={trainingOutputName}
-              duration={Math.round((Date.now() - trainingStartTime) / 1000)}
-              steps={trainingSteps}
-              onRetrain={() => setTrainingState('config')}
-            />
-          )}
-          <TrainingHistory toolId={tool.id} />
+        <div className="flex-1 overflow-hidden flex">
+          {/* Left pane: training form / progress / complete */}
+          <div className="flex-1 overflow-y-auto px-8 py-6 border-r border-white/5">
+            {trainingState === 'config' && (
+              <TrainingConfigForm
+                toolId={tool.id}
+                defaultModel={trainingDefaultModel}
+                provider={selectedProvider}
+                modalDeployId={selectedTarget || undefined}
+                onStart={(executionId, jobId, meta) => {
+                  setTrainingExecutionId(executionId)
+                  setTrainingJobId(jobId)
+                  setTrainingOutputName(meta.outputName)
+                  setTrainingSteps(meta.steps)
+                  setTrainingStartTime(Date.now())
+                  setTrainingState('progress')
+                }}
+              />
+            )}
+            {trainingState === 'progress' && (
+              <TrainingProgress
+                toolId={tool.id}
+                executionId={trainingExecutionId}
+                onComplete={() => setTrainingState('complete')}
+                onError={(_message) => setTrainingState('config')}
+              />
+            )}
+            {trainingState === 'complete' && (
+              <TrainingComplete
+                outputName={trainingOutputName}
+                duration={Math.round((Date.now() - trainingStartTime) / 1000)}
+                steps={trainingSteps}
+                onRetrain={() => setTrainingState('config')}
+              />
+            )}
+          </div>
+          {/* Right pane: training history */}
+          <div className="w-[380px] shrink-0 overflow-y-auto px-5 py-6">
+            <TrainingHistory toolId={tool.id} />
+          </div>
         </div>
       )}
 
