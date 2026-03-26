@@ -328,10 +328,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         let payload: TrainingPayload
         try {
           payload = buildTrainingPayload(inputs ?? {})
+          // Enable quantization by default (saves VRAM). Only disable for 80GB+ GPUs.
           const highVramGpus = ['H100', 'H200', 'B200', 'A100-80GB']
-          if (gpuTier && highVramGpus.includes(gpuTier as string)) {
-            payload.quantize = false
-          }
+          payload.quantize = !(gpuTier && highVramGpus.includes(gpuTier as string))
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Invalid training inputs'
           return NextResponse.json({ error: msg }, { status: 400 })
