@@ -654,6 +654,22 @@ def cmd_sync_dataset(dataset_dir: str, dataset_id: str, volume_name: str = "flow
     _json_out({"success": len(errors) == 0, "synced": synced, "total": len(files), "errors": errors})
 
 
+def cmd_download_training_output(volume_name: str, remote_path: str, dest_path: str):
+    """Download a file from a Modal Volume to a local path."""
+    try:
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        result = subprocess.run(
+            [MODAL_BIN, "volume", "get", volume_name, remote_path, dest_path],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode == 0:
+            _json_out({"success": True, "path": dest_path})
+        else:
+            _json_out({"success": False, "error": result.stderr.strip() or f"exit {result.returncode}"})
+    except Exception as e:
+        _json_out({"success": False, "error": str(e)})
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: modal-helper.py <deploy|undeploy|status|logs|scan-comfyui|deploy-comfyui> [args...]", file=sys.stderr)
@@ -681,6 +697,8 @@ if __name__ == "__main__":
     elif command == "sync-dataset" and len(sys.argv) >= 4:
         volume = sys.argv[4] if len(sys.argv) >= 5 else "flowscale-training-datasets"
         cmd_sync_dataset(sys.argv[2], sys.argv[3], volume)
+    elif command == "download-training-output" and len(sys.argv) >= 5:
+        cmd_download_training_output(sys.argv[2], sys.argv[3], sys.argv[4])
     else:
         print(f"Unknown command or missing args: {sys.argv[1:]}", file=sys.stderr)
         sys.exit(1)
