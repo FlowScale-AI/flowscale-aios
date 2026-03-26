@@ -17,6 +17,62 @@ function getModalTomlPath(): string {
 }
 
 /**
+ * Get the Python command for the current platform.
+ * On Windows, resolves the full path to avoid shell quoting issues.
+ * On Unix, uses 'python3' or 'python'.
+ */
+export function getPythonCommand(): string {
+  const isWin = process.platform === "win32";
+  const candidates = isWin
+    ? ["py", "python", "python3"]
+    : ["python3", "python"];
+
+  for (const cmd of candidates) {
+    try {
+      // On Windows, use 'where' to get the full path; on Unix use 'which'
+      const findCmd = isWin ? "where" : "which";
+      const results = execSync(`${findCmd} ${cmd}`, {
+        timeout: 5000,
+        stdio: "pipe",
+      })
+        .toString()
+        .trim()
+        .split(/\r?\n/);
+
+      // Filter results - skip WindowsApps stubs (they don't work with spawn)
+      for (const result of results) {
+        const trimmed = result.trim();
+        if (!trimmed) continue;
+        // Skip Windows Store app aliases - they're stubs that don't work with spawn()
+        if (isWin && trimmed.includes("WindowsApps")) continue;
+        if (existsSync(trimmed)) {
+          return trimmed;
+        }
+      }
+      // Fallback: just verify the command works (will use shell in this case)
+      execSync(`${cmd} --version`, { timeout: 5000, stdio: "pipe" });
+      return cmd;
+    } catch {}
+  }
+
+  return isWin ? "python" : "python3";
+}
+
+/**
+ * Spawn options for Python scripts.
+ * If getPythonCommand returns a full path, shell is not needed.
+ * If it returns just a command name (fallback), we need shell on Windows.
+ */
+export function getPythonSpawnOptions(
+  extraOpts: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    shell: false,
+    ...extraOpts,
+  };
+}
+
+/**
  * Resolve the full path to the `modal` binary.
  * pip installs to user-local bin dirs that may not be in the Next.js server PATH,
  * so we check common locations explicitly.

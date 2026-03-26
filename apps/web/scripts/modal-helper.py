@@ -36,6 +36,20 @@ def _find_modal() -> str:
         "/usr/local/bin/modal",
         "/opt/homebrew/bin/modal",
     ]
+    # Windows: check Scripts directory next to the Python executable
+    if sys.platform == "win32":
+        import sysconfig
+        scripts_dir = sysconfig.get_path("scripts")
+        if scripts_dir:
+            candidates.insert(0, os.path.join(scripts_dir, "modal.exe"))
+        # Also check common Windows pip install locations
+        local_python = os.path.join(home, "AppData", "Local", "Python")
+        if os.path.isdir(local_python):
+            for d in os.listdir(local_python):
+                s = os.path.join(local_python, d, "Scripts", "modal.exe")
+                candidates.append(s)
+        candidates.append(os.path.join(home, "AppData", "Local", "Programs", "Python", "Scripts", "modal.exe"))
+        candidates.append(os.path.join(home, "AppData", "Roaming", "Python", "Scripts", "modal.exe"))
     for p in candidates:
         if os.path.isfile(p):
             return p
@@ -53,9 +67,9 @@ def _save_log(plugin_dir: str, content: str, label: str = "deploy"):
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     log_path = os.path.join(plugin_dir, f"logs-{label}-{ts}.txt")
     latest_path = os.path.join(plugin_dir, "modal-latest.log")
-    with open(log_path, "w") as f:
+    with open(log_path, "w", encoding="utf-8") as f:
         f.write(content)
-    with open(latest_path, "w") as f:
+    with open(latest_path, "w", encoding="utf-8") as f:
         f.write(content)
     return log_path
 
@@ -69,7 +83,7 @@ def cmd_deploy(plugin_dir: str, gpu: str, app_name: str):
 
     # Write initial log entry
     latest_path = os.path.join(plugin_dir, "modal-latest.log")
-    with open(latest_path, "w") as f:
+    with open(latest_path, "w", encoding="utf-8") as f:
         f.write(f"[{datetime.now().isoformat()}] Deploying to Modal with GPU={gpu}...\n")
 
     env = {**os.environ, "FLOWSCALE_GPU": gpu, "FLOWSCALE_APP_NAME": app_name, "PYTHONIOENCODING": "utf-8"}
@@ -80,12 +94,14 @@ def cmd_deploy(plugin_dir: str, gpu: str, app_name: str):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
             cwd=plugin_dir,
         )
 
         all_output = []
-        with open(latest_path, "a") as log_f:
+        with open(latest_path, "a", encoding="utf-8") as log_f:
             for line in iter(proc.stdout.readline, ""):
                 all_output.append(line)
                 log_f.write(line)
@@ -154,8 +170,8 @@ def cmd_deploy(plugin_dir: str, gpu: str, app_name: str):
 def cmd_undeploy(app_name: str):
     """Stop and delete a Modal app."""
     try:
-        subprocess.run([MODAL_BIN, "app", "stop", app_name], capture_output=True, text=True, timeout=30)
-        subprocess.run([MODAL_BIN, "app", "delete", app_name, "--yes"], capture_output=True, text=True, timeout=30)
+        subprocess.run([MODAL_BIN, "app", "stop", app_name], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+        subprocess.run([MODAL_BIN, "app", "delete", app_name, "--yes"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
         _json_out({"success": True})
     except Exception as e:
         _json_out({"success": False, "error": str(e)})
@@ -197,7 +213,7 @@ def cmd_logs(plugin_dir: str, app_name: str = ""):
     latest_path = os.path.join(plugin_dir, "modal-latest.log")
     deploy_logs = ""
     if os.path.exists(latest_path):
-        with open(latest_path, "r") as f:
+        with open(latest_path, "r", encoding="utf-8") as f:
             deploy_logs = f.read()
 
     # Runtime logs from Modal CLI (streams forever — grab what we can in 3s)
@@ -208,6 +224,7 @@ def cmd_logs(plugin_dir: str, app_name: str = ""):
             proc = subprocess.Popen(
                 [MODAL_BIN, "app", "logs", app_name],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                encoding="utf-8", errors="replace",
             )
             lines = []
             import time
@@ -297,34 +314,39 @@ def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-mod
                 model_files.append((full, rel))
 
     if not model_files:
-        _json_out({"success": True, "synced": 0, "message": "No model files found"})
+        if not silent:
+            _json_out({"success": True, "synced": 0, "message": "No model files found"})
         return
 
     total = len(model_files)
     synced = 0
     errors = []
 
+    # When silent=True (called from deploy), write progress to stderr to avoid
+    # contaminating the JSON output on stdout.
+    _log = (lambda msg: print(msg, file=sys.stderr, flush=True)) if silent else (lambda msg: print(msg, flush=True))
+
     for i, (full_path, rel_path) in enumerate(model_files, 1):
         size_mb = os.path.getsize(full_path) / 1024 / 1024
-        print(f"[{i}/{total}] Uploading {rel_path} ({size_mb:.0f} MB)...", flush=True)
+        _log(f"[{i}/{total}] Uploading {rel_path} ({size_mb:.0f} MB)...")
         try:
             result = subprocess.run(
                 [MODAL_BIN, "volume", "put", "--force", volume_name, full_path, rel_path],
-                capture_output=True, text=True, timeout=600,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
             )
             if result.returncode == 0:
                 synced += 1
-                print(f"  Done.", flush=True)
+                _log(f"  Done.")
             else:
                 err = result.stderr.strip() or f"Exit code {result.returncode}"
                 errors.append(f"{rel_path}: {err}")
-                print(f"  Failed: {err}", flush=True)
+                _log(f"  Failed: {err}")
         except subprocess.TimeoutExpired:
             errors.append(f"{rel_path}: upload timed out")
-            print(f"  Timed out.", flush=True)
+            _log(f"  Timed out.")
         except Exception as e:
             errors.append(f"{rel_path}: {e}")
-            print(f"  Error: {e}", flush=True)
+            _log(f"  Error: {e}")
 
     if not silent:
         _json_out({"success": len(errors) == 0, "synced": synced, "total": total, "errors": errors})
@@ -563,11 +585,11 @@ def cmd_deploy_comfyui(config_source: str, gpu: str, app_name: str):
     tmp_dir = tempfile.mkdtemp(prefix="flowscale-comfyui-")
     modal_app_path = os.path.join(tmp_dir, "comfyui_modal_app.py")
     try:
-        with open(modal_app_path, "w") as f:
+        with open(modal_app_path, "w", encoding="utf-8") as f:
             f.write(app_content)
 
         latest_path = os.path.join(tmp_dir, "modal-latest.log")
-        with open(latest_path, "w") as f:
+        with open(latest_path, "w", encoding="utf-8") as f:
             f.write(f"[{datetime.now().isoformat()}] Deploying ComfyUI to Modal with GPU={gpu}...\n")
 
         env = {**os.environ, "FLOWSCALE_GPU": gpu, "FLOWSCALE_APP_NAME": app_name, "PYTHONIOENCODING": "utf-8"}
@@ -576,12 +598,14 @@ def cmd_deploy_comfyui(config_source: str, gpu: str, app_name: str):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
             cwd=tmp_dir,
         )
 
         all_output = []
-        with open(latest_path, "a") as log_f:
+        with open(latest_path, "a", encoding="utf-8") as log_f:
             for line in iter(proc.stdout.readline, ""):
                 all_output.append(line)
                 log_f.write(line)
@@ -605,7 +629,7 @@ def cmd_deploy_comfyui(config_source: str, gpu: str, app_name: str):
         # Auto-sync models from local ComfyUI to Volume after deploy
         comfyui_path = config.get("comfyuiPath", "")
         if comfyui_path and os.path.isdir(os.path.join(comfyui_path, "models")):
-            with open(latest_path, "a") as log_f:
+            with open(latest_path, "a", encoding="utf-8") as log_f:
                 log_f.write("\n[Syncing models to Modal Volume...]\n")
             cmd_sync_models(comfyui_path, silent=True)
 
