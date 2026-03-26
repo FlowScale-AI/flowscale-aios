@@ -56,12 +56,10 @@ def _resolve_gpu(gpu_str: str):
     timeout=7200,
 )
 class LoRATrainer:
-    def __init__(self):
-        self._jobs: dict[str, dict] = {}
-        self._lock = threading.Lock()
-
     @modal.enter()
     def setup(self):
+        self._jobs: dict[str, dict] = {}
+        self._lock = threading.Lock()
         print("LoRA Trainer container ready.")
 
     def _new_job(self, job_id: str) -> dict:
