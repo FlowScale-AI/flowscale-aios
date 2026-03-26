@@ -262,6 +262,220 @@ describe('normalizeWorkflow', () => {
     const result = normalizeWorkflow(simpleGraph as any, objectInfoMap)
     expect(result['1'].inputs.text).toBe('hello world')
   })
+
+  it('handles TensorArt-injected extra widget values in LoraLoader', () => {
+    // TensorArt prepends a numeric ID and display name before the real widget values
+    const tensorArtGraph = {
+      nodes: [
+        {
+          id: 38,
+          type: 'LoraLoader',
+          inputs: [
+            { name: 'model', type: 'MODEL', link: 58 },
+            { name: 'clip', type: 'CLIP', link: 59 },
+          ],
+          // TensorArt injects: [tensorart_id, display_name, ...real_values]
+          widgets_values: ['764836094031419103', 'XLabs Flux Realism LoRA - v1.0', 1, 1],
+        },
+        {
+          id: 30,
+          type: 'CheckpointLoaderSimple',
+          inputs: [],
+          // TensorArt injects: [tensorart_id, display_name]
+          widgets_values: ['757279507095956705', 'FLUX.1 - dev-fp8'],
+        },
+      ],
+      links: [
+        [58, 30, 0, 38, 0, 'MODEL'],
+        [59, 30, 1, 38, 1, 'CLIP'],
+      ],
+    }
+    const result = normalizeWorkflow(tensorArtGraph as any)
+    // LoraLoader should map correctly despite the 2 extra prepended values
+    expect(result['38'].inputs.strength_model).toBe(1)
+    expect(result['38'].inputs.strength_clip).toBe(1)
+    // The lora_name gets the display name (best match at offset 2, since offset 1 would
+    // assign the numeric ID to lora_name which is also valid — either way, strength_model
+    // must NOT be a string)
+    expect(typeof result['38'].inputs.strength_model).toBe('number')
+    // CheckpointLoaderSimple: ckpt_name should be the display name, not the numeric ID
+    expect(result['30'].inputs.ckpt_name).toBe('FLUX.1 - dev-fp8')
+  })
+
+  it('handles standard (non-TensorArt) LoraLoader widgets unchanged', () => {
+    const normalGraph = {
+      nodes: [
+        {
+          id: 10,
+          type: 'LoraLoader',
+          inputs: [
+            { name: 'model', type: 'MODEL', link: 1 },
+            { name: 'clip', type: 'CLIP', link: 2 },
+          ],
+          widgets_values: ['my_lora.safetensors', 0.8, 0.5],
+        },
+        {
+          id: 11,
+          type: 'CheckpointLoaderSimple',
+          inputs: [],
+          widgets_values: ['model.safetensors'],
+        },
+      ],
+      links: [
+        [1, 11, 0, 10, 0, 'MODEL'],
+        [2, 11, 1, 10, 1, 'CLIP'],
+      ],
+    }
+    const result = normalizeWorkflow(normalGraph as any)
+    expect(result['10'].inputs.lora_name).toBe('my_lora.safetensors')
+    expect(result['10'].inputs.strength_model).toBe(0.8)
+    expect(result['10'].inputs.strength_clip).toBe(0.5)
+  })
+
+  it('sanitizes stale LoRA display name strings in numeric param positions (ComfyUI-resaved workflows)', () => {
+    // ComfyUI + LoRA manager extensions can inject display name strings into
+    // strength_model position: ['lora.safetensors', 'Display Name', 1]
+    const graph = {
+      nodes: [
+        {
+          id: 10,
+          type: 'LoraLoader',
+          inputs: [
+            { name: 'model', type: 'MODEL', link: 1 },
+            { name: 'clip', type: 'CLIP', link: 2 },
+          ],
+          widgets_values: ['more_details.safetensors', 'XLabs Flux Realism LoRA - v1.0', 1],
+        },
+        {
+          id: 11,
+          type: 'CheckpointLoaderSimple',
+          inputs: [],
+          widgets_values: ['model.safetensors'],
+        },
+      ],
+      links: [
+        [1, 11, 0, 10, 0, 'MODEL'],
+        [2, 11, 1, 10, 1, 'CLIP'],
+      ],
+    }
+    const result = normalizeWorkflow(graph as any)
+    expect(result['10'].inputs.lora_name).toBe('more_details.safetensors')
+    // strength_model should be sanitized to a number, not the display name string
+    expect(typeof result['10'].inputs.strength_model).toBe('number')
+    expect(result['10'].inputs.strength_model).toBe(1.0)
+    expect(result['10'].inputs.strength_clip).toBe(1)
+  })
+
+  it('skips bypassed nodes (mode=4) and rewires links through them', () => {
+    // Node 50 is bypassed (mode=4), its inputs come from node 49,
+    // its outputs feed into node 31 and node 41
+    const graph = {
+      nodes: [
+        {
+          id: 49,
+          type: 'LoraLoader',
+          mode: 0,
+          inputs: [
+            { name: 'model', type: 'MODEL', link: 75 },
+            { name: 'clip', type: 'CLIP', link: 76 },
+          ],
+          widgets_values: ['lora.safetensors', 1, 1],
+        },
+        {
+          id: 50,
+          type: 'LoraLoader',
+          mode: 4, // bypassed
+          inputs: [
+            { name: 'model', type: 'MODEL', link: 80 },
+            { name: 'clip', type: 'CLIP', link: 81 },
+          ],
+          widgets_values: ['', '', 1],
+        },
+        {
+          id: 31,
+          type: 'KSampler',
+          mode: 0,
+          inputs: [
+            { name: 'model', type: 'MODEL', link: 82 },
+            { name: 'positive', type: 'CONDITIONING', link: 57 },
+            { name: 'negative', type: 'CONDITIONING', link: 68 },
+            { name: 'latent_image', type: 'LATENT', link: 51 },
+          ],
+          widgets_values: [42, 'randomize', 20, 1, 'euler', 'normal', 1],
+        },
+        {
+          id: 41,
+          type: 'CLIPTextEncode',
+          mode: 0,
+          inputs: [{ name: 'clip', type: 'CLIP', link: 83 }],
+          widgets_values: ['hello'],
+        },
+        {
+          id: 30,
+          type: 'CheckpointLoaderSimple',
+          mode: 0,
+          inputs: [],
+          widgets_values: ['model.safetensors'],
+        },
+      ],
+      links: [
+        // 30 → 49 (model, clip)
+        [75, 30, 0, 49, 0, 'MODEL'],
+        [76, 30, 1, 49, 1, 'CLIP'],
+        // 49 → 50 (model, clip)  — bypassed node
+        [80, 49, 0, 50, 0, 'MODEL'],
+        [81, 49, 1, 50, 1, 'CLIP'],
+        // 50 → 31 (model) and 50 → 41 (clip)
+        [82, 50, 0, 31, 0, 'MODEL'],
+        [83, 50, 1, 41, 0, 'CLIP'],
+      ],
+    }
+    const result = normalizeWorkflow(graph as any)
+    // Bypassed node 50 should not exist in output
+    expect(result['50']).toBeUndefined()
+    // Node 31 should reference node 49 (bypass rewired), not node 50
+    expect(result['31'].inputs.model).toEqual(['49', 0])
+    // Node 41 should reference node 49's CLIP output (slot 1)
+    expect(result['41'].inputs.clip).toEqual(['49', 1])
+  })
+
+  it('skips muted nodes (mode=2)', () => {
+    const graph = {
+      nodes: [
+        { id: 1, type: 'CLIPTextEncode', mode: 0, inputs: [], widgets_values: ['hello'] },
+        { id: 2, type: 'CLIPTextEncode', mode: 2, inputs: [], widgets_values: ['muted'] },
+      ],
+      links: [],
+    }
+    const result = normalizeWorkflow(graph as any)
+    expect(result['1']).toBeDefined()
+    expect(result['2']).toBeUndefined()
+  })
+
+  it('resolves FluxGuidance guidance param from static table', () => {
+    const graph = {
+      nodes: [
+        {
+          id: 35,
+          type: 'FluxGuidance',
+          mode: 0,
+          inputs: [{ name: 'conditioning', type: 'CONDITIONING', link: 70 }],
+          widgets_values: [3.5],
+        },
+        {
+          id: 42,
+          type: 'CLIPTextEncode',
+          mode: 0,
+          inputs: [],
+          widgets_values: ['a prompt'],
+        },
+      ],
+      links: [[70, 42, 0, 35, 0, 'CONDITIONING']],
+    }
+    const result = normalizeWorkflow(graph as any)
+    expect(result['35'].inputs.guidance).toBe(3.5)
+    expect(result['35'].inputs.conditioning).toEqual(['42', 0])
+  })
 })
 
 // ── analyzeWorkflow ──────────────────────────────────────────────────────────

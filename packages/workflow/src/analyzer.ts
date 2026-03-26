@@ -208,6 +208,7 @@ const GRAPH_WIDGET_PARAMS: Record<string, Array<string | null>> = {
   ModelSamplingAuraFlow: ['shift'],
   ModelSamplingSD3: ['shift'],
   ModelSamplingFlux: ['max_shift', 'base_shift'],
+  FluxGuidance: ['guidance'],
 
   // ControlNet
   ControlNetApply: ['strength'],
@@ -244,6 +245,7 @@ interface GraphNodeInput {
 interface GraphNode {
   id: number
   type: string
+  mode?: number // 0 = active, 2 = muted, 4 = bypassed
   inputs?: GraphNodeInput[]
   widgets_values?: unknown[]
   properties?: Record<string, unknown>
@@ -283,6 +285,121 @@ function isApiFormat(json: unknown): boolean {
 // UI-only node types that have no ComfyUI backend — skip during conversion & queuing
 const UI_ONLY_NODES = new Set(['Note', 'PrimitiveNode', 'Reroute', 'MarkdownNote'])
 
+/**
+ * Detect how many extra widget values have been prepended by third-party
+ * extensions (e.g. TensorArt injects a numeric ID string and a display-name
+ * string before each loader node's real widget values).
+ *
+ * Strategy: if widgets_values is longer than widgetParams, check whether the
+ * leading surplus values look like TensorArt-injected entries (numeric-string
+ * IDs or extra string labels before a param that expects a number).
+ */
+function detectWidgetOffset(
+  widgetParams: Array<string | null>,
+  widgetsValues: unknown[]
+): number {
+  const surplus = widgetsValues.length - widgetParams.length
+  if (surplus <= 0) return 0
+
+  // Quick check: TensorArt typically injects 2 extra values (ID + display name)
+  // per loader node — both are strings, and the first is a long numeric string.
+  // Verify the first surplus value is a numeric-string ID.
+  const first = widgetsValues[0]
+  if (typeof first === 'string' && /^\d{6,}$/.test(first)) {
+    return surplus
+  }
+
+  // Fallback: scan for the offset where types align best with the param list.
+  let bestOffset = 0
+  let bestScore = -1
+  for (let off = 0; off <= surplus; off++) {
+    let score = 0
+    for (let i = 0; i < widgetParams.length; i++) {
+      const name = widgetParams[i]
+      if (name === null) continue
+      const vi = off + i
+      if (vi >= widgetsValues.length) break
+      const val = widgetsValues[vi]
+      if (typeof val === 'number' && /strength|cfg|denoise|shift|scale|ratio|steps|seed|width|height|batch/i.test(name)) {
+        score += 2
+      }
+      if (typeof val === 'string' && /name|file|text|image|model|path|prefix/i.test(name)) {
+        score += 1
+      }
+      if (typeof val === 'string' && /strength|cfg|denoise|shift|scale|ratio/i.test(name)) {
+        score -= 3
+      }
+    }
+    if (score > bestScore) {
+      bestScore = score
+      bestOffset = off
+    }
+  }
+  return bestOffset
+}
+
+/**
+ * Get the expected type and default value for a named input from /object_info.
+ * Returns null if not found.
+ */
+function getInputSpecFromInfo(
+  nodeType: string,
+  paramName: string,
+  info: ObjectInfoMap
+): { expectedType: string; defaultValue?: unknown } | null {
+  const nodeDef = info[nodeType]
+  if (!nodeDef?.input) return null
+  const allInputs = { ...nodeDef.input.required, ...nodeDef.input.optional }
+  const spec = allInputs[paramName]
+  if (!spec) return null
+  const type = Array.isArray(spec[0]) ? 'COMBO' : String(spec[0])
+  const defaultValue = spec[1]?.default
+  return { expectedType: type, defaultValue }
+}
+
+/** Param names that are known to be numeric (FLOAT/INT) in ComfyUI. */
+const NUMERIC_PARAMS = /^(strength_model|strength_clip|strength|cfg|denoise|shift|max_shift|base_shift|scale|ratio|steps|seed|width|height|batch_size|start_percent|end_percent|start_at_step|end_at_step|guidance|blur_sigma|grow_mask_by|feather|x|y|b1|b2|s1|s2|block_number|downscale_factor|stop_at_clip_layer|noise_augmentation|tile_size|overlap|temporal_size|temporal_overlap|zIndex)$/
+
+/**
+ * Sanitize a widget value against its expected type.
+ *
+ * Uses /object_info when available for precise type checking. Falls back to
+ * param-name heuristics so sanitization still works without a live ComfyUI
+ * (e.g. Modal cold-start timeout, offline builds).
+ *
+ * Catches stale display-name strings injected by LoRA/checkpoint manager
+ * extensions into positions that expect FLOAT/INT.
+ */
+function sanitizeWidgetValue(
+  value: unknown,
+  paramName: string,
+  nodeType: string,
+  objectInfoMap?: ObjectInfoMap
+): unknown {
+  if (value === undefined || value === null) return value
+
+  // Strategy 1: Use /object_info for precise type checking
+  if (objectInfoMap) {
+    const spec = getInputSpecFromInfo(nodeType, paramName, objectInfoMap)
+    if (spec && (spec.expectedType === 'FLOAT' || spec.expectedType === 'INT') && typeof value === 'string') {
+      const num = Number(value)
+      if (!isNaN(num) && value.trim() !== '') return num
+      return spec.defaultValue ?? (spec.expectedType === 'FLOAT' ? 1.0 : 0)
+    }
+    return value
+  }
+
+  // Strategy 2: Fallback — use param name patterns when object_info unavailable
+  if (typeof value === 'string' && NUMERIC_PARAMS.test(paramName)) {
+    const num = Number(value)
+    if (!isNaN(num) && value.trim() !== '') return num
+    // Non-numeric string in a numeric param — use sensible default
+    return paramName === 'seed' ? 0 : 1.0
+  }
+
+  return value
+}
+
 /** Convert graph-format workflow to API format.
  *  Pass objectInfoMap (from ComfyUI GET /object_info) for dynamic widget-param
  *  resolution; falls back to the static GRAPH_WIDGET_PARAMS table otherwise. */
@@ -294,9 +411,45 @@ function graphToApi(graph: GraphFormat, objectInfoMap?: ObjectInfoMap): ComfyUIW
     linkMap.set(linkId, [String(fromNodeId), fromSlot])
   }
 
+  // Bypassed nodes (mode=4) pass inputs through to outputs slot-by-slot.
+  // Rewire the linkMap so downstream nodes reference the bypassed node's upstream source.
+  const bypassedIds = new Set(
+    graph.nodes.filter(n => n.mode === 4).map(n => n.id)
+  )
+  if (bypassedIds.size > 0) {
+    // Build a map: bypassed nodeId → { outputSlot → [upstreamNodeId, upstreamSlot] }
+    const bypassInputSources = new Map<number, Map<number, [string, number]>>()
+    for (const node of graph.nodes) {
+      if (!bypassedIds.has(node.id)) continue
+      // For each linked input on a bypassed node, find where it comes from.
+      // Input slot index maps to output slot index (pass-through).
+      const sources = new Map<number, [string, number]>()
+      let linkedSlot = 0
+      for (const inp of node.inputs ?? []) {
+        if (inp.link != null && linkMap.has(inp.link)) {
+          sources.set(linkedSlot, linkMap.get(inp.link)!)
+          linkedSlot++
+        }
+      }
+      bypassInputSources.set(node.id, sources)
+    }
+
+    // Rewrite linkMap entries that point at bypassed nodes
+    for (const [linkId, [fromNodeStr, fromSlot]] of linkMap) {
+      const fromNodeId = Number(fromNodeStr)
+      if (!bypassedIds.has(fromNodeId)) continue
+      const sources = bypassInputSources.get(fromNodeId)
+      if (sources?.has(fromSlot)) {
+        linkMap.set(linkId, sources.get(fromSlot)!)
+      }
+    }
+  }
+
   const api: ComfyUIWorkflow = {}
   for (const node of graph.nodes) {
     if (UI_ONLY_NODES.has(node.type)) continue
+    // Skip muted (mode=2) and bypassed (mode=4) nodes — ComfyUI won't execute them
+    if (node.mode === 2 || node.mode === 4) continue
 
     const inputs: Record<string, unknown> = {}
 
@@ -312,10 +465,15 @@ function graphToApi(graph: GraphFormat, objectInfoMap?: ObjectInfoMap): ComfyUIW
       (objectInfoMap && buildWidgetParamsFromInfo(node.type, objectInfoMap)) ??
       GRAPH_WIDGET_PARAMS[node.type]
     if (widgetParams && node.widgets_values) {
+      // Detect extra prepended values from extensions (e.g. TensorArt IDs)
+      const offset = detectWidgetOffset(widgetParams, node.widgets_values)
       widgetParams.forEach((name, i) => {
+        const vi = offset + i
         // Don't overwrite a value already set by link wiring
-        if (name !== null && !(name in inputs) && i < node.widgets_values!.length) {
-          inputs[name] = node.widgets_values![i]
+        if (name !== null && !(name in inputs) && vi < node.widgets_values!.length) {
+          inputs[name] = sanitizeWidgetValue(
+            node.widgets_values![vi], name, node.type, objectInfoMap
+          )
         }
       })
     }

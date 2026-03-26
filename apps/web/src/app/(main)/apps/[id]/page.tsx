@@ -177,10 +177,14 @@ function inferKind(filename: string): 'image' | 'video' | 'audio' | 'model' | 'f
 }
 
 function resolveOutputUrl(out: Exclude<OutputItem, { kind: 'text' }>, comfyPort?: number | null): string {
-  if (!out.path) return `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename || '')}&type=output`
-  if (out.path.startsWith('/')) return out.path
-  const subfolder = out.path.includes('/') ? out.path.substring(0, out.path.lastIndexOf('/')) : ''
-  return `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}${subfolder ? `&subfolder=${encodeURIComponent(subfolder)}` : ''}&type=output`
+  // Prefer saved local path (set by saveOutputsToDisk after execution completes)
+  if (out.path?.startsWith('/')) return out.path
+  // Standard ComfyUI proxy URL
+  if (out.path && !out.path.startsWith('/')) {
+    const subfolder = out.path.includes('/') ? out.path.substring(0, out.path.lastIndexOf('/')) : ''
+    return `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename)}${subfolder ? `&subfolder=${encodeURIComponent(subfolder)}` : ''}&type=output`
+  }
+  return `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(out.filename || '')}&type=output`
 }
 
 function OutputLightbox({
@@ -264,11 +268,23 @@ function OutputGrid({ outputs, comfyPort }: { outputs: OutputItem[]; comfyPort?:
             )
           }
           const url = resolveOutputUrl(out, comfyPort)
-          const open = () => setLightbox({ item: out, url })
+          // Show loading placeholder while waiting for disk-saved path (e.g. Modal outputs)
+          const isSaving = !out.path?.startsWith('/') && (!comfyPort || url.includes('/null/'))
+          const open = () => !isSaving && setLightbox({ item: out, url })
           if (out.kind === 'image') return (
             <div key={i} className={cardClass} onClick={open}>
               <div className="h-36 bg-zinc-950 overflow-hidden">
-                <BlurRevealImage src={url} alt={out.filename} />
+                {isSaving ? (
+                  <div className="w-full h-full flex items-center justify-center relative">
+                    <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 to-zinc-950 animate-pulse" />
+                    <div className="relative flex flex-col items-center gap-1.5">
+                      <LottieSpinner size={20} />
+                      <span className="text-[10px] text-zinc-600">Saving output…</span>
+                    </div>
+                  </div>
+                ) : (
+                  <BlurRevealImage src={url} alt={out.filename} />
+                )}
               </div>
               <div className="px-3 py-2 border-t border-white/5">
                 <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
@@ -277,7 +293,13 @@ function OutputGrid({ outputs, comfyPort }: { outputs: OutputItem[]; comfyPort?:
           )
           if (out.kind === 'video') return (
             <div key={i} className={cardClass} onClick={open}>
-              <video src={url} className="w-full aspect-video bg-zinc-950" />
+              {isSaving ? (
+                <div className="w-full aspect-video bg-zinc-950 flex items-center justify-center">
+                  <LottieSpinner size={20} />
+                </div>
+              ) : (
+                <video src={url} className="w-full aspect-video bg-zinc-950" />
+              )}
               <div className="px-3 py-2 border-t border-white/5">
                 <p className="text-[11px] text-zinc-500 truncate">{out.filename}</p>
               </div>
@@ -930,6 +952,7 @@ export default function ToolPage() {
 
   const [leftTab, setLeftTab] = useState<'form' | 'nodejs' | 'http'>('form')
   const [latestOutputs, setLatestOutputs] = useState<OutputItem[]>([])
+  const [latestExecId, setLatestExecId] = useState<string | null>(null)
   const sseRef = useRef<EventSource | null>(null)
   // Track the execution we kicked off (for ComfyUI SSE/polling only)
   const comfyRunRef = useRef<{ executionId: string; promptId: string; comfyPort: number; done: boolean; pollInterval?: ReturnType<typeof setInterval> | undefined } | null>(null)
@@ -955,6 +978,28 @@ export default function ToolPage() {
         try {
           const items = JSON.parse(finished.outputsJson) as OutputItem[]
           setLatestOutputs(items)
+          // Poll for saved disk paths — saveOutputsToDisk downloads files asynchronously
+          // after the PATCH, so outputsJson may not have `path` fields yet.
+          const hasPath = items.some((it: OutputItem) => 'path' in it && (it as { path?: string }).path?.startsWith('/'))
+          if (!hasPath && prevId) {
+            let attempts = 0
+            const poll = setInterval(async () => {
+              attempts++
+              try {
+                const res = await fetch(`/api/executions/${prevId}`)
+                if (!res.ok) return
+                const exec = await res.json()
+                if (exec?.outputsJson) {
+                  const saved = JSON.parse(exec.outputsJson) as OutputItem[]
+                  if (saved.some((s: OutputItem) => 'path' in s && (s as { path?: string }).path?.startsWith('/'))) {
+                    setLatestOutputs(saved)
+                    clearInterval(poll)
+                  }
+                }
+              } catch { /* ignore */ }
+              if (attempts >= 10) clearInterval(poll)
+            }, 2000)
+          }
         } catch { /* ignore */ }
       }
     }
