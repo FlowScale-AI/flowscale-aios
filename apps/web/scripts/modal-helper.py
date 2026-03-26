@@ -304,9 +304,13 @@ def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-mod
     synced = 0
     errors = []
 
+    def _log(msg: str):
+        if not silent:
+            print(msg, flush=True)
+
     for i, (full_path, rel_path) in enumerate(model_files, 1):
         size_mb = os.path.getsize(full_path) / 1024 / 1024
-        print(f"[{i}/{total}] Uploading {rel_path} ({size_mb:.0f} MB)...", flush=True)
+        _log(f"[{i}/{total}] Uploading {rel_path} ({size_mb:.0f} MB)...")
         try:
             result = subprocess.run(
                 [MODAL_BIN, "volume", "put", "--force", volume_name, full_path, rel_path],
@@ -314,17 +318,17 @@ def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-mod
             )
             if result.returncode == 0:
                 synced += 1
-                print(f"  Done.", flush=True)
+                _log(f"  Done.")
             else:
                 err = result.stderr.strip() or f"Exit code {result.returncode}"
                 errors.append(f"{rel_path}: {err}")
-                print(f"  Failed: {err}", flush=True)
+                _log(f"  Failed: {err}")
         except subprocess.TimeoutExpired:
             errors.append(f"{rel_path}: upload timed out")
-            print(f"  Timed out.", flush=True)
+            _log(f"  Timed out.")
         except Exception as e:
             errors.append(f"{rel_path}: {e}")
-            print(f"  Error: {e}", flush=True)
+            _log(f"  Error: {e}")
 
     if not silent:
         _json_out({"success": len(errors) == 0, "synced": synced, "total": total, "errors": errors})
