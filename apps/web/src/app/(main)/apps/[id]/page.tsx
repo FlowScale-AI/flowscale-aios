@@ -1347,23 +1347,25 @@ export default function ToolPage() {
             )}
           </div>
         )}
-        <button
-          onClick={() => runMutation.mutate()}
-          disabled={isRunning || (tool.engine === 'comfyui' && selectedProvider !== 'modal' && runningInstances.length === 0 && !effectiveComfyPort)}
-          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
-        >
-          {isRunning ? (
-            <>
-              <LottieSpinner size={14} />
-              Running…
-            </>
-          ) : (
-            <>
-              <Play size={14} weight="fill" />
-              Run
-            </>
-          )}
-        </button>
+        {!isTrainingTool && (
+          <button
+            onClick={() => runMutation.mutate()}
+            disabled={isRunning || (tool.engine === 'comfyui' && selectedProvider !== 'modal' && runningInstances.length === 0 && !effectiveComfyPort)}
+            className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
+          >
+            {isRunning ? (
+              <>
+                <LottieSpinner size={14} />
+                Running…
+              </>
+            ) : (
+              <>
+                <Play size={14} weight="fill" />
+                Run
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Error banner */}
