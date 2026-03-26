@@ -166,14 +166,22 @@ def train(config: dict) -> dict:
                 "error": f"No .safetensors found. Files: {[str(f.relative_to(output_dir)) for f in all_files[:20]]}",
             }
 
+        # Find the latest sample image (highest step number)
+        all_samples = sorted(output_dir.rglob("samples/*.jpg")) + sorted(output_dir.rglob("samples/*.png"))
+        sample_path = all_samples[-1] if all_samples else None
+
         # Commit Volume writes so they're visible to `modal volume get`
         outputs_volume.commit()
 
-        # Return path relative to volume root (strip /outputs/ mount prefix)
-        output_volume_path = str(lora_path)
-        if output_volume_path.startswith("/outputs/"):
-            output_volume_path = output_volume_path[len("/outputs/"):]
-        return {"status": "completed", "outputVolumePath": output_volume_path}
+        # Return paths relative to volume root (strip /outputs/ mount prefix)
+        def _vol_path(p: Path) -> str:
+            s = str(p)
+            return s[len("/outputs/"):] if s.startswith("/outputs/") else s
+
+        result = {"status": "completed", "outputVolumePath": _vol_path(lora_path)}
+        if sample_path:
+            result["sampleVolumePath"] = _vol_path(sample_path)
+        return result
 
     except Exception as exc:
         return {"status": "failed", "error": str(exc)}

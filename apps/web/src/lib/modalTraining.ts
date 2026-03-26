@@ -35,6 +35,7 @@ export interface TrainingResult {
   success: boolean
   status?: string
   outputVolumePath?: string
+  sampleVolumePath?: string
   error?: string
 }
 
@@ -213,6 +214,32 @@ export async function downloadTrainingOutput(
   } catch { /* non-fatal */ }
 
   return { localPath: destPath, apiPath: `/api/outputs/${toolId}/${destFilename}`, lorasCopyPath }
+}
+
+/**
+ * Download sample image from Modal Volume.
+ */
+export async function downloadSampleImage(
+  volumePath: string,
+  toolId: string,
+  executionId: string,
+): Promise<string | null> {
+  try {
+    const toolDir = join(API_OUTPUTS_DIR, toolId)
+    mkdirSync(toolDir, { recursive: true })
+    const ext = volumePath.endsWith('.png') ? 'png' : 'jpg'
+    const destFilename = `${executionId.slice(0, 8)}_sample.${ext}`
+    const destPath = join(toolDir, destFilename)
+
+    const args = ['download-training-output', OUTPUTS_VOLUME, volumePath, destPath]
+    const result = await runHelper(args)
+    const parsed = JSON.parse(result)
+    if (!parsed.success) return null
+
+    return `/api/outputs/${toolId}/${destFilename}`
+  } catch {
+    return null // non-fatal
+  }
 }
 
 function runHelper(args: string[]): Promise<string> {

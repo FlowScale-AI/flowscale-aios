@@ -16,7 +16,7 @@ import { getPlugin, type ToolPluginManifest } from '@/lib/toolPlugins'
 import { autoRouteComfyPort, trackExecStart, trackExecEnd } from '@/lib/comfyAutoRoute'
 import { getModalDeployUrl, autoRouteModalDeployment } from '@/lib/modal-deploy'
 import { runTraining } from '@/lib/trainingExecution'
-import { syncDatasetToModal, runModalTraining, downloadTrainingOutput, buildTrainingPayload, type TrainingPayload, type TrainingHandle } from '@/lib/modalTraining'
+import { syncDatasetToModal, runModalTraining, downloadTrainingOutput, downloadSampleImage, buildTrainingPayload, type TrainingPayload, type TrainingHandle } from '@/lib/modalTraining'
 import { isModalComfyPort, resolveComfyBaseUrl, getModalComfyByPort } from '@/lib/modal-comfyui'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
@@ -386,14 +386,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 result.outputVolumePath, payload.outputName, toolId, executionId,
               )
 
+              // Download sample image if available
+              let sampleApiPath: string | null = null
+              if (result.sampleVolumePath) {
+                sampleApiPath = await downloadSampleImage(result.sampleVolumePath, toolId, executionId)
+              }
+
+              const outputItems: Array<Record<string, unknown>> = [{
+                kind: 'file',
+                filename: `${executionId.slice(0, 8)}_${payload.outputName}.safetensors`,
+                path: output.apiPath,
+                lorasCopyPath: output.lorasCopyPath,
+              }]
+              if (sampleApiPath) {
+                outputItems.push({ kind: 'image', filename: `${executionId.slice(0, 8)}_sample.jpg`, path: sampleApiPath })
+              }
+
               await db.update(executions).set({
                 status: 'completed',
-                outputsJson: JSON.stringify([{
-                  kind: 'file',
-                  filename: `${executionId.slice(0, 8)}_${payload.outputName}.safetensors`,
-                  path: output.apiPath,
-                  lorasCopyPath: output.lorasCopyPath,
-                }]),
+                outputsJson: JSON.stringify(outputItems),
                 completedAt: Date.now(),
               }).where(eq(executions.id, executionId))
             } else {
