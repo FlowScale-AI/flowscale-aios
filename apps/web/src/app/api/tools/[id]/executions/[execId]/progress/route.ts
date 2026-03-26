@@ -23,25 +23,27 @@ export async function GET(
 
   // Ephemeral modal training (no metadataJson) — progress is written directly to progress_json by the route handler
   if (!metadata) {
-    const progress = exec.progressJson ? JSON.parse(exec.progressJson) as Record<string, unknown> : null
-
-    // Convert progress_json format to SSE events for the TrainingProgress component
     const encoder = new TextEncoder()
     const stream = new ReadableStream({
       async start(controller) {
-        const poll = async () => {
+        while (true) {
           const [latest] = await db.select().from(executions).where(eq(executions.id, execId))
           if (!latest) { controller.close(); return }
 
           const prog = latest.progressJson ? JSON.parse(latest.progressJson) as Record<string, unknown> : null
           if (prog && typeof prog.step === 'number') {
+            // Extract loss, speed, lr from tqdm message (e.g. "9/100 [00:32<03:26, 2.27s/it, lr: 1.0e-04 loss: 8.729e-03]")
+            const msg = (prog.message as string) ?? ''
+            const lossMatch = msg.match(/loss:\s*([\d.e+-]+)/i)
+            const lrMatch = msg.match(/lr:\s*([\d.e+-]+)/i)
+            const speedMatch = msg.match(/([\d.]+)s\/it/i)
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({
               type: 'step',
               step: prog.step,
               total: prog.totalSteps ?? 0,
-              loss: null,
-              speed: null,
-              lr: null,
+              loss: lossMatch ? parseFloat(lossMatch[1]) : null,
+              speed: speedMatch ? 1 / parseFloat(speedMatch[1]) : null,
+              lr: lrMatch ? parseFloat(lrMatch[1]) : null,
             })}\n\n`))
           } else if (prog?.message) {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'log', message: prog.message })}\n\n`))
@@ -58,11 +60,8 @@ export async function GET(
             return
           }
 
-          // Poll again in 3s
           await new Promise(r => setTimeout(r, 3000))
-          await poll()
         }
-        await poll()
       },
     })
 

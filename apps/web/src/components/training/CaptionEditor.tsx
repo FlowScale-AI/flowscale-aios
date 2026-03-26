@@ -28,12 +28,16 @@ export function CaptionEditor({ datasetId, images, onUpdate }: CaptionEditorProp
 
   const selected = images[selectedIdx]
 
-  // Sync localCaptions when images prop changes
+  // Sync localCaptions when images prop changes (e.g. after auto-captioning)
   useEffect(() => {
     setLocalCaptions((prev) => {
       const next: Record<string, string> = {}
       for (const img of images) {
-        next[img.name] = img.name in prev ? prev[img.name] : (img.caption ?? '')
+        const serverCaption = img.caption ?? ''
+        const localValue = prev[img.name]
+        // If user has edited this caption locally (non-empty), keep their edit.
+        // Otherwise use the server value (which includes freshly auto-generated captions).
+        next[img.name] = localValue ? localValue : serverCaption
       }
       return next
     })

@@ -164,7 +164,10 @@ def train(config: dict) -> dict:
         # Commit Volume writes so they're visible to `modal volume get`
         outputs_volume.commit()
 
+        # Return path relative to volume root (strip /outputs/ mount prefix)
         output_volume_path = str(lora_path)
+        if output_volume_path.startswith("/outputs/"):
+            output_volume_path = output_volume_path[len("/outputs/"):]
         return {"status": "completed", "outputVolumePath": output_volume_path}
 
     except Exception as exc:

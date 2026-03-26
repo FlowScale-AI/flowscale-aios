@@ -986,6 +986,27 @@ export default function ToolPage() {
   const [trainingStartTime, setTrainingStartTime] = useState<number>(0)
   const [trainingSteps, setTrainingSteps] = useState<number>(0)
 
+  // Resume training progress if there's a running execution on page load
+  useEffect(() => {
+    if (!isTrainingTool || !tool?.id) return
+    fetch(`/api/tools/${tool.id}/executions`)
+      .then(r => r.json())
+      .then((execs: Array<{ id: string; status: string; inputsJson: string; createdAt: number }>) => {
+        const running = execs.find(e => e.status === 'running')
+        if (running) {
+          try {
+            const inputs = JSON.parse(running.inputsJson) as { outputName?: string; steps?: number }
+            setTrainingExecutionId(running.id)
+            setTrainingOutputName(inputs.outputName ?? '')
+            setTrainingSteps(inputs.steps ?? 0)
+            setTrainingStartTime(running.createdAt)
+            setTrainingState('progress')
+          } catch { /* ignore */ }
+        }
+      })
+      .catch(() => { /* ignore */ })
+  }, [isTrainingTool, tool?.id])
+
   const [leftTab, setLeftTab] = useState<'form' | 'nodejs' | 'http'>('form')
   const [latestOutputs, setLatestOutputs] = useState<OutputItem[]>([])
   const [latestExecId, setLatestExecId] = useState<string | null>(null)
