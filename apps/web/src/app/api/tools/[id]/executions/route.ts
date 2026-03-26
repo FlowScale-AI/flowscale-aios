@@ -388,7 +388,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               if (status === 'completed') {
                 await db.update(executions).set({ progressJson: JSON.stringify({ ...progress, message: 'Downloading trained LoRA...' }) })
                   .where(eq(executions.id, executionId))
-                const output = await downloadTrainingOutput(jobId, payload.outputName, toolId, executionId)
+                const output = await downloadTrainingOutput(capturedModalUrl, jobId, payload.outputName, toolId, executionId)
                 await db.update(executions).set({
                   status: 'completed',
                   outputsJson: JSON.stringify([{

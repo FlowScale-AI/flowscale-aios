@@ -1,7 +1,7 @@
 import { spawn } from 'child_process'
 import { join } from 'path'
 import { homedir } from 'os'
-import { existsSync, copyFileSync, mkdirSync } from 'fs'
+import { existsSync, copyFileSync, mkdirSync, writeFileSync } from 'fs'
 import { getDatasetDir, getDatasetSyncStatus, markDatasetSynced } from './training'
 import { getComfyManagedPath } from './providerSettings'
 
@@ -85,21 +85,27 @@ export async function getModalTrainingProgress(
 }
 
 export async function downloadTrainingOutput(
+  modalUrl: string,
   jobId: string,
   outputName: string,
   toolId: string,
   executionId: string,
 ): Promise<{ localPath: string; apiPath: string; lorasCopyPath: string | null }> {
-  const remotePath = `${jobId}/${outputName}.safetensors`
   const toolDir = join(API_OUTPUTS_DIR, toolId)
   mkdirSync(toolDir, { recursive: true })
   const destFilename = `${executionId.slice(0, 8)}_${outputName}.safetensors`
   const destPath = join(toolDir, destFilename)
 
-  const args = ['download-training-output', OUTPUTS_VOLUME, remotePath, destPath]
-  const result = await runHelper(args)
-  const parsed = JSON.parse(result)
-  if (!parsed.success) throw new Error(parsed.error || 'Download failed')
+  // Download directly from the Modal container via HTTP (file is in container memory)
+  const res = await fetch(`${modalUrl}/download/${jobId}`, {
+    signal: AbortSignal.timeout(300_000), // 5 min for large files
+  })
+  if (!res.ok) {
+    const errText = await res.text().catch(() => `HTTP ${res.status}`)
+    throw new Error(`Failed to download LoRA from Modal: ${errText}`)
+  }
+  const buffer = Buffer.from(await res.arrayBuffer())
+  writeFileSync(destPath, buffer)
 
   let lorasCopyPath: string | null = null
   try {

@@ -151,12 +151,17 @@ class LoRATrainer:
                         return
             proc.wait()
             if proc.returncode == 0:
+                # ai-toolkit may write to a subdirectory — find the .safetensors file
                 lora_path = output_dir / f"{output_name}.safetensors"
-                outputs_volume.commit()
+                if not lora_path.exists():
+                    # Search recursively
+                    found = list(output_dir.rglob("*.safetensors"))
+                    if found:
+                        lora_path = found[-1]  # last one is typically the final checkpoint
                 with self._lock:
                     self._jobs[job_id]["status"] = "completed"
                     self._jobs[job_id]["progress"] = 100
-                    self._jobs[job_id]["outputPath"] = str(lora_path)
+                    self._jobs[job_id]["outputPath"] = str(lora_path) if lora_path.exists() else None
                     self._jobs[job_id]["message"] = "Training complete"
             else:
                 with self._lock:
@@ -209,9 +214,25 @@ class LoRATrainer:
                 job["message"] = "Cancelled by user"
             return JSONResponse({"ok": True, "status": "cancelled"})
 
+        async def download_output(request: Request):
+            """Stream the trained .safetensors file directly from the container."""
+            from starlette.responses import FileResponse
+            job_id = request.path_params["job_id"]
+            with self._lock:
+                job = self._jobs.get(job_id)
+            if job is None:
+                return JSONResponse({"error": "Job not found"}, status_code=404)
+            if job["status"] != "completed" or not job.get("outputPath"):
+                return JSONResponse({"error": "Output not ready"}, status_code=400)
+            output_path = Path(job["outputPath"])
+            if not output_path.exists():
+                return JSONResponse({"error": f"File not found: {output_path}"}, status_code=404)
+            return FileResponse(str(output_path), media_type="application/octet-stream", filename=output_path.name)
+
         return Starlette(routes=[
             Route("/health", health, methods=["GET"]),
             Route("/train", start_train, methods=["POST"]),
             Route("/train/{job_id}/progress", get_progress, methods=["GET"]),
             Route("/train/{job_id}/cancel", cancel_train, methods=["POST"]),
+            Route("/download/{job_id}", download_output, methods=["GET"]),
         ])
