@@ -106,7 +106,7 @@ class LoRATrainer:
                         "noise_scheduler": "flowmatch", "optimizer": "adamw8bit", "lr": lr,
                         "ema_config": {"use_ema": True, "ema_decay": 0.99}, "dtype": "bf16",
                     },
-                    "model": {"name_or_path": model_id, "is_flux": model_id.startswith("FLUX"), "quantize": True},
+                    "model": {"name_or_path": model_id, "is_flux": "flux" in model_id.lower(), "quantize": True},
                     "sample": {
                         "sampler": "flowmatch", "sample_every": max(200, steps // 5),
                         "width": resolution, "height": resolution,
@@ -249,6 +249,17 @@ class LoRATrainer:
                 info["yaml_version"] = r.stdout.strip()
             except Exception as e:
                 info["yaml_version"] = str(e)
+            # Check diffusers
+            try:
+                r = sp.run(["python", "-c", "import diffusers; print(diffusers.__version__); from diffusers import FluxPipeline; print('FluxPipeline OK')"], capture_output=True, text=True, timeout=10)
+                info["diffusers"] = r.stdout.strip() or r.stderr.strip()
+            except Exception as e:
+                info["diffusers"] = str(e)
+            try:
+                r = sp.run(["python", "-c", "import transformers; print(transformers.__version__)"], capture_output=True, text=True, timeout=5)
+                info["transformers"] = r.stdout.strip()
+            except Exception as e:
+                info["transformers"] = str(e)
             # Check datasets volume
             ds_path = Path("/datasets")
             info["datasets_exists"] = ds_path.exists()
