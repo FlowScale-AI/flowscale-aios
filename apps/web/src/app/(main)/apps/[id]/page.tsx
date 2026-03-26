@@ -888,7 +888,15 @@ export default function ToolPage() {
     } catch { return 'flux-dev' as const }
   })()
 
-  const isTrainingTool = tool?.toolType === 'training'
+  const isTrainingTool = tool?.toolType === 'training' || (tool?.engine === 'api' && (() => {
+    try {
+      const wf = JSON.parse(tool.workflowJson ?? '{}')
+      const pluginId = wf.pluginId as string | undefined
+      if (!pluginId) return false
+      // Check if the plugin's server type is 'training' based on plugin ID pattern
+      return pluginId.includes('trainer') || pluginId.includes('training')
+    } catch { return false }
+  })())
 
   // ── GPU/device selection for API tools ────────────────────────────────────────
   const { data: gpuData } = useQuery<{ instances: Array<{ id: string; device: string; label: string }> }>({
@@ -1366,6 +1374,8 @@ export default function ToolPage() {
             <TrainingConfigForm
               toolId={tool.id}
               defaultModel={trainingDefaultModel}
+              provider={selectedProvider}
+              modalDeployId={selectedTarget || undefined}
               onStart={(executionId, jobId, meta) => {
                 setTrainingExecutionId(executionId)
                 setTrainingJobId(jobId)

@@ -419,7 +419,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           }
         })()
 
-        return NextResponse.json({ executionId }, { status: 202 })
+        return NextResponse.json({ id: executionId, executionId, type: 'modal-training' }, { status: 202 })
       }
 
       // ── Local training branch (existing code) ─────────────────────────────

@@ -35,8 +35,8 @@ export function buildTrainingPayload(inputs: Record<string, unknown>): TrainingP
     outputName,
     triggerWord: (inputs['api__triggerWord'] ?? inputs['triggerWord'] ?? 'ohwx') as string,
     steps: Number(inputs['api__steps'] ?? inputs['steps'] ?? 1000),
-    lr: (inputs['api__lr'] ?? inputs['lr'] ?? '1e-4') as string,
-    rank: Number(inputs['api__rank'] ?? inputs['rank'] ?? 128),
+    lr: String(inputs['api__lr'] ?? inputs['lr'] ?? inputs['learningRate'] ?? '1e-4'),
+    rank: Number(inputs['api__rank'] ?? inputs['rank'] ?? inputs['loraRank'] ?? 128),
     resolution: Number(inputs['api__resolution'] ?? inputs['resolution'] ?? 1024),
   }
 }

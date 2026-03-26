@@ -14,12 +14,14 @@ interface DatasetMeta {
 interface TrainingConfigFormProps {
   toolId: string
   defaultModel: 'flux-dev' | 'sdxl'
+  provider?: 'local' | 'modal'
+  modalDeployId?: string
   onStart: (executionId: string, jobId: string, meta: { outputName: string; steps: number }) => void
 }
 
 const LORA_RANKS = [16, 32, 64, 128, 256] as const
 
-export function TrainingConfigForm({ toolId, defaultModel, onStart }: TrainingConfigFormProps) {
+export function TrainingConfigForm({ toolId, defaultModel, provider, modalDeployId, onStart }: TrainingConfigFormProps) {
   const defaultSteps = defaultModel === 'flux-dev' ? 1000 : 800
 
   const [outputName, setOutputName] = useState('')
@@ -67,6 +69,7 @@ export function TrainingConfigForm({ toolId, defaultModel, onStart }: TrainingCo
             loraRank,
             resolution,
           },
+          ...(provider === 'modal' ? { provider: 'modal', modalDeployId: modalDeployId || 'auto' } : {}),
         }),
       })
 
