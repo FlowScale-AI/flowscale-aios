@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Cloud, Spinner, X, Warning } from "phosphor-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useModalComfyInstances } from "@/hooks/useModalComfyInstances";
 import type { ModalComfyInstanceData } from "@/hooks/useModalComfyInstances";
+
+const TAG = "[ModalComfySection]";
 
 const GPU_OPTIONS = [
   { value: "T4", label: "T4 (16 GB)" },
@@ -64,20 +66,50 @@ export function ModalComfySection() {
   // Track which instance IDs are being undeployed
   const [undeployingIds, setUndeployingIds] = useState<Set<string>>(new Set());
 
+  // Log when query data changes
+  useEffect(() => {
+    console.log(
+      TAG,
+      "query data updated — server instances:",
+      instances.map((i) => `${i.id}(${i.status})`),
+    );
+    console.log(
+      TAG,
+      "pendingInstances:",
+      pendingInstances.map((i) => `${i.id}(${i.status})`),
+    );
+    console.log(
+      TAG,
+      "allInstances (merged):",
+      allInstances.map((i) => `${i.id}(${i.status})`),
+    );
+    console.log(TAG, "undeployingIds:", [...undeployingIds]);
+    console.log(TAG, "confirmUndeployId:", confirmUndeployId);
+  }, [data, pendingInstances.length, undeployingIds.size, confirmUndeployId]);
+
   const deployMutation = useMutation({
     mutationFn: async ({ gpu, name }: { gpu: string; name: string }) => {
+      console.log(TAG, `DEPLOY — calling API: name="${name}" gpu="${gpu}"`);
       const res = await fetch("/api/modal/comfyui", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "deploy", gpu, name }),
       });
+      console.log(TAG, `DEPLOY — API responded: status=${res.status}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Deploy failed" }));
+        console.error(TAG, `DEPLOY — API error:`, err);
         throw new Error(err.error);
       }
-      return res.json();
+      const json = await res.json();
+      console.log(TAG, `DEPLOY — API success:`, json);
+      return json;
     },
     onSuccess: (_data, variables) => {
+      console.log(
+        TAG,
+        `DEPLOY onSuccess — adding to pendingInstances: name="${variables.name}"`,
+      );
       setPendingInstances((prev) => [
         ...prev,
         {
@@ -92,31 +124,69 @@ export function ModalComfySection() {
       setShowDeployPopup(false);
       queryClient.invalidateQueries({ queryKey: ["modal-comfyui-instances"] });
     },
+    onError: (err) => {
+      console.error(TAG, `DEPLOY onError:`, err);
+    },
   });
 
   const undeployMutation = useMutation({
     mutationFn: async (instanceId: string) => {
+      console.log(TAG, `UNDEPLOY — starting for instanceId="${instanceId}"`);
+      console.log(
+        TAG,
+        `UNDEPLOY — current state: undeployingIds=[${[...undeployingIds]}], pendingInstances=[${pendingInstances.map((p) => p.id)}]`,
+      );
       setUndeployingIds((prev) => new Set(prev).add(instanceId));
+      console.log(TAG, `UNDEPLOY — calling API...`);
       const res = await fetch("/api/modal/comfyui", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "undeploy", instanceId }),
       });
-      if (!res.ok) throw new Error("Undeploy failed");
-      return res.json();
+      console.log(
+        TAG,
+        `UNDEPLOY — API responded: status=${res.status}, ok=${res.ok}`,
+      );
+      if (!res.ok) {
+        const body = await res.text();
+        console.error(
+          TAG,
+          `UNDEPLOY — API error: status=${res.status}, body="${body}"`,
+        );
+        throw new Error(`Undeploy failed (${res.status}): ${body}`);
+      }
+      const json = await res.json();
+      console.log(TAG, `UNDEPLOY — API success:`, json);
+      return json;
     },
     onSuccess: (_data, instanceId) => {
+      console.log(
+        TAG,
+        `UNDEPLOY onSuccess — instanceId="${instanceId}", cleaning up state`,
+      );
       setUndeployingIds((prev) => {
         const s = new Set(prev);
         s.delete(instanceId);
         return s;
       });
-      // Remove from pending instances so stale "deploying" entries don't linger
-      setPendingInstances((prev) => prev.filter((p) => p.id !== instanceId));
+      setPendingInstances((prev) => {
+        const next = prev.filter((p) => p.id !== instanceId);
+        console.log(
+          TAG,
+          `UNDEPLOY onSuccess — pendingInstances: [${prev.map((p) => p.id)}] → [${next.map((p) => p.id)}]`,
+        );
+        return next;
+      });
       setConfirmUndeployId(null);
+      console.log(TAG, `UNDEPLOY onSuccess — invalidating query cache`);
       queryClient.invalidateQueries({ queryKey: ["modal-comfyui-instances"] });
     },
-    onError: (_err, instanceId) => {
+    onError: (err, instanceId) => {
+      console.error(
+        TAG,
+        `UNDEPLOY onError — instanceId="${instanceId}", error:`,
+        err,
+      );
       setUndeployingIds((prev) => {
         const s = new Set(prev);
         s.delete(instanceId);
@@ -127,21 +197,28 @@ export function ModalComfySection() {
 
   const resyncMutation = useMutation({
     mutationFn: async (instanceId: string) => {
+      console.log(TAG, `RESYNC — calling API for instanceId="${instanceId}"`);
       const res = await fetch("/api/modal/comfyui", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "resync", instanceId }),
       });
+      console.log(TAG, `RESYNC — API responded: status=${res.status}`);
       if (!res.ok) throw new Error("Resync failed");
       return res.json();
     },
     onSuccess: () => {
+      console.log(TAG, `RESYNC onSuccess — invalidating query cache`);
       queryClient.invalidateQueries({ queryKey: ["modal-comfyui-instances"] });
+    },
+    onError: (err) => {
+      console.error(TAG, `RESYNC onError:`, err);
     },
   });
 
   function handleOpenDeployPopup() {
     const name = generateInstanceName(popupGpu, instances);
+    console.log(TAG, `opening deploy popup, auto-name="${name}"`);
     setPopupName(name);
     setShowDeployPopup(true);
   }
@@ -259,7 +336,13 @@ export function ModalComfySection() {
 
                 {/* Undeploy button */}
                 <button
-                  onClick={() => setConfirmUndeployId(inst.id)}
+                  onClick={() => {
+                    console.log(
+                      TAG,
+                      `X button clicked — opening confirm dialog for "${inst.id}"`,
+                    );
+                    setConfirmUndeployId(inst.id);
+                  }}
                   disabled={isStopping}
                   className="ml-1 text-zinc-600 hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
                   title="Undeploy"
@@ -352,14 +435,23 @@ export function ModalComfySection() {
           </p>
           <div className="flex items-center gap-2 justify-end">
             <button
-              onClick={() => setConfirmUndeployId(null)}
+              onClick={() => {
+                console.log(TAG, `confirm dialog — Cancel clicked`);
+                setConfirmUndeployId(null);
+              }}
               disabled={undeployMutation.isPending}
               className="px-3 py-1 text-xs text-zinc-400 hover:text-zinc-200 disabled:opacity-50 transition-colors"
             >
               Cancel
             </button>
             <button
-              onClick={() => undeployMutation.mutate(confirmUndeployId)}
+              onClick={() => {
+                console.log(
+                  TAG,
+                  `confirm dialog — Undeploy clicked for "${confirmUndeployId}"`,
+                );
+                undeployMutation.mutate(confirmUndeployId);
+              }}
               disabled={undeployMutation.isPending}
               className="px-3 py-1 text-xs font-medium bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-lg transition-colors"
             >

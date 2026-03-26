@@ -322,9 +322,9 @@ def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-mod
     synced = 0
     errors = []
 
-    # When silent=True (called from deploy), write progress to stderr to avoid
-    # contaminating the JSON output on stdout.
-    _log = (lambda msg: print(msg, file=sys.stderr, flush=True)) if silent else (lambda msg: print(msg, flush=True))
+    def _log(msg: str):
+        if not silent:
+            print(msg, flush=True)
 
     for i, (full_path, rel_path) in enumerate(model_files, 1):
         size_mb = os.path.getsize(full_path) / 1024 / 1024

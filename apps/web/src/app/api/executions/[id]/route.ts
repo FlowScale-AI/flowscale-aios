@@ -81,10 +81,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.status === 'completed' && body.outputsJson) {
     const [exec] = await db.select().from(executions).where(eq(executions.id, id))
     if (exec) {
-      const [tool] = await db.select().from(tools).where(eq(tools.id, exec.toolId))
-      if (tool?.comfyPort) {
+      // Use the execution's comfyPort (set at run time), falling back to the tool's default
+      const port = exec.comfyPort || (() => {
+        // Sync lookup — tool.comfyPort is the fallback
+        const [tool] = db.select().from(tools).where(eq(tools.id, exec.toolId)).all()
+        return tool?.comfyPort
+      })()
+      if (port) {
         try {
-          const saved = await saveOutputsToDisk(body.outputsJson, tool.comfyPort, tool.id, id)
+          const saved = await saveOutputsToDisk(body.outputsJson, port, exec.toolId, id)
           await db.update(executions).set({ outputsJson: JSON.stringify(saved) }).where(eq(executions.id, id))
         } catch (err) {
           console.error('saveOutputsToDisk failed', err)

@@ -224,6 +224,8 @@ function StepAttach({
   const [loadingWorkflows, setLoadingWorkflows] = useState(false)
   const [loadingWorkflow, setLoadingWorkflow] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const { data: modalComfyData } = useModalComfyInstances()
+  const modalInstances = (modalComfyData?.instances ?? []).filter(i => i.status === 'deployed')
 
   const scanPorts = async () => {
     setScanning(true)
@@ -231,7 +233,11 @@ function StepAttach({
       const res = await fetch('/api/comfy/scan')
       const data: ComfyInstance[] = await res.json()
       setInstances(data)
-      if (data.length > 0) setSelectedPort(data[0].port)
+      if (data.length > 0) {
+        setSelectedPort(data[0].port)
+      } else if (modalInstances.length > 0 && !selectedPort) {
+        setSelectedPort(modalInstances[0].virtualPort)
+      }
     } catch { /* ignore */ } finally {
       setScanning(false)
     }
@@ -252,6 +258,13 @@ function StepAttach({
   }, [])
 
   useEffect(() => { scanPorts() }, [])
+
+  // Auto-select a Modal instance if no local instances found after scan
+  useEffect(() => {
+    if (!scanning && instances.length === 0 && modalInstances.length > 0 && !selectedPort) {
+      setSelectedPort(modalInstances[0].virtualPort)
+    }
+  }, [scanning, instances.length, modalInstances, selectedPort])
 
   useEffect(() => {
     if (selectedPort) fetchWorkflows(selectedPort)
@@ -300,8 +313,23 @@ function StepAttach({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">ComfyUI Instance</span>
-            {selectedPort && (
-              <span className="text-xs text-zinc-600 font-mono-custom">:{selectedPort}</span>
+            {(instances.length > 0 || modalInstances.length > 0) && (
+              <select
+                value={selectedPort ?? ''}
+                onChange={(e) => setSelectedPort(Number(e.target.value))}
+                className="text-xs text-zinc-300 font-mono-custom bg-zinc-900 border border-zinc-800 rounded px-2 py-0.5"
+              >
+                {instances.map((inst) => (
+                  <option key={inst.port} value={inst.port}>
+                    Local :{inst.port}
+                  </option>
+                ))}
+                {modalInstances.map((inst) => (
+                  <option key={inst.virtualPort} value={inst.virtualPort}>
+                    Cloud · {inst.name} ({inst.gpu})
+                  </option>
+                ))}
+              </select>
             )}
           </div>
           <button
@@ -322,7 +350,7 @@ function StepAttach({
           </div>
         )}
 
-        {!scanning && instances.length === 0 && (
+        {!scanning && instances.length === 0 && modalInstances.length === 0 && (
           <div className="flex items-center gap-3 p-4 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-sm">
             <Monitor size={16} weight="duotone" />
             No running ComfyUI detected. Start ComfyUI and click Refresh.

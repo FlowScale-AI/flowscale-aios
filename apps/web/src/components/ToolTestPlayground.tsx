@@ -178,7 +178,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
 
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
-  type OutputFile = { filename: string; subfolder?: string; kind: 'image' | 'video' | 'audio' | 'model' | 'file' }
+  type OutputFile = { filename: string; subfolder?: string; path?: string; kind: 'image' | 'video' | 'audio' | 'model' | 'file' }
   type OutputText = { text: string; kind: 'text' }
   type OutputItem = OutputFile | OutputText
   const [outputs, setOutputs] = useState<OutputItem[]>([])
@@ -280,7 +280,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
             setExecMeta({ seed: result.seed, elapsed: `${elapsed}s` })
 
-            await fetch(`/api/executions/${result.executionId}`, {
+            const patchRes = await fetch(`/api/executions/${result.executionId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -288,7 +288,17 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                 outputsJson: JSON.stringify(files),
                 completedAt: Date.now(),
               }),
-            }).catch(() => {})
+            }).catch(() => null)
+            // Re-read execution to get outputs with saved disk paths (set by saveOutputsToDisk)
+            if (patchRes?.ok) {
+              try {
+                const saved = await patchRes.json()
+                if (saved?.outputsJson) {
+                  const savedOutputs = JSON.parse(saved.outputsJson) as OutputItem[]
+                  if (savedOutputs.length > 0) setOutputs(savedOutputs)
+                }
+              } catch { /* ignore parse errors */ }
+            }
           }
         } catch { /* ignore */ }
 
@@ -482,7 +492,9 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                           </div>
                         )
                       }
-                      const url = `/api/comfy/${effectiveComfyPort}/view?filename=${encodeURIComponent(out.filename)}${out.subfolder ? `&subfolder=${encodeURIComponent(out.subfolder)}` : ''}&type=output`
+                      const url = out.path?.startsWith('/')
+                        ? out.path
+                        : `/api/comfy/${effectiveComfyPort}/view?filename=${encodeURIComponent(out.filename)}${out.subfolder ? `&subfolder=${encodeURIComponent(out.subfolder)}` : ''}&type=output`
                       if (out.kind === 'image') return (
                         <div key={i} className={cardClass}>
                           <div className="h-36 bg-zinc-950 overflow-hidden">
