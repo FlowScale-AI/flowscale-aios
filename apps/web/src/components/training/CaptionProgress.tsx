@@ -14,12 +14,14 @@ export function CaptionProgress({ datasetId, totalImages, onComplete }: CaptionP
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
   async function handleCaption() {
     if (running) return
     setRunning(true)
     setProgress(0)
     setError(null)
+    setStatusMessage(null)
 
     try {
       const res = await fetch(`/api/training/datasets/${datasetId}/caption`, {
@@ -47,7 +49,10 @@ export function CaptionProgress({ datasetId, totalImages, onComplete }: CaptionP
           if (!line.startsWith('data: ')) continue
           try {
             const event = JSON.parse(line.slice(6)) as { type: string; message?: string }
-            if (event.type === 'caption') {
+            if (event.type === 'status') {
+              setStatusMessage(event.message ?? null)
+            } else if (event.type === 'caption') {
+              setStatusMessage(null)
               captionCount++
               setProgress(totalImages > 0 ? Math.min(captionCount / totalImages, 1) : 0)
             } else if (event.type === 'error') {
@@ -121,8 +126,14 @@ export function CaptionProgress({ datasetId, totalImages, onComplete }: CaptionP
         </div>
       </div>
 
-      {/* Progress bar */}
-      {(running || progress > 0) && (
+      {/* Status / Progress */}
+      {running && statusMessage && progress === 0 && (
+        <div className="flex items-center gap-2 text-xs text-zinc-400 font-mono">
+          <SpinnerGap size={12} className="animate-spin text-violet-400" />
+          {statusMessage}
+        </div>
+      )}
+      {((!statusMessage && running) || progress > 0) && (
         <div className="space-y-1.5">
           <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
             <div
