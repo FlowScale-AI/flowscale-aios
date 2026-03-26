@@ -24,6 +24,7 @@ export async function GET(
   // Ephemeral modal training (no metadataJson) — progress is written directly to progress_json by the route handler
   if (!metadata) {
     const encoder = new TextEncoder()
+    let lastLogCount = 0  // track which logs we've already sent
     const stream = new ReadableStream({
       async start(controller) {
         while (true) {
@@ -31,8 +32,17 @@ export async function GET(
           if (!latest) { controller.close(); return }
 
           const prog = latest.progressJson ? JSON.parse(latest.progressJson) as Record<string, unknown> : null
+
+          // Emit any new log lines from the container
+          const logs = (prog?.logs as string[] | undefined) ?? []
+          if (logs.length > lastLogCount) {
+            for (let i = lastLogCount; i < logs.length; i++) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'log', message: logs[i] })}\n\n`))
+            }
+            lastLogCount = logs.length
+          }
+
           if (prog && typeof prog.step === 'number') {
-            // Extract loss, speed, lr from tqdm message (e.g. "9/100 [00:32<03:26, 2.27s/it, lr: 1.0e-04 loss: 8.729e-03]")
             const msg = (prog.message as string) ?? ''
             const lossMatch = msg.match(/loss:\s*([\d.e+-]+)/i)
             const lrMatch = msg.match(/lr:\s*([\d.e+-]+)/i)
@@ -46,7 +56,7 @@ export async function GET(
               lr: lrMatch ? parseFloat(lrMatch[1]) : null,
             })}\n\n`))
           } else if (prog?.message) {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'log', message: prog.message })}\n\n`))
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'log', message: prog.message as string })}\n\n`))
           }
 
           if (latest.status === 'completed') {

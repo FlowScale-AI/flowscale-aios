@@ -664,12 +664,13 @@ def cmd_run_training(plugin_dir: str, config_json: str, gpu: str, app_name: str 
         for line in proc.stdout:
             line = line.rstrip()
             if line.startswith("PROGRESS:"):
-                # Relay progress lines directly to Node.js
                 print(line, flush=True)
             elif line.startswith("RESULT:"):
                 result_line = line[len("RESULT:"):]
                 print(line, flush=True)
-            # Other lines (ai-toolkit logs) are ignored for the caller
+            elif line.startswith("[ai-toolkit]") or line.startswith("[trainer]") or line.startswith("[captioner]"):
+                # Relay container logs for the UI
+                print(f"LOG:{line}", flush=True)
 
         proc.wait(timeout=7500)  # slightly above modal_app.py's 7200s timeout
         stderr_output = "".join(stderr_lines)

@@ -138,6 +138,7 @@ export function runModalTraining(
   payload: TrainingPayload & { jobId: string },
   gpu: string,
   onProgress: (progress: TrainingProgress) => void,
+  onLog?: (line: string) => void,
 ): TrainingHandle {
   const configJson = JSON.stringify(payload)
   const args = ['run-training', TRAINER_PLUGIN_DIR, configJson, gpu]
@@ -159,6 +160,10 @@ export function runModalTraining(
       for (const raw of lines) {
         const line = raw.trim()
         if (!line) continue
+        if (line.startsWith('LOG:') && onLog) {
+          onLog(line.slice(4))
+          continue
+        }
         const parsed = parseProgressLine(line)
         if (parsed?.type === 'progress') {
           onProgress(parsed.data)
