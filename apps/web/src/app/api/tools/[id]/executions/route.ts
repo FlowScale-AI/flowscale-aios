@@ -16,7 +16,7 @@ import { getPlugin, type ToolPluginManifest } from '@/lib/toolPlugins'
 import { autoRouteComfyPort, trackExecStart, trackExecEnd } from '@/lib/comfyAutoRoute'
 import { getModalDeployUrl, autoRouteModalDeployment } from '@/lib/modal-deploy'
 import { runTraining } from '@/lib/trainingExecution'
-import { syncDatasetToModal, startModalTraining, getModalTrainingProgress, downloadTrainingOutput, buildTrainingPayload, type TrainingPayload } from '@/lib/modalTraining'
+import { syncDatasetToModal, runModalTraining, downloadTrainingOutput, buildTrainingPayload, type TrainingPayload, type TrainingHandle } from '@/lib/modalTraining'
 import { isModalComfyPort, resolveComfyBaseUrl, getModalComfyByPort } from '@/lib/modal-comfyui'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
@@ -321,14 +321,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const isModalTraining = provider === 'modal' || comfyPortOverride === 'modal'
 
       if (isModalTraining) {
-        // ── Modal cloud training branch ─────────────────────────────────────
+        // ── Modal cloud training (ephemeral `modal run`) ─────────────────────────────────────
         const currentUser = getRequestUser(req)
         const executionId = uuidv4()
 
         let payload: TrainingPayload
         try {
           payload = buildTrainingPayload(inputs ?? {})
-          // Disable quantization on high-VRAM GPUs (avoids optimum-quanto CUDA errors)
           const highVramGpus = ['H100', 'H200', 'B200', 'A100-80GB']
           if (gpuTier && highVramGpus.includes(gpuTier as string)) {
             payload.quantize = false
@@ -353,66 +352,56 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         })
         db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()
 
-        let modalUrl: string | null = null
-        const resolvedDeployId = (modalDeployId as string | undefined) ?? 'auto'
-        if (resolvedDeployId === 'auto') {
-          const deployment = autoRouteModalDeployment(config.pluginId)
-          modalUrl = deployment?.url ?? null
-        } else {
-          modalUrl = getModalDeployUrl(config.pluginId, resolvedDeployId)
-        }
+        const resolvedGpu = (gpuTier as string) || 'A100-40GB'
 
-        if (!modalUrl) {
-          await db.update(executions).set({ status: 'error', errorMessage: 'No Modal deployment found. Deploy the trainer from Settings first.', completedAt: Date.now() })
-            .where(eq(executions.id, executionId))
-          return NextResponse.json({ error: 'No Modal deployment found' }, { status: 400 })
-        }
-
-        // Fire and forget — sync, train, download
-        const capturedModalUrl = modalUrl
+        // Fire and forget — sync, train (blocking with progress), download
         ;(async () => {
           try {
             await db.update(executions).set({ progressJson: JSON.stringify({ message: 'Syncing dataset to cloud...' }) })
               .where(eq(executions.id, executionId))
             await syncDatasetToModal(payload.datasetId)
 
-            const { jobId } = await startModalTraining(capturedModalUrl, payload)
-            await db.update(executions).set({
-              metadataJson: JSON.stringify({ jobId, pluginId: config.pluginId, modalUrl: capturedModalUrl }),
-            }).where(eq(executions.id, executionId))
+            await db.update(executions).set({ progressJson: JSON.stringify({ message: 'Starting training on Modal...' }) })
+              .where(eq(executions.id, executionId))
 
-            let done = false
-            while (!done) {
-              await new Promise(r => setTimeout(r, 3000))
-              const progress = await getModalTrainingProgress(capturedModalUrl, jobId)
-              const status = progress.status as string
+            const handle = runModalTraining(
+              { ...payload, jobId: executionId },
+              resolvedGpu,
+              (progress) => {
+                db.update(executions).set({ progressJson: JSON.stringify(progress) })
+                  .where(eq(executions.id, executionId)).run()
+              },
+            )
 
-              await db.update(executions).set({ progressJson: JSON.stringify(progress) })
+            // Store handle for cancellation support
+            inFlightControllers.set(executionId, { abort: () => handle.cancel() } as unknown as AbortController)
+
+            const result = await handle.result
+
+            if (result.success && result.outputVolumePath) {
+              await db.update(executions).set({ progressJson: JSON.stringify({ message: 'Downloading trained LoRA...' }) })
                 .where(eq(executions.id, executionId))
 
-              if (status === 'completed') {
-                await db.update(executions).set({ progressJson: JSON.stringify({ ...progress, message: 'Downloading trained LoRA...' }) })
-                  .where(eq(executions.id, executionId))
-                const output = await downloadTrainingOutput(capturedModalUrl, jobId, payload.outputName, toolId, executionId)
-                await db.update(executions).set({
-                  status: 'completed',
-                  outputsJson: JSON.stringify([{
-                    kind: 'file',
-                    filename: `${executionId.slice(0, 8)}_${payload.outputName}.safetensors`,
-                    path: output.apiPath,
-                    lorasCopyPath: output.lorasCopyPath,
-                  }]),
-                  completedAt: Date.now(),
-                }).where(eq(executions.id, executionId))
-                done = true
-              } else if (status === 'failed' || status === 'cancelled') {
-                await db.update(executions).set({
-                  status: 'error',
-                  errorMessage: (progress.error as string) || `Training ${status}`,
-                  completedAt: Date.now(),
-                }).where(eq(executions.id, executionId))
-                done = true
-              }
+              const output = await downloadTrainingOutput(
+                result.outputVolumePath, payload.outputName, toolId, executionId,
+              )
+
+              await db.update(executions).set({
+                status: 'completed',
+                outputsJson: JSON.stringify([{
+                  kind: 'file',
+                  filename: `${executionId.slice(0, 8)}_${payload.outputName}.safetensors`,
+                  path: output.apiPath,
+                  lorasCopyPath: output.lorasCopyPath,
+                }]),
+                completedAt: Date.now(),
+              }).where(eq(executions.id, executionId))
+            } else {
+              await db.update(executions).set({
+                status: 'error',
+                errorMessage: result.error || 'Training failed',
+                completedAt: Date.now(),
+              }).where(eq(executions.id, executionId))
             }
           } catch (err) {
             console.error(`Modal training failed for ${executionId}:`, err)
@@ -421,6 +410,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               errorMessage: err instanceof Error ? err.message : 'Modal training failed',
               completedAt: Date.now(),
             }).where(eq(executions.id, executionId))
+          } finally {
+            inFlightControllers.delete(executionId)
           }
         })()
 
