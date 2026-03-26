@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getDataset, getDatasetDir } from '@/lib/training'
 import { scanPlugins } from '@/lib/toolPlugins'
-import { isServerRunning } from '@/lib/localInference'
+import { isServerRunning, resolvePython, areDepsInstalled, spawnServer, stopServer } from '@/lib/localInference'
 import { join } from 'path'
 import { writeFileSync } from 'fs'
 
@@ -13,6 +13,15 @@ function findCaptioningPlugin(): { pluginId: string; port: number } | null {
     return { pluginId: p.id, port: p.server.port }
   }
   return null
+}
+
+async function waitForServer(pluginId: string, timeoutMs: number = 120_000): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    if (await isServerRunning(pluginId)) return true
+    await new Promise(r => setTimeout(r, 1000))
+  }
+  return false
 }
 
 export async function POST(
@@ -31,11 +40,6 @@ export async function POST(
     return NextResponse.json({ error: 'No training plugin installed. Install a LoRA trainer first.' }, { status: 400 })
   }
 
-  const running = await isServerRunning(captioner.pluginId)
-  if (!running) {
-    return NextResponse.json({ error: 'Training plugin server is not running. Start it first.' }, { status: 400 })
-  }
-
   const dir = getDatasetDir(id)
   const images = dataset.images.map((img) => ({
     path: join(dir, img.name),
@@ -45,7 +49,36 @@ export async function POST(
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder()
+      let serverWasStarted = false
+
+      const emit = (event: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+      }
+
       try {
+        // Auto-start server if not running
+        const alreadyRunning = await isServerRunning(captioner.pluginId)
+        if (!alreadyRunning) {
+          const python = resolvePython()
+          if (!areDepsInstalled(python, captioner.pluginId)) {
+            emit({ type: 'error', message: 'Dependencies not installed. Install from the tool page first.' })
+            controller.close()
+            return
+          }
+
+          emit({ type: 'status', message: 'Starting captioning server...' })
+          spawnServer(python, captioner.pluginId)
+          serverWasStarted = true
+
+          const ready = await waitForServer(captioner.pluginId)
+          if (!ready) {
+            emit({ type: 'error', message: 'Captioning server failed to start within 120s' })
+            controller.close()
+            return
+          }
+        }
+
+        // Run captioning
         const res = await fetch(`http://127.0.0.1:${captioner.port}/caption/batch`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -53,7 +86,7 @@ export async function POST(
         })
 
         if (!res.ok || !res.body) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: 'Captioning request failed' })}\n\n`))
+          emit({ type: 'error', message: 'Captioning request failed' })
           controller.close()
           return
         }
@@ -83,6 +116,10 @@ export async function POST(
         const msg = err instanceof Error ? err.message : 'Captioning error'
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: msg })}\n\n`))
       } finally {
+        // Stop server if we started it
+        if (serverWasStarted) {
+          try { await stopServer(captioner.pluginId) } catch { /* non-fatal */ }
+        }
         controller.close()
       }
     },
