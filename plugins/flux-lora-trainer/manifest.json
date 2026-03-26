@@ -1,24 +1,38 @@
 {
-  "id": "flux-lora-trainer",
-  "version": "0.1.0",
-  "name": "Flux LoRA Trainer",
-  "description": "Train Flux LoRA models on your images using ai-toolkit",
+  "id": "flux1-lora-trainer",
+  "version": "1.1.0",
+  "name": "Flux.1 LoRA Trainer",
+  "description": "Train LoRA adapters on FLUX.1-dev using your own images. Outputs a .safetensors file ready for ComfyUI.",
   "badge": "Training",
-  "model": "FLUX.1-dev",
+  "model": "black-forest-labs/FLUX.1-dev",
   "engine": "api",
   "server": {
     "type": "training",
     "script": "server.py",
-    "port": 41300,
+    "port": 8770,
     "healthEndpoint": "/health",
-    "generateEndpoint": "/generate",
+    "generateEndpoint": "/train",
     "trainEndpoint": "/train",
     "progressEndpoint": "/train/{jobId}/progress",
     "cancelEndpoint": "/train/{jobId}/cancel"
   },
   "dependencies": {
     "python": ">=3.10",
-    "packages": ["torch", "transformers", "safetensors", "pyyaml"]
+    "packages": [
+      "torch",
+      "torchvision",
+      "diffusers>=0.31.0",
+      "transformers",
+      "accelerate",
+      "peft",
+      "safetensors",
+      "fastapi",
+      "uvicorn",
+      "pillow",
+      "bitsandbytes",
+      "prodigyopt",
+      "wandb"
+    ]
   },
   "schema": {
     "inputs": [

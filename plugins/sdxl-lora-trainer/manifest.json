@@ -1,24 +1,38 @@
 {
-  "id": "sdxl-lora-trainer",
-  "version": "0.1.0",
-  "name": "SDXL LoRA Trainer",
-  "description": "Train SDXL LoRA models on your images using ai-toolkit",
+  "id": "flux2-lora-trainer",
+  "version": "1.1.0",
+  "name": "Flux 2 LoRA Trainer",
+  "description": "Train LoRA adapters on FLUX.2-dev using your own images. Outputs a .safetensors file ready for ComfyUI.",
   "badge": "Training",
-  "model": "SDXL",
+  "model": "black-forest-labs/FLUX.2-dev",
   "engine": "api",
   "server": {
     "type": "training",
     "script": "server.py",
-    "port": 41301,
+    "port": 8771,
     "healthEndpoint": "/health",
-    "generateEndpoint": "/generate",
+    "generateEndpoint": "/train",
     "trainEndpoint": "/train",
     "progressEndpoint": "/train/{jobId}/progress",
     "cancelEndpoint": "/train/{jobId}/cancel"
   },
   "dependencies": {
     "python": ">=3.10",
-    "packages": ["torch", "transformers", "safetensors", "pyyaml"]
+    "packages": [
+      "torch",
+      "torchvision",
+      "diffusers>=0.31.0",
+      "transformers",
+      "accelerate",
+      "peft",
+      "safetensors",
+      "fastapi",
+      "uvicorn",
+      "pillow",
+      "bitsandbytes",
+      "prodigyopt",
+      "wandb"
+    ]
   },
   "schema": {
     "inputs": [
@@ -37,7 +51,7 @@
   "cloud": {
     "modal": {
       "supported": true,
-      "defaultGpu": "A10",
+      "defaultGpu": "A100-40GB",
       "containerIdleTimeout": 120
     }
   }
