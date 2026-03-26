@@ -161,9 +161,9 @@ export function TrainingConfigForm({ toolId, defaultModel, provider, modalDeploy
           </label>
           <input
             type="number"
-            min={100}
+            min={2}
             max={10000}
-            step={100}
+            step={1}
             value={steps}
             onChange={(e) => setSteps(Number(e.target.value))}
             className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500/50 transition-colors"
