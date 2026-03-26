@@ -25,7 +25,7 @@ datasets_volume = modal.Volume.from_name("flowscale-training-datasets", create_i
 outputs_volume = modal.Volume.from_name("flowscale-training-outputs", create_if_missing=True)
 
 trainer_image = (
-    modal.Image.debian_slim(python_version="3.11")
+    modal.Image.from_registry("nvidia/cuda:12.4.0-devel-ubuntu22.04", add_python="3.11")
     .apt_install("git", "ffmpeg", "libgl1-mesa-glx", "libglib2.0-0")
     .run_commands(
         "git clone https://github.com/ostris/ai-toolkit.git /ai-toolkit",
@@ -73,7 +73,7 @@ class LoRATrainer:
         output_name = config["outputName"]
         trigger_word = config.get("triggerWord", "ohwx")
         steps = config.get("steps", 1000)
-        lr = config.get("lr", "1e-4")
+        lr = float(config.get("lr", "1e-4"))
         rank = config.get("rank", 128)
         resolution = config.get("resolution", 1024)
 
