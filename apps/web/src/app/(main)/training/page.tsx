@@ -81,9 +81,9 @@ export default function TrainingPage() {
             <Brain size={18} weight="duotone" className="text-violet-400" />
           </div>
           <div>
-            <h1 className="font-tech text-xl font-semibold text-zinc-100">Training</h1>
+            <h1 className="font-tech text-xl font-semibold text-zinc-100">Datasets</h1>
             <p className="text-sm text-zinc-500 mt-0.5">
-              Manage datasets and fine-tune models
+              Manage training datasets for LoRA fine-tuning
             </p>
           </div>
         </div>

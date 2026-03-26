@@ -19,7 +19,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { setComfyManagedPath, setComfyInstallType } from '@/lib/providerSettings'
-import { isValidComfyInstall } from '../utils'
+import { isValidComfyInstall, resolveComfyPath } from '../utils'
 
 const FLOWSCALE_COMFY_PATH = path.join(os.homedir(), '.flowscale', 'comfyui')
 const COMFYUI_REPO = 'https://github.com/comfyanonymous/ComfyUI.git'
@@ -58,7 +58,8 @@ export async function POST(req: Request) {
       }
 
       try {
-        const targetPath = body.targetPath ?? FLOWSCALE_COMFY_PATH
+        const rawTargetPath = body.targetPath ?? FLOWSCALE_COMFY_PATH
+        const targetPath = resolveComfyPath(rawTargetPath)
 
         // ── Fast path: existing valid ComfyUI installation ─────────────────────
         if (isValidComfyInstall(targetPath)) {
@@ -76,6 +77,14 @@ export async function POST(req: Request) {
         if (fs.existsSync(installPath) && isValidComfyInstall(installPath)) {
           send({ msg: `Directory already exists at ${installPath} — skipping clone.` })
         } else {
+          // Clean up any existing empty/partial directory so git clone succeeds
+          if (fs.existsSync(installPath)) {
+            const contents = fs.readdirSync(installPath)
+            if (contents.length === 0 || !isValidComfyInstall(installPath)) {
+              send({ msg: `Removing incomplete directory at ${installPath}…` })
+              fs.rmSync(installPath, { recursive: true, force: true })
+            }
+          }
           send({ msg: 'Cloning ComfyUI from GitHub…' })
           fs.mkdirSync(path.dirname(installPath), { recursive: true })
           await runStreamed(

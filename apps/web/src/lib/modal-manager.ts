@@ -16,6 +16,44 @@ function getModalTomlPath(): string {
   return join(homedir(), '.modal.toml')
 }
 
+/**
+ * Resolve the full path to the `modal` binary.
+ * pip installs to user-local bin dirs that may not be in the Next.js server PATH,
+ * so we check common locations explicitly.
+ */
+function findModalBin(): string {
+  // 1. Check if `modal` is already on PATH
+  try {
+    const which = execSync('which modal', { timeout: 5000, stdio: 'pipe' }).toString().trim()
+    if (which) return which
+  } catch {}
+
+  // 2. Check common pip user-install locations
+  const home = homedir()
+  const candidates = [
+    join(home, 'Library', 'Python', '3.9', 'bin', 'modal'),  // macOS pip3 --user
+    join(home, 'Library', 'Python', '3.10', 'bin', 'modal'),
+    join(home, 'Library', 'Python', '3.11', 'bin', 'modal'),
+    join(home, 'Library', 'Python', '3.12', 'bin', 'modal'),
+    join(home, 'Library', 'Python', '3.13', 'bin', 'modal'),
+    join(home, '.local', 'bin', 'modal'),                     // Linux pip --user
+    '/usr/local/bin/modal',
+    '/opt/homebrew/bin/modal',
+  ]
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+
+  return 'modal' // fallback — hope it's on PATH
+}
+
+/** Cached modal binary path. */
+let _modalBin: string | null = null
+export function modalBin(): string {
+  if (!_modalBin) _modalBin = findModalBin()
+  return _modalBin
+}
+
 function findPipExec(): string {
   // Try pip3, pip, python -m pip, python3 -m pip
   for (const cmd of ['pip3 --version', 'pip --version']) {
@@ -29,7 +67,7 @@ function findPipExec(): string {
 
 export function isModalInstalled(): boolean {
   try {
-    execSync('modal --version', { timeout: 10000, stdio: 'pipe' })
+    execSync(`${modalBin()} --version`, { timeout: 10000, stdio: 'pipe' })
     return true
   } catch {
     return false
@@ -67,7 +105,7 @@ export function getModalStatus(): { installed: boolean; authenticated: boolean; 
 
   // Try to get workspace info
   try {
-    const output = execSync('modal profile current', { timeout: 10000, stdio: 'pipe' }).toString().trim()
+    const output = execSync(`${modalBin()} profile current`, { timeout: 10000, stdio: 'pipe' }).toString().trim()
     // modal profile current outputs the workspace name
     if (output) {
       return { installed: true, authenticated: true, workspace: output }
@@ -80,31 +118,57 @@ export function getModalStatus(): { installed: boolean; authenticated: boolean; 
   return { installed: true, authenticated: tomlExists }
 }
 
-export function startModalAuth(): { started: boolean; error?: string } {
+/** Pending auth URL extracted from `modal token new` output. */
+let pendingAuthUrl: string | null = null
+
+export function startModalAuth(): { started: boolean; error?: string; url?: string | null } {
   if (authProcess && !authProcess.killed) {
-    return { started: true } // Already running
+    return { started: true, url: pendingAuthUrl }
   }
 
+  pendingAuthUrl = null
+
   try {
-    authProcess = spawn('modal', ['token', 'new'], {
+    authProcess = spawn(modalBin(), ['token', 'new', '--no-verify'], {
       stdio: 'pipe',
-      shell: true,
+      shell: false,
       detached: false,
+      env: { ...process.env, BROWSER: 'echo' }, // prevent modal from opening a browser itself
     })
+
+    const extractUrl = (chunk: Buffer) => {
+      const text = chunk.toString()
+      // modal token new outputs a URL like https://modal.com/token-flow/...
+      const match = text.match(/(https:\/\/modal\.com\/\S+)/)
+      if (match) {
+        pendingAuthUrl = match[1]
+      }
+    }
+
+    authProcess.stdout?.on('data', extractUrl)
+    authProcess.stderr?.on('data', extractUrl)
 
     authProcess.on('error', (err) => {
       console.error('Modal auth error:', err.message)
       authProcess = null
+      pendingAuthUrl = null
     })
 
     authProcess.on('close', () => {
       authProcess = null
+      // Keep pendingAuthUrl alive for 60s after process exits so the frontend can still retrieve it
+      setTimeout(() => { pendingAuthUrl = null }, 60_000)
     })
 
     return { started: true }
   } catch (err: unknown) {
     return { started: false, error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+/** Returns the auth URL if one has been captured from the modal token flow. */
+export function getModalAuthUrl(): string | null {
+  return pendingAuthUrl
 }
 
 export function isAuthInProgress(): boolean {
@@ -120,16 +184,17 @@ export function syncHfTokenToModal(token: string): { success: boolean; error?: s
 
   try {
     // Check if secret already exists
-    const listResult = execSync('modal secret list', { timeout: 10000, stdio: 'pipe' }).toString()
+    const bin = modalBin()
+    const listResult = execSync(`${bin} secret list`, { timeout: 10000, stdio: 'pipe' }).toString()
     const secretExists = listResult.includes('huggingface-secret')
 
     if (secretExists) {
       // Delete and recreate (Modal doesn't have an update command)
-      execSync('modal secret delete huggingface-secret --yes', { timeout: 10000, stdio: 'pipe' })
+      execSync(`${bin} secret delete huggingface-secret --yes`, { timeout: 10000, stdio: 'pipe' })
     }
 
     // Create the secret
-    execSync(`modal secret create huggingface-secret HF_TOKEN=${token}`, {
+    execSync(`${bin} secret create huggingface-secret HF_TOKEN=${token}`, {
       timeout: 10000,
       stdio: 'pipe',
     })

@@ -11,11 +11,37 @@ Usage:
     python modal-helper.py status <app-name>
     python modal-helper.py logs <plugin-dir>
 """
+from __future__ import annotations
+
 import json
 import subprocess
 import sys
 import os
 from datetime import datetime
+
+
+def _find_modal() -> str:
+    """Resolve the full path to the `modal` binary.
+    pip user-installs land in dirs that may not be on PATH when spawned from Node.js."""
+    import shutil
+    found = shutil.which("modal")
+    if found:
+        return found
+    home = os.path.expanduser("~")
+    candidates = [
+        # macOS pip3 --user
+        *[os.path.join(home, "Library", "Python", v, "bin", "modal") for v in ("3.9", "3.10", "3.11", "3.12", "3.13")],
+        # Linux pip --user
+        os.path.join(home, ".local", "bin", "modal"),
+        "/usr/local/bin/modal",
+        "/opt/homebrew/bin/modal",
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return "modal"  # fallback
+
+MODAL_BIN = _find_modal()
 
 
 def _json_out(data: dict):
@@ -50,7 +76,7 @@ def cmd_deploy(plugin_dir: str, gpu: str, app_name: str):
     try:
         # Use Popen for streaming — write to log file as output arrives
         proc = subprocess.Popen(
-            ["modal", "deploy", modal_app_path],
+            [MODAL_BIN, "deploy", modal_app_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -128,8 +154,8 @@ def cmd_deploy(plugin_dir: str, gpu: str, app_name: str):
 def cmd_undeploy(app_name: str):
     """Stop and delete a Modal app."""
     try:
-        subprocess.run(["modal", "app", "stop", app_name], capture_output=True, text=True, timeout=30)
-        subprocess.run(["modal", "app", "delete", app_name, "--yes"], capture_output=True, text=True, timeout=30)
+        subprocess.run([MODAL_BIN, "app", "stop", app_name], capture_output=True, text=True, timeout=30)
+        subprocess.run([MODAL_BIN, "app", "delete", app_name, "--yes"], capture_output=True, text=True, timeout=30)
         _json_out({"success": True})
     except Exception as e:
         _json_out({"success": False, "error": str(e)})
@@ -180,7 +206,7 @@ def cmd_logs(plugin_dir: str, app_name: str = ""):
         try:
             import select
             proc = subprocess.Popen(
-                ["modal", "app", "logs", app_name],
+                [MODAL_BIN, "app", "logs", app_name],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             )
             lines = []
@@ -278,27 +304,31 @@ def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-mod
     synced = 0
     errors = []
 
+    def _log(msg: str):
+        if not silent:
+            print(msg, flush=True)
+
     for i, (full_path, rel_path) in enumerate(model_files, 1):
         size_mb = os.path.getsize(full_path) / 1024 / 1024
-        print(f"[{i}/{total}] Uploading {rel_path} ({size_mb:.0f} MB)...", flush=True)
+        _log(f"[{i}/{total}] Uploading {rel_path} ({size_mb:.0f} MB)...")
         try:
             result = subprocess.run(
-                ["modal", "volume", "put", "--force", volume_name, full_path, rel_path],
+                [MODAL_BIN, "volume", "put", "--force", volume_name, full_path, rel_path],
                 capture_output=True, text=True, timeout=600,
             )
             if result.returncode == 0:
                 synced += 1
-                print(f"  Done.", flush=True)
+                _log(f"  Done.")
             else:
                 err = result.stderr.strip() or f"Exit code {result.returncode}"
                 errors.append(f"{rel_path}: {err}")
-                print(f"  Failed: {err}", flush=True)
+                _log(f"  Failed: {err}")
         except subprocess.TimeoutExpired:
             errors.append(f"{rel_path}: upload timed out")
-            print(f"  Timed out.", flush=True)
+            _log(f"  Timed out.")
         except Exception as e:
             errors.append(f"{rel_path}: {e}")
-            print(f"  Error: {e}", flush=True)
+            _log(f"  Error: {e}")
 
     if not silent:
         _json_out({"success": len(errors) == 0, "synced": synced, "total": total, "errors": errors})
@@ -546,7 +576,7 @@ def cmd_deploy_comfyui(config_source: str, gpu: str, app_name: str):
 
         env = {**os.environ, "FLOWSCALE_GPU": gpu, "FLOWSCALE_APP_NAME": app_name, "PYTHONIOENCODING": "utf-8"}
         proc = subprocess.Popen(
-            ["modal", "deploy", modal_app_path],
+            [MODAL_BIN, "deploy", modal_app_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

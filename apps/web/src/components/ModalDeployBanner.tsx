@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Cloud, Spinner, X } from 'phosphor-react'
-import { useMutation } from '@tanstack/react-query'
+import { Cloud, Spinner, X, Warning, CaretDown, CaretUp } from 'phosphor-react'
+import { useMutation, useQuery } from '@tanstack/react-query'
 
 const GPU_OPTIONS = [
   { value: 'T4', label: 'T4 (16 GB)' },
@@ -20,10 +20,11 @@ const GPU_OPTIONS = [
 interface ModalDeploymentStatus {
   id: string
   name: string
-  status: 'deploying' | 'deployed'
+  status: 'deploying' | 'deployed' | 'failed'
   gpu: string
   warm: boolean | null
   url: string
+  error?: string
 }
 
 interface MissingSecretsError {
@@ -81,6 +82,31 @@ export function ModalDeployBanner({
   }
   const allDeployments = [...deployments, ...activePending]
   const isAnyDeploying = allDeployments.some((d) => d.status === 'deploying')
+  const hasFailedOrDeploying = allDeployments.some((d) => d.status === 'deploying' || d.status === 'failed')
+  const [showLogs, setShowLogs] = useState(false)
+  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
+
+  // Poll deploy logs when actively deploying or viewing logs
+  const { data: logData } = useQuery<{ logs: string }>({
+    queryKey: ['modal-deploy-logs', pluginId],
+    queryFn: async () => {
+      const res = await fetch(`/api/modal/deploy/${pluginId}?health=false&logs=true`)
+      if (!res.ok) return { logs: '' }
+      const data = await res.json()
+      return { logs: data.logs ?? '' }
+    },
+    enabled: showLogs || isAnyDeploying,
+    refetchInterval: isAnyDeploying ? 3_000 : false,
+    staleTime: 2_000,
+  })
+
+  const toggleError = (id: string) => {
+    setExpandedErrors(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
 
   const deployMutation = useMutation({
     mutationFn: async ({ gpu, name }: { gpu: string; name: string }) => {
@@ -154,82 +180,149 @@ export function ModalDeployBanner({
     setPopupName(generateDeployName(pluginId, gpu, deployments))
   }
 
+  const [expanded, setExpanded] = useState(false)
+  const deployedCount = allDeployments.filter(d => d.status === 'deployed').length
+  const failedCount = allDeployments.filter(d => d.status === 'failed').length
+  const deployingCount = allDeployments.filter(d => d.status === 'deploying').length
+
+  // Build compact status summary
+  const statusParts: string[] = []
+  if (deployedCount > 0) statusParts.push(`${deployedCount} deployed`)
+  if (deployingCount > 0) statusParts.push(`${deployingCount} deploying`)
+  if (failedCount > 0) statusParts.push(`${failedCount} failed`)
+
   return (
-    <div className="px-6 py-2.5 bg-purple-950/20 border-b border-purple-900/30 text-sm relative">
-      {/* Header row */}
+    <div className="px-6 py-2 bg-purple-950/20 border-b border-purple-900/30 text-sm relative">
+      {/* Compact header row */}
       <div className="flex items-center gap-2">
-        <Cloud size={16} weight="duotone" className="text-purple-400" />
-        <span className="text-purple-300 font-medium">Modal Cloud</span>
-        <span className="text-purple-400/60 text-xs">
-          {allDeployments.length} deployment{allDeployments.length !== 1 ? 's' : ''}
-        </span>
-        {isAnyDeploying && (
-          <span className="flex items-center gap-1 text-purple-400 text-xs">
-            <Spinner size={12} className="animate-spin" />
-            Deploying...
-          </span>
+        <Cloud size={14} weight="duotone" className="text-purple-400 shrink-0" />
+        <span className="text-purple-300 text-xs font-medium">Modal</span>
+
+        {/* Compact status chips */}
+        {allDeployments.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            {deployedCount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                {deployedCount}
+              </span>
+            )}
+            {deployingCount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-purple-400">
+                <Spinner size={10} className="animate-spin" />
+                {deployingCount}
+              </span>
+            )}
+            {failedCount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-red-400">
+                <Warning size={10} />
+                {failedCount}
+              </span>
+            )}
+          </div>
         )}
+
+        {/* Expand/collapse toggle when there are deployments */}
+        {allDeployments.length > 0 && (
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="text-purple-400/60 hover:text-purple-300 transition-colors"
+            title={expanded ? 'Collapse' : 'Expand'}
+          >
+            {expanded ? <CaretUp size={12} /> : <CaretDown size={12} />}
+          </button>
+        )}
+
         <button
           onClick={handleOpenPopup}
           disabled={isAnyDeploying}
-          className="ml-auto flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
+          className="ml-auto flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
         >
           + Deploy
         </button>
       </div>
 
-      {/* Deployment list */}
-      {allDeployments.length > 0 && (
+      {/* Expanded deployment list */}
+      {expanded && allDeployments.length > 0 && (
         <div className="mt-2 flex flex-col gap-1">
           {allDeployments.map((deployment) => {
             const isStopping = undployingIds.has(deployment.id)
+            const isFailed = deployment.status === 'failed'
+            const isErrorExpanded = expandedErrors.has(deployment.id)
             return (
-            <div
-              key={deployment.id}
-              className={`flex items-center gap-2 py-1 px-2 bg-purple-950/30 rounded border border-purple-900/20 ${isStopping ? 'opacity-50' : ''}`}
-            >
-              {/* Status spinner */}
-              {(deployment.status === 'deploying' || isStopping) && (
-                <Spinner size={12} className="animate-spin text-purple-400 shrink-0" />
-              )}
-              <span className="text-purple-200 text-xs truncate flex-1">
-                {deployment.name}
-                {isStopping && <span className="text-red-400 ml-1">Stopping...</span>}
-              </span>
-
-              {/* GPU badge */}
-              <span className="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-800 border border-zinc-700 text-zinc-400 rounded shrink-0">
-                {deployment.gpu}
-              </span>
-
-              {/* Warm/Cold indicator */}
-              {deployment.warm !== null && (
-                <span
-                  className={`flex items-center gap-1 text-xs shrink-0 ${
-                    deployment.warm ? 'text-emerald-400' : 'text-zinc-500'
-                  }`}
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                      deployment.warm ? 'bg-emerald-400' : 'bg-zinc-600'
-                    }`}
-                  />
-                  {deployment.warm ? 'Warm' : 'Cold'}
-                </span>
-              )}
-
-              {/* Undeploy button */}
-              <button
-                onClick={() => handleUndeploy(deployment.id)}
-                disabled={isStopping}
-                className="ml-1 text-zinc-600 hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
-                title="Undeploy"
+            <div key={deployment.id} className="flex flex-col">
+              <div
+                className={`flex items-center gap-2 py-1 px-2 rounded border ${
+                  isFailed
+                    ? 'bg-red-950/30 border-red-500/20'
+                    : 'bg-purple-950/30 border-purple-900/20'
+                } ${isStopping ? 'opacity-50' : ''}`}
               >
-                <X size={12} />
-              </button>
+                {(deployment.status === 'deploying' || isStopping) && (
+                  <Spinner size={12} className="animate-spin text-purple-400 shrink-0" />
+                )}
+                {isFailed && (
+                  <Warning size={12} className="text-red-400 shrink-0" />
+                )}
+                <span className={`text-xs truncate flex-1 ${isFailed ? 'text-red-300' : 'text-purple-200'}`}>
+                  {deployment.name}
+                  {isStopping && <span className="text-red-400 ml-1">Stopping...</span>}
+                  {isFailed && <span className="text-red-400 ml-1">Failed</span>}
+                </span>
+
+                <span className="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-800 border border-zinc-700 text-zinc-400 rounded shrink-0">
+                  {deployment.gpu}
+                </span>
+
+                {deployment.status === 'deployed' && deployment.warm !== null && (
+                  <span className={`flex items-center gap-1 text-[10px] shrink-0 ${deployment.warm ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${deployment.warm ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+                    {deployment.warm ? 'Warm' : 'Cold'}
+                  </span>
+                )}
+
+                {isFailed && deployment.error && (
+                  <button onClick={() => toggleError(deployment.id)} className="text-red-400 hover:text-red-300 transition-colors shrink-0" title="Show error details">
+                    {isErrorExpanded ? <CaretUp size={12} /> : <CaretDown size={12} />}
+                  </button>
+                )}
+
+                <button
+                  onClick={() => handleUndeploy(deployment.id)}
+                  disabled={isStopping}
+                  className="ml-1 text-zinc-600 hover:text-red-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                  title={isFailed ? 'Dismiss' : 'Undeploy'}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+
+              {isFailed && isErrorExpanded && deployment.error && (
+                <div className="mt-1 px-2 py-1.5 bg-red-950/20 border border-red-500/10 rounded text-[11px] font-mono text-red-300/80 max-h-40 overflow-y-auto whitespace-pre-wrap break-all">
+                  {deployment.error}
+                </div>
+              )}
             </div>
             )
           })}
+
+          {/* Deploy logs toggle + panel */}
+          {hasFailedOrDeploying && (
+            <button
+              onClick={() => setShowLogs((v) => !v)}
+              className="mt-1 flex items-center gap-1 text-[11px] text-purple-400/70 hover:text-purple-300 transition-colors"
+            >
+              {showLogs ? <CaretUp size={10} /> : <CaretDown size={10} />}
+              {showLogs ? 'Hide deploy logs' : 'View deploy logs'}
+            </button>
+          )}
+          {showLogs && (
+            <div className="mt-1.5 rounded border border-purple-900/30 bg-black/30 overflow-hidden">
+              <pre className="px-3 py-2 text-[11px] font-mono text-zinc-400 max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
+                {logData?.logs || 'No logs available yet...'}
+              </pre>
+            </div>
+          )}
         </div>
       )}
 

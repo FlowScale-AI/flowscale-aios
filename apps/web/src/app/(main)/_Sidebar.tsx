@@ -8,6 +8,7 @@ import {
   House,
   Wrench,
   ClockCounterClockwise,
+  ImageSquare,
   GearSix,
   SignOut,
   Bug,
@@ -136,9 +137,16 @@ export default function Sidebar({
         />
 
         <NavItem
+          href="/outputs"
+          icon={ImageSquare}
+          label="Assets"
+          active={pathname === "/outputs" || pathname.startsWith("/outputs/")}
+        />
+
+        <NavItem
           href="/training"
           icon={Brain}
-          label="Training"
+          label="Datasets"
           active={pathname === "/training" || pathname.startsWith("/training/")}
         />
 

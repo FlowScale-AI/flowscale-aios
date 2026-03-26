@@ -141,13 +141,13 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
 
 type Tab = "compute" | "providers" | "comfyui" | "storage" | "users" | "general";
 
-const TAB_CONFIG: { id: Tab; label: string; icon: typeof Cpu }[] = [
-  { id: "compute", label: "Compute", icon: Lightning },
-  { id: "providers", label: "Providers", icon: Plugs },
-  { id: "comfyui", label: "ComfyUI", icon: GearSix },
-  { id: "storage", label: "Storage", icon: Database },
-  { id: "users", label: "Users", icon: UsersThree },
-  { id: "general", label: "General", icon: Globe },
+const TAB_CONFIG: { id: Tab; label: string; icon: typeof Cpu; description: string }[] = [
+  { id: "general", label: "General", icon: Globe, description: "App preferences, updates, and system info" },
+  { id: "compute", label: "Compute", icon: Lightning, description: "Manage GPUs, devices, and cloud compute" },
+  { id: "users", label: "Users", icon: UsersThree, description: "Manage users, roles, and permissions" },
+  { id: "storage", label: "Storage", icon: Database, description: "Output storage and disk usage" },
+  { id: "comfyui", label: "ComfyUI", icon: GearSix, description: "ComfyUI instances and configuration" },
+  { id: "providers", label: "Providers", icon: Plugs, description: "API keys for cloud inference providers" },
 ];
 
 function formatDate(ms: number | null) {
@@ -171,7 +171,7 @@ function SettingsPageInner() {
   const rawTab = searchParams.get("tab");
   const tab: Tab = TAB_CONFIG.some((t) => t.id === rawTab)
     ? (rawTab as Tab)
-    : "compute";
+    : "general";
 
   const [isDesktop, setIsDesktop] = useState(false);
 
@@ -205,54 +205,67 @@ function SettingsPageInner() {
 
   return (
     <>
-      <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
-          <div>
+      <PageTransition className="h-full flex bg-[var(--color-background)] overflow-hidden">
+        {/* Sidebar */}
+        <div className="w-56 shrink-0 border-r border-white/5 flex flex-col">
+          <div className="px-5 py-6">
             <h1 className="font-tech text-xl font-semibold text-zinc-100">
               Settings
             </h1>
             <p className="text-sm text-zinc-500 mt-0.5">
-              Configure compute, providers, and app settings
+              Configure your workspace
             </p>
           </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex gap-1 px-8 pt-4 shrink-0">
-          {TAB_CONFIG.map((t) => {
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={[
-                  "flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors",
-                  tab === t.id
-                    ? "bg-white/10 text-white"
-                    : "text-zinc-500 hover:text-zinc-300",
-                ].join(" ")}
-              >
-                <Icon size={14} />
-                {t.label}
-              </button>
-            );
-          })}
+          <nav className="flex flex-col gap-0.5 px-3 flex-1">
+            {TAB_CONFIG.map((t) => {
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  className={[
+                    "flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
+                    tab === t.id
+                      ? "bg-white/10 text-white"
+                      : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5",
+                  ].join(" ")}
+                >
+                  <Icon size={16} />
+                  {t.label}
+                </button>
+              );
+            })}
+          </nav>
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
+          {/* Tab header */}
+          {(() => {
+            const current = TAB_CONFIG.find((t) => t.id === tab);
+            if (!current) return null;
+            const Icon = current.icon;
+            return (
+              <div className="px-10 pt-8 pb-6">
+                <div className="flex items-center gap-2.5">
+                  <Icon size={20} className="text-zinc-400" />
+                  <h2 className="font-tech text-lg font-semibold text-zinc-100">{current.label}</h2>
+                </div>
+                <p className="text-sm text-zinc-500 mt-1 ml-[30px]">{current.description}</p>
+              </div>
+            );
+          })()}
+          {tab === "general" && <GeneralTab isDesktop={isDesktop} />}
           {tab === "compute" && <ComputeTab />}
-          {tab === "providers" && <ProvidersTab />}
-          {tab === "comfyui" && <ComfyUITab showError={showError} />}
-          {tab === "storage" && <StorageTab />}
           {tab === "users" && (
             <UsersPanel
               currentUserId={me?.id ?? null}
               currentUserRole={me?.role ?? null}
             />
           )}
-          {tab === "general" && <GeneralTab isDesktop={isDesktop} />}
+          {tab === "storage" && <StorageTab />}
+          {tab === "comfyui" && <ComfyUITab showError={showError} />}
+          {tab === "providers" && <ProvidersTab />}
         </div>
       </PageTransition>
 
@@ -354,9 +367,27 @@ function ModalComputeCard() {
           return;
         }
       }
-      // Step 2: Authenticate
+      // Step 2: Authenticate — the API spawns `modal token new` and returns the auth URL
       setPhase("authenticating");
-      await setupMutation.mutateAsync("authenticate");
+      const authResult = await setupMutation.mutateAsync("authenticate");
+      // Open the auth URL in the browser so the user can complete the flow
+      let authUrl = authResult.url;
+      // If the URL wasn't ready yet, poll for it a few times
+      if (!authUrl) {
+        for (let i = 0; i < 5; i++) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const poll = await fetch("/api/modal/setup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "auth-url" }),
+          });
+          const data = await poll.json();
+          if (data.url) { authUrl = data.url; break; }
+        }
+      }
+      if (authUrl) {
+        window.open(authUrl, "_blank");
+      }
       // Polling will detect when auth completes
     } catch (err: any) {
       setPhase("error");
@@ -463,6 +494,168 @@ function ModalComputeCard() {
   );
 }
 
+interface PluginDeployRecord {
+  id: string;
+  name: string;
+  status: "deploying" | "deployed" | "failed";
+  appName: string;
+  url: string;
+  gpu: string;
+  deployedAt: number;
+  error?: string;
+}
+
+function ModalDeploymentsSection() {
+  const { data: modalStatus } = useModalStatus();
+  const { data: modalComfyData } = useQuery<{ instances: Array<{ id: string; name: string; status: string; gpu: string; virtualPort: number }> }>({
+    queryKey: ["modal-comfyui-instances"],
+    queryFn: async () => {
+      const res = await fetch("/api/modal/comfyui");
+      if (!res.ok) return { instances: [] };
+      return res.json();
+    },
+    enabled: modalStatus?.authenticated === true,
+  });
+  const { data: pluginDeployData } = useQuery<{ deployments: Record<string, PluginDeployRecord[]> }>({
+    queryKey: ["modal-all-deployments"],
+    queryFn: async () => {
+      const res = await fetch("/api/modal/deployments");
+      if (!res.ok) return { deployments: {} };
+      return res.json();
+    },
+    enabled: modalStatus?.authenticated === true,
+    refetchInterval: 15_000,
+  });
+
+  const queryClient = useQueryClient();
+
+  const comfyInstances = modalComfyData?.instances ?? [];
+  const pluginDeployments = pluginDeployData?.deployments ?? {};
+  const allPluginDeploys = Object.entries(pluginDeployments).flatMap(
+    ([pluginId, records]) => records.map((r) => ({ ...r, pluginId }))
+  );
+
+  const hasAnyDeployments = comfyInstances.length > 0 || allPluginDeploys.length > 0;
+
+  if (!modalStatus?.authenticated) return null;
+
+  const undeployPlugin = async (pluginId: string, deployId: string) => {
+    await fetch(`/api/modal/deploy/${pluginId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "undeploy", deployId }),
+    });
+    queryClient.invalidateQueries({ queryKey: ["modal-all-deployments"] });
+  };
+
+  const undeployComfy = async (instanceId: string) => {
+    await fetch("/api/modal/comfyui", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "undeploy", instanceId }),
+    });
+    queryClient.invalidateQueries({ queryKey: ["modal-comfyui-instances"] });
+  };
+
+  return (
+    <section>
+      <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="size-9 rounded-lg border border-purple-500/20 bg-purple-500/10 flex items-center justify-center overflow-hidden shrink-0">
+            <Cloud size={18} className="text-purple-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-zinc-200">Cloud Deployments</span>
+              {hasAnyDeployments && (
+                <span className="px-1.5 py-0.5 text-[10px] font-semibold text-purple-400 bg-purple-400/10 rounded-full border border-purple-400/20">
+                  {comfyInstances.length + allPluginDeploys.length} active
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-zinc-600 mt-0.5">
+              All Modal deployments across tools and ComfyUI instances
+            </p>
+          </div>
+        </div>
+
+        {!hasAnyDeployments ? (
+          <p className="text-xs text-zinc-600 py-2">No active cloud deployments.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {/* ComfyUI instances */}
+            {comfyInstances.map((inst) => (
+              <div
+                key={inst.id}
+                className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Monitor size={13} className="text-purple-400/70" />
+                  <span className="text-xs font-medium text-zinc-300">{inst.name}</span>
+                  <span className="text-[10px] font-mono text-zinc-600">{inst.gpu}</span>
+                  <span className="px-1.5 py-0.5 text-[9px] font-semibold text-zinc-500 bg-zinc-800 rounded-full">
+                    ComfyUI
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] ${inst.status === "deployed" ? "text-emerald-400" : inst.status === "deploying" ? "text-amber-400" : "text-red-400"}`}>
+                    {inst.status}
+                  </span>
+                  {inst.status === "deployed" && (
+                    <button
+                      onClick={() => undeployComfy(inst.id)}
+                      className="text-zinc-600 hover:text-red-400 transition-colors"
+                      title="Stop deployment"
+                    >
+                      <Stop size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {/* Tool plugin deployments */}
+            {allPluginDeploys.map((d) => (
+              <div
+                key={`${d.pluginId}-${d.id}`}
+                className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Lightning size={13} className="text-purple-400/70" />
+                  <span className="text-xs font-medium text-zinc-300">{d.name}</span>
+                  <span className="text-[10px] font-mono text-zinc-600">{d.gpu}</span>
+                  <span className="px-1.5 py-0.5 text-[9px] font-semibold text-zinc-500 bg-zinc-800 rounded-full">
+                    {d.pluginId}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] ${d.status === "deployed" ? "text-emerald-400" : d.status === "deploying" ? "text-amber-400" : "text-red-400"}`}>
+                    {d.status}
+                  </span>
+                  {d.status === "failed" && d.error && (
+                    <span className="text-[10px] text-red-400 max-w-[150px] truncate" title={d.error}>
+                      {d.error}
+                    </span>
+                  )}
+                  {(d.status === "deployed" || d.status === "failed") && (
+                    <button
+                      onClick={() => undeployPlugin(d.pluginId, d.id)}
+                      className="text-zinc-600 hover:text-red-400 transition-colors"
+                      title={d.status === "failed" ? "Remove" : "Stop deployment"}
+                    >
+                      {d.status === "failed" ? <Trash size={12} /> : <Stop size={12} />}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ComputeTab() {
   const queryClient = useQueryClient();
 
@@ -541,8 +734,8 @@ function ComputeTab() {
   });
 
   return (
-    <div className="px-8 py-6">
-      <div className="max-w-2xl mx-auto space-y-6">
+    <div className="px-10 pb-8">
+      <div className="max-w-3xl space-y-6">
         {/* GPU Detection */}
         <section>
           <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
@@ -697,6 +890,9 @@ function ComputeTab() {
 
         {/* Modal.com */}
         <ModalComputeCard />
+
+        {/* Modal cloud deployments (only when connected) */}
+        <ModalDeploymentsSection />
 
         {/* V2 placeholder: Connect another machine */}
         <section>
@@ -935,8 +1131,8 @@ function ProvidersTab() {
   });
 
   return (
-    <div className="px-8 py-6">
-      <div className="max-w-2xl mx-auto space-y-6">
+    <div className="px-10 pb-8">
+      <div className="max-w-3xl space-y-6">
         <section>
           <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">
             Cloud Providers
@@ -1086,8 +1282,8 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const savedPath = comfyPathData?.comfyuiPath;
 
   return (
-    <div className="px-8 py-6">
-      <div className="max-w-2xl mx-auto">
+    <div className="px-10 pb-8">
+      <div className="max-w-3xl">
         <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
           {/* Header row */}
           <div className="flex items-center justify-between mb-4">
@@ -1292,8 +1488,8 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
 
 function StorageTab() {
   return (
-    <div className="px-8 py-6">
-      <div className="max-w-2xl mx-auto">
+    <div className="px-10 pb-8">
+      <div className="max-w-3xl">
         <section>
           <div className="flex items-center gap-2 mb-4">
             <HardDrive size={16} className="text-zinc-400" />
@@ -1572,8 +1768,8 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
   };
 
   return (
-    <div className="px-8 py-6">
-      <div className="max-w-2xl mx-auto space-y-8">
+    <div className="px-10 pb-8">
+      <div className="max-w-3xl space-y-8">
         {/* Updates */}
         {isDesktop && <UpdatesSection />}
 
@@ -1818,7 +2014,7 @@ function UsersPanel({
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Sub-header */}
-      <div className="flex items-center justify-between px-8 py-3 shrink-0">
+      <div className="flex items-center justify-between px-10 py-3 shrink-0">
         <div className="flex gap-1">
           {userTabs.map((t) => (
             <button
@@ -1858,7 +2054,7 @@ function UsersPanel({
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto px-8 py-2">
+      <div className="flex-1 overflow-y-auto px-10 py-2">
         {loading ? (
           <div className="flex items-center justify-center h-40 text-zinc-500 text-sm">
             Loading\u2026

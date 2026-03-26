@@ -324,7 +324,7 @@ export default function HomePage() {
               {executions.map((exec) => (
                 <Link
                   key={exec.id}
-                  href="/jobs"
+                  href={`/jobs/${exec.id}`}
                   className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors"
                 >
                   {exec.status === 'completed' && <CheckCircle size={15} weight="fill" className="text-emerald-500 shrink-0" />}
