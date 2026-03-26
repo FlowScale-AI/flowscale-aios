@@ -136,8 +136,9 @@ def train(config: dict) -> dict:
         for line in proc.stdout:
             line = line.rstrip()
             print(f"[ai-toolkit] {line}")
-            # Match tqdm format "N/M [" (e.g. "9/100 [00:32<03:26]") — only when M matches expected steps
-            tqdm_match = re.search(r"(\d+)/(\d+)\s*\[", line)
+            # Only match training progress lines that contain the output name (e.g. "messi-02:  50%|")
+            # This avoids matching "Loading checkpoint shards: 2/2" or "Generating Images: 1/1"
+            tqdm_match = re.search(r"(\d+)/(\d+)\s*\[", line) if output_name in line else None
             step_match = re.search(r"step[:\s]+(\d+)", line, re.IGNORECASE) if not tqdm_match else None
             if tqdm_match and int(tqdm_match.group(2)) == steps:
                 current = int(tqdm_match.group(1))
