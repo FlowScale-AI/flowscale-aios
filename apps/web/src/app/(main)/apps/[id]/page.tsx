@@ -30,6 +30,7 @@ import { useModalComfyInstances } from '@/hooks/useModalComfyInstances'
 import { TrainingConfigForm } from '@/components/training/TrainingConfigForm'
 import { TrainingProgress } from '@/components/training/TrainingProgress'
 import { TrainingComplete } from '@/components/training/TrainingComplete'
+import { TrainingHistory } from '@/components/training/TrainingHistory'
 
 interface WorkflowIO {
   nodeId: string
@@ -1429,6 +1430,7 @@ export default function ToolPage() {
               onRetrain={() => setTrainingState('config')}
             />
           )}
+          <TrainingHistory toolId={tool.id} />
         </div>
       )}
 
