@@ -136,10 +136,15 @@ def train(config: dict) -> dict:
         for line in proc.stdout:
             line = line.rstrip()
             print(f"[ai-toolkit] {line}")
-            # Match tqdm format "N/M" (e.g. "9/100") or "step: N" / "step N"
-            match = re.search(r"(\d+)/(\d+)\s*\[", line) or re.search(r"step[:\s]+(\d+)", line, re.IGNORECASE)
-            if match:
-                current = int(match.group(1))
+            # Match tqdm format "N/M [" (e.g. "9/100 [00:32<03:26]") — only when M matches expected steps
+            tqdm_match = re.search(r"(\d+)/(\d+)\s*\[", line)
+            step_match = re.search(r"step[:\s]+(\d+)", line, re.IGNORECASE) if not tqdm_match else None
+            if tqdm_match and int(tqdm_match.group(2)) == steps:
+                current = int(tqdm_match.group(1))
+                pct = min(100, int(current / max(steps, 1) * 100))
+                print(f"PROGRESS:{json.dumps({'step': current, 'totalSteps': steps, 'pct': pct, 'message': line})}")
+            elif step_match:
+                current = int(step_match.group(1))
                 pct = min(100, int(current / max(steps, 1) * 100))
                 print(f"PROGRESS:{json.dumps({'step': current, 'totalSteps': steps, 'pct': pct, 'message': line})}")
 
