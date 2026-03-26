@@ -166,8 +166,16 @@ export function areDepsInstalled(python: string, pluginId: string = DEFAULT_PLUG
   if (!plugin) return false
   const packages = plugin.dependencies?.packages ?? []
 
+  // Some packages have import names that differ from their pip names
+  const IMPORT_MAP: Record<string, string> = {
+    'pillow': 'PIL', 'opencv-python': 'cv2', 'scikit-learn': 'sklearn',
+    'pyyaml': 'yaml', 'python-dateutil': 'dateutil',
+  }
   try {
-    const checks = packages.map((pkg) => `import ${pkg}`).join('; ')
+    const checks = packages.map((pkg) => {
+      const base = pkg.replace(/[><=!].+$/, '')  // strip version specifiers
+      return `import ${IMPORT_MAP[base] ?? base}`
+    }).join('; ')
     execSync(`${python} -c "${checks}"`, { stdio: 'ignore' })
     const gpu = detectGpuType()
     if (gpu === 'rocm') {
