@@ -101,7 +101,7 @@ class LoRATrainer:
                     "device": "cuda:0",
                     "trigger_word": trigger_word,
                     "network": {"type": "lora", "linear": rank, "linear_alpha": rank},
-                    "save": {"dtype": "float16", "save_every": max(100, steps // 10), "max_step_saves_to_keep": 2},
+                    "save": {"dtype": "float16", "save_every": min(steps, max(100, steps // 10)), "max_step_saves_to_keep": 2, "save_last": True},
                     "datasets": [{"folder_path": str(dataset_dir), "caption_ext": "txt", "caption_dropout_rate": 0.05, "resolution": [resolution]}],
                     "train": {
                         "batch_size": 1, "steps": steps, "gradient_accumulation_steps": 1,
@@ -152,17 +152,25 @@ class LoRATrainer:
             proc.wait()
             if proc.returncode == 0:
                 # ai-toolkit may write to a subdirectory — find the .safetensors file
+                # Search the entire output dir recursively
+                all_safetensors = list(output_dir.rglob("*.safetensors"))
+                print(f"[trainer] Found {len(all_safetensors)} .safetensors files in {output_dir}")
+                for f in all_safetensors:
+                    print(f"  - {f} ({f.stat().st_size / 1024 / 1024:.1f} MB)")
+
                 lora_path = output_dir / f"{output_name}.safetensors"
-                if not lora_path.exists():
-                    # Search recursively
-                    found = list(output_dir.rglob("*.safetensors"))
-                    if found:
-                        lora_path = found[-1]  # last one is typically the final checkpoint
+                if not lora_path.exists() and all_safetensors:
+                    lora_path = all_safetensors[-1]  # last one is typically the final checkpoint
+
                 with self._lock:
                     self._jobs[job_id]["status"] = "completed"
                     self._jobs[job_id]["progress"] = 100
                     self._jobs[job_id]["outputPath"] = str(lora_path) if lora_path.exists() else None
                     self._jobs[job_id]["message"] = "Training complete"
+                    if not lora_path.exists():
+                        # List what IS in the output dir for debugging
+                        all_files = list(output_dir.rglob("*"))
+                        self._jobs[job_id]["message"] = f"Training complete but no .safetensors found. Files: {[str(f.relative_to(output_dir)) for f in all_files[:20]]}"
             else:
                 with self._lock:
                     self._jobs[job_id]["status"] = "failed"
