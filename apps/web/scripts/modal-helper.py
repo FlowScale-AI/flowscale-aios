@@ -10,6 +10,7 @@ Usage:
     python modal-helper.py undeploy <app-name>
     python modal-helper.py status <app-name>
     python modal-helper.py logs <plugin-dir>
+    python modal-helper.py run-training <plugin-dir> <config-json> <gpu> [app-name]
 """
 from __future__ import annotations
 
@@ -622,8 +623,11 @@ def cmd_deploy_comfyui(config_source: str, gpu: str, app_name: str):
         _json_out({"success": False, "error": str(e)})
 
 
-def cmd_deploy_trainer(plugin_dir: str, gpu: str, app_name: str):
-    """Deploy the LoRA trainer Modal app."""
+def cmd_run_training(plugin_dir: str, config_json: str, gpu: str, app_name: str = "flowscale-lora-trainer"):
+    """Run ephemeral LoRA training via `modal run`.
+
+    Streams stdout (PROGRESS: and RESULT: lines) to the Node.js caller.
+    """
     modal_app_path = os.path.join(plugin_dir, "modal_app.py")
     if not os.path.exists(modal_app_path):
         _json_out({"success": False, "error": f"modal_app.py not found in {plugin_dir}"})
@@ -638,37 +642,52 @@ def cmd_deploy_trainer(plugin_dir: str, gpu: str, app_name: str):
 
     try:
         proc = subprocess.Popen(
-            [MODAL_BIN, "deploy", modal_app_path],
+            [MODAL_BIN, "run", modal_app_path, "--config-json", config_json],
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             text=True,
             env=env,
             cwd=plugin_dir,
+            start_new_session=True,  # own process group for clean kill
         )
 
-        all_output = []
-        for line in iter(proc.stdout.readline, ""):
-            all_output.append(line)
+        # Drain stderr on a background thread to avoid deadlock when the
+        # OS pipe buffer fills up (Modal emits container startup logs there).
+        stderr_lines: list[str] = []
+        def _drain_stderr():
+            for l in proc.stderr:
+                stderr_lines.append(l)
+        import threading
+        threading.Thread(target=_drain_stderr, daemon=True).start()
 
-        proc.wait(timeout=600)
-        full_output = "".join(all_output)
+        result_line = None
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line.startswith("PROGRESS:"):
+                # Relay progress lines directly to Node.js
+                print(line, flush=True)
+            elif line.startswith("RESULT:"):
+                result_line = line[len("RESULT:"):]
+                print(line, flush=True)
+            # Other lines (ai-toolkit logs) are ignored for the caller
 
-        if proc.returncode != 0:
-            _json_out({"success": False, "error": full_output.strip() or f"exit {proc.returncode}"})
-            return
+        proc.wait(timeout=7500)  # slightly above modal_app.py's 7200s timeout
+        stderr_output = "".join(stderr_lines)
 
-        import re
-        url = None
-        joined = full_output.replace("\n", "").replace("\r", "")
-        m = re.search(r"https://\S+\.modal\.run", joined)
-        if m:
-            url = m.group(0)
-
-        _json_out({"success": True, "appName": app_name, "url": url or "", "gpu": gpu})
+        if result_line:
+            # The RESULT line contains the train() return value
+            result = json.loads(result_line)
+            _json_out({"success": result.get("status") == "completed", **result})
+        elif proc.returncode != 0:
+            _json_out({"success": False, "error": stderr_output.strip() or f"modal run exited with code {proc.returncode}"})
+        else:
+            _json_out({"success": False, "error": "No RESULT line received from training function"})
 
     except subprocess.TimeoutExpired:
-        proc.kill()
-        _json_out({"success": False, "error": "Deploy timed out after 600s"})
+        import signal
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        proc.wait(timeout=5)
+        _json_out({"success": False, "error": "modal run timed out"})
     except Exception as e:
         _json_out({"success": False, "error": str(e)})
 
@@ -745,8 +764,10 @@ if __name__ == "__main__":
     elif command == "sync-models" and len(sys.argv) >= 3:
         volume = sys.argv[3] if len(sys.argv) >= 4 else "flowscale-comfyui-models"
         cmd_sync_models(sys.argv[2], volume)
-    elif command == "deploy-trainer" and len(sys.argv) >= 5:
-        cmd_deploy_trainer(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif command == "run-training" and len(sys.argv) >= 5:
+        # run-training <plugin-dir> <config-json> <gpu> [app-name]
+        app_name = sys.argv[5] if len(sys.argv) >= 6 else "flowscale-lora-trainer"
+        cmd_run_training(sys.argv[2], sys.argv[3], sys.argv[4], app_name)
     elif command == "sync-dataset" and len(sys.argv) >= 4:
         volume = sys.argv[4] if len(sys.argv) >= 5 else "flowscale-training-datasets"
         cmd_sync_dataset(sys.argv[2], sys.argv[3], volume)
