@@ -622,6 +622,57 @@ def cmd_deploy_comfyui(config_source: str, gpu: str, app_name: str):
         _json_out({"success": False, "error": str(e)})
 
 
+def cmd_deploy_trainer(plugin_dir: str, gpu: str, app_name: str):
+    """Deploy the LoRA trainer Modal app."""
+    modal_app_path = os.path.join(plugin_dir, "modal_app.py")
+    if not os.path.exists(modal_app_path):
+        _json_out({"success": False, "error": f"modal_app.py not found in {plugin_dir}"})
+        return
+
+    env = {
+        **os.environ,
+        "FLOWSCALE_GPU": gpu,
+        "FLOWSCALE_APP_NAME": app_name,
+        "PYTHONIOENCODING": "utf-8",
+    }
+
+    try:
+        proc = subprocess.Popen(
+            [MODAL_BIN, "deploy", modal_app_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+            cwd=plugin_dir,
+        )
+
+        all_output = []
+        for line in iter(proc.stdout.readline, ""):
+            all_output.append(line)
+
+        proc.wait(timeout=600)
+        full_output = "".join(all_output)
+
+        if proc.returncode != 0:
+            _json_out({"success": False, "error": full_output.strip() or f"exit {proc.returncode}"})
+            return
+
+        import re
+        url = None
+        joined = full_output.replace("\n", "").replace("\r", "")
+        m = re.search(r"https://\S+\.modal\.run", joined)
+        if m:
+            url = m.group(0)
+
+        _json_out({"success": True, "appName": app_name, "url": url or "", "gpu": gpu})
+
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        _json_out({"success": False, "error": "Deploy timed out after 600s"})
+    except Exception as e:
+        _json_out({"success": False, "error": str(e)})
+
+
 def cmd_sync_dataset(dataset_dir: str, dataset_id: str, volume_name: str = "flowscale-training-datasets"):
     """Upload a local dataset directory to a Modal Volume."""
     if not os.path.isdir(dataset_dir):
@@ -694,6 +745,8 @@ if __name__ == "__main__":
     elif command == "sync-models" and len(sys.argv) >= 3:
         volume = sys.argv[3] if len(sys.argv) >= 4 else "flowscale-comfyui-models"
         cmd_sync_models(sys.argv[2], volume)
+    elif command == "deploy-trainer" and len(sys.argv) >= 5:
+        cmd_deploy_trainer(sys.argv[2], sys.argv[3], sys.argv[4])
     elif command == "sync-dataset" and len(sys.argv) >= 4:
         volume = sys.argv[4] if len(sys.argv) >= 5 else "flowscale-training-datasets"
         cmd_sync_dataset(sys.argv[2], sys.argv[3], volume)

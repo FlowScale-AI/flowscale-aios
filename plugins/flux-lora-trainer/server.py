@@ -129,7 +129,7 @@ def _run_training(job_id: str, req: TrainRequest):
     import subprocess
     import tempfile
 
-    dataset_dir = Path(os.environ.get("FLOWSCALE_DATASETS_DIR", Path.home() / ".flowscale" / "datasets")) / req.datasetId
+    dataset_dir = Path(os.environ.get("FLOWSCALE_DATASETS_DIR", Path.home() / ".flowscale" / "training-datasets")) / req.datasetId
     output_dir = Path(os.environ.get("FLOWSCALE_OUTPUTS_DIR", Path.home() / ".flowscale" / "loras"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
