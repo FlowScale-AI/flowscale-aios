@@ -1289,15 +1289,21 @@ export default function ToolPage() {
                   </optgroup>
                   {(modalSupported || isModalSelected) && modalStatus?.authenticated && (
                     <optgroup label="Cloud (Modal)">
-                      <option value="modal:auto">Cloud &middot; Auto-route</option>
-                      {(modalDeployData?.deployments ?? [])
-                        .filter(d => d.status === 'deployed')
-                        .map((d) => (
-                          <option key={d.id} value={`modal:${d.id}`}>
-                            Cloud &middot; {d.name} ({d.gpu})
-                          </option>
-                        ))
-                      }
+                      {isTrainingPlugin ? (
+                        <option value="modal:auto">Cloud</option>
+                      ) : (
+                        <>
+                          <option value="modal:auto">Cloud &middot; Auto-route</option>
+                          {(modalDeployData?.deployments ?? [])
+                            .filter(d => d.status === 'deployed')
+                            .map((d) => (
+                              <option key={d.id} value={`modal:${d.id}`}>
+                                Cloud &middot; {d.name} ({d.gpu})
+                              </option>
+                            ))
+                          }
+                        </>
+                      )}
                     </optgroup>
                   )}
                 </>
@@ -1356,8 +1362,8 @@ export default function ToolPage() {
       {/* Local inference setup (API tools — hidden when Modal is selected) */}
       {tool.engine === 'api' && !isModalSelected && <LocalInferenceSetup />}
 
-      {/* Modal deploy banner (API tools when Modal selected) */}
-      {tool.engine === 'api' && isModalSelected && pluginId && modalSupported && (
+      {/* Modal deploy banner (API tools when Modal selected — not training) */}
+      {tool.engine === 'api' && isModalSelected && pluginId && modalSupported && !isTrainingPlugin && (
         <ModalDeployBanner
           pluginId={pluginId}
           defaultGpu={modalDeployData?.defaultGpu ?? 'A10'}
