@@ -52,6 +52,7 @@ def _resolve_gpu(gpu_str: str):
     image=trainer_image,
     gpu=_resolve_gpu(GPU),
     volumes={"/datasets": datasets_volume, "/outputs": outputs_volume},
+    secrets=[modal.Secret.from_name("huggingface-secret", required_keys=["HF_TOKEN"])],
     scaledown_window=120,
     timeout=7200,
 )
@@ -90,7 +91,7 @@ class LoRATrainer:
                 self._jobs[job_id]["error"] = f"Dataset '{dataset_id}' not found or empty on Volume"
             return
 
-        model_id = os.environ.get("FLOWSCALE_MODEL_ID", "FLUX.1-dev")
+        model_id = os.environ.get("FLOWSCALE_MODEL_ID", "black-forest-labs/FLUX.1-dev")
         toolkit_config = {
             "job": "extension",
             "config": {
