@@ -372,9 +372,10 @@ function ModalComputeCard() {
       const authResult = await setupMutation.mutateAsync("authenticate");
       // Open the auth URL in the browser so the user can complete the flow
       let authUrl = authResult.url;
+      let debugInfo = authResult.debug;
       // If the URL wasn't ready yet, poll for it a few times
       if (!authUrl) {
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 8; i++) {
           await new Promise((r) => setTimeout(r, 1500));
           const poll = await fetch("/api/modal/setup", {
             method: "POST",
@@ -382,11 +383,21 @@ function ModalComputeCard() {
             body: JSON.stringify({ action: "auth-url" }),
           });
           const data = await poll.json();
+          debugInfo = data.debug;
           if (data.url) { authUrl = data.url; break; }
         }
       }
       if (authUrl) {
         window.open(authUrl, "_blank");
+      } else {
+        // Failed to get URL — show debug info
+        setPhase("error");
+        const errParts = ["Failed to get auth URL from Modal CLI."];
+        if (debugInfo?.error) errParts.push(`Error: ${debugInfo.error}`);
+        if (debugInfo?.output) errParts.push(`Output: ${debugInfo.output.slice(0, 200)}`);
+        if (debugInfo?.modalBin) errParts.push(`Binary: ${debugInfo.modalBin}`);
+        setErrorMsg(errParts.join(" "));
+        return;
       }
       // Polling will detect when auth completes
     } catch (err: any) {

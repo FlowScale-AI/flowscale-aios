@@ -22,24 +22,56 @@ function getModalTomlPath(): string {
  * so we check common locations explicitly.
  */
 function findModalBin(): string {
+  const isWin = process.platform === 'win32'
+
   // 1. Check if `modal` is already on PATH
   try {
-    const which = execSync('which modal', { timeout: 5000, stdio: 'pipe' }).toString().trim()
-    if (which) return which
+    const whichCmd = isWin ? 'where modal' : 'which modal'
+    const found = execSync(whichCmd, { timeout: 5000, stdio: 'pipe' }).toString().trim()
+    // `where` on Windows can return multiple lines; take the first
+    const firstLine = found.split(/\r?\n/)[0]
+    if (firstLine) return firstLine
   } catch {}
 
-  // 2. Check common pip user-install locations
+  // 2. On Windows, ask Python for its scripts directory (most reliable)
+  if (isWin) {
+    try {
+      // Try py launcher first, then python
+      for (const pyCmd of ['py', 'python', 'python3']) {
+        try {
+          const scriptsDir = execSync(
+            `${pyCmd} -c "import sysconfig; print(sysconfig.get_path('scripts'))"`,
+            { timeout: 5000, stdio: 'pipe' }
+          ).toString().trim()
+          const modalPath = join(scriptsDir, 'modal.exe')
+          if (existsSync(modalPath)) return modalPath
+        } catch {}
+      }
+    } catch {}
+  }
+
+  // 3. Check common pip user-install locations
   const home = homedir()
-  const candidates = [
-    join(home, 'Library', 'Python', '3.9', 'bin', 'modal'),  // macOS pip3 --user
-    join(home, 'Library', 'Python', '3.10', 'bin', 'modal'),
-    join(home, 'Library', 'Python', '3.11', 'bin', 'modal'),
-    join(home, 'Library', 'Python', '3.12', 'bin', 'modal'),
-    join(home, 'Library', 'Python', '3.13', 'bin', 'modal'),
-    join(home, '.local', 'bin', 'modal'),                     // Linux pip --user
-    '/usr/local/bin/modal',
-    '/opt/homebrew/bin/modal',
-  ]
+  const candidates: string[] = isWin
+    ? [
+        join(home, 'AppData', 'Roaming', 'Python', 'Scripts', 'modal.exe'),
+        join(home, 'AppData', 'Local', 'Programs', 'Python', 'Python39', 'Scripts', 'modal.exe'),
+        join(home, 'AppData', 'Local', 'Programs', 'Python', 'Python310', 'Scripts', 'modal.exe'),
+        join(home, 'AppData', 'Local', 'Programs', 'Python', 'Python311', 'Scripts', 'modal.exe'),
+        join(home, 'AppData', 'Local', 'Programs', 'Python', 'Python312', 'Scripts', 'modal.exe'),
+        join(home, 'AppData', 'Local', 'Programs', 'Python', 'Python313', 'Scripts', 'modal.exe'),
+        join(home, 'AppData', 'Local', 'Programs', 'Python', 'Python314', 'Scripts', 'modal.exe'),
+      ]
+    : [
+        join(home, 'Library', 'Python', '3.9', 'bin', 'modal'),  // macOS pip3 --user
+        join(home, 'Library', 'Python', '3.10', 'bin', 'modal'),
+        join(home, 'Library', 'Python', '3.11', 'bin', 'modal'),
+        join(home, 'Library', 'Python', '3.12', 'bin', 'modal'),
+        join(home, 'Library', 'Python', '3.13', 'bin', 'modal'),
+        join(home, '.local', 'bin', 'modal'),                     // Linux pip --user
+        '/usr/local/bin/modal',
+        '/opt/homebrew/bin/modal',
+      ]
   for (const p of candidates) {
     if (existsSync(p)) return p
   }
@@ -55,13 +87,28 @@ export function modalBin(): string {
 }
 
 function findPipExec(): string {
-  // Try pip3, pip, python -m pip, python3 -m pip
+  const isWin = process.platform === 'win32'
+
+  // Try direct pip commands first
   for (const cmd of ['pip3 --version', 'pip --version']) {
     try {
       execSync(cmd, { timeout: 5000, stdio: 'pipe' })
       return cmd.split(' ')[0]
     } catch {}
   }
+
+  // Try python -m pip variants (especially important on Windows where pip may not be on PATH)
+  const pythonCmds = isWin
+    ? ['py -m pip --version', 'python -m pip --version', 'python3 -m pip --version']
+    : ['python3 -m pip --version', 'python -m pip --version']
+  for (const cmd of pythonCmds) {
+    try {
+      execSync(cmd, { timeout: 5000, stdio: 'pipe' })
+      // Return the "python -m pip" prefix (everything before " --version")
+      return cmd.replace(' --version', '')
+    } catch {}
+  }
+
   return 'pip'
 }
 
@@ -77,7 +124,11 @@ export function isModalInstalled(): boolean {
 export async function installModal(): Promise<{ success: boolean; error?: string; logs?: string }> {
   return new Promise((resolve) => {
     const pip = findPipExec()
-    const proc = spawn(pip, ['install', 'modal'], {
+    // pip may be "py -m pip" or "python -m pip", so split into command + args
+    const parts = pip.split(' ')
+    const cmd = parts[0]
+    const args = [...parts.slice(1), 'install', 'modal']
+    const proc = spawn(cmd, args, {
       stdio: 'pipe',
       shell: true,
     })
@@ -87,6 +138,8 @@ export async function installModal(): Promise<{ success: boolean; error?: string
     proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
     proc.on('error', (err) => resolve({ success: false, error: err.message }))
     proc.on('close', (code) => {
+      // Clear cached modal binary path so it's re-detected after install
+      _modalBin = null
       if (code === 0) {
         resolve({ success: true, logs: stdout })
       } else {
@@ -120,6 +173,20 @@ export function getModalStatus(): { installed: boolean; authenticated: boolean; 
 
 /** Pending auth URL extracted from `modal token new` output. */
 let pendingAuthUrl: string | null = null
+/** Captured output from the last modal auth attempt, for debugging. */
+let authOutput: string = ''
+/** Error from spawn, if any. */
+let authError: string | null = null
+
+export function getAuthDebugInfo(): { url: string | null; output: string; error: string | null; processRunning: boolean; modalBin: string } {
+  return {
+    url: pendingAuthUrl,
+    output: authOutput,
+    error: authError,
+    processRunning: authProcess != null && !authProcess.killed,
+    modalBin: modalBin(),
+  }
+}
 
 export function startModalAuth(): { started: boolean; error?: string; url?: string | null } {
   if (authProcess && !authProcess.killed) {
@@ -127,21 +194,38 @@ export function startModalAuth(): { started: boolean; error?: string; url?: stri
   }
 
   pendingAuthUrl = null
+  authOutput = ''
+  authError = null
 
   try {
-    authProcess = spawn(modalBin(), ['token', 'new', '--no-verify'], {
+    const isWin = process.platform === 'win32'
+    const bin = modalBin()
+    console.log('[Modal Auth] Starting auth with binary:', bin)
+    console.log('[Modal Auth] Platform:', process.platform, 'shell:', isWin)
+
+    // On Windows: shell: true is required because pip installs modal as a .cmd wrapper.
+    // BROWSER='echo' only works on Unix (echo is a shell builtin on Windows, not an exe),
+    // so on Windows we let Modal open the browser normally while still capturing the URL.
+    const env = isWin
+      ? { ...process.env }
+      : { ...process.env, BROWSER: 'echo' }
+
+    authProcess = spawn(bin, ['token', 'new', '--no-verify'], {
       stdio: 'pipe',
-      shell: false,
+      shell: isWin,
       detached: false,
-      env: { ...process.env, BROWSER: 'echo' }, // prevent modal from opening a browser itself
+      env,
     })
 
     const extractUrl = (chunk: Buffer) => {
       const text = chunk.toString()
+      console.log('[Modal Auth] Output:', text)
+      authOutput += text
       // modal token new outputs a URL like https://modal.com/token-flow/...
       const match = text.match(/(https:\/\/modal\.com\/\S+)/)
       if (match) {
         pendingAuthUrl = match[1]
+        console.log('[Modal Auth] Captured URL:', pendingAuthUrl)
       }
     }
 
@@ -149,12 +233,14 @@ export function startModalAuth(): { started: boolean; error?: string; url?: stri
     authProcess.stderr?.on('data', extractUrl)
 
     authProcess.on('error', (err) => {
-      console.error('Modal auth error:', err.message)
+      console.error('[Modal Auth] Process error:', err.message)
+      authError = err.message
       authProcess = null
       pendingAuthUrl = null
     })
 
-    authProcess.on('close', () => {
+    authProcess.on('close', (code) => {
+      console.log('[Modal Auth] Process closed with code:', code)
       authProcess = null
       // Keep pendingAuthUrl alive for 60s after process exits so the frontend can still retrieve it
       setTimeout(() => { pendingAuthUrl = null }, 60_000)
@@ -162,7 +248,10 @@ export function startModalAuth(): { started: boolean; error?: string; url?: stri
 
     return { started: true }
   } catch (err: unknown) {
-    return { started: false, error: err instanceof Error ? err.message : String(err) }
+    const errMsg = err instanceof Error ? err.message : String(err)
+    console.error('[Modal Auth] Spawn error:', errMsg)
+    authError = errMsg
+    return { started: false, error: errMsg }
   }
 }
 

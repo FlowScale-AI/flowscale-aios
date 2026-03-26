@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestUser } from '@/lib/auth'
-import { installModal, startModalAuth, getModalAuthUrl, disconnectModal } from '@/lib/modal-manager'
+import { installModal, startModalAuth, getModalAuthUrl, disconnectModal, getAuthDebugInfo } from '@/lib/modal-manager'
 
 export async function POST(req: NextRequest) {
   const user = getRequestUser(req)
@@ -23,11 +23,15 @@ export async function POST(req: NextRequest) {
       await new Promise((r) => setTimeout(r, 2000))
       url = getModalAuthUrl()
     }
-    return NextResponse.json({ ...result, url })
+    // Include debug info if URL still not available
+    const debug = !url ? getAuthDebugInfo() : undefined
+    return NextResponse.json({ ...result, url, debug })
   }
 
   if (action === 'auth-url') {
-    return NextResponse.json({ url: getModalAuthUrl() })
+    const url = getModalAuthUrl()
+    const debug = getAuthDebugInfo()
+    return NextResponse.json({ url, debug })
   }
 
   if (action === 'disconnect') {
