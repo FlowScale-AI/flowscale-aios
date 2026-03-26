@@ -18,6 +18,8 @@ import {
   ArrowsClockwise,
   FolderOpen,
   ArrowSquareOut,
+  ShareNetwork,
+  Check,
 } from 'phosphor-react'
 import { PageTransition, Modal } from '@/components/ui'
 
@@ -72,16 +74,30 @@ function CustomToolCard({
   onUpdate,
   updating,
   inferenceStatus,
+  networkIp,
 }: {
   tool: CustomTool
   onDelete: () => void
   onUpdate?: () => void
   updating?: boolean
   inferenceStatus?: 'running' | 'starting' | 'stopped'
+  networkIp?: string | null
 }) {
+  const [shareCopied, setShareCopied] = useState(false)
   const showInference = tool.engine === 'api' && inferenceStatus
   const typeConfig = TOOL_TYPE_CONFIG[(tool.toolType as ToolType) ?? 'custom']
   const lastUsedText = formatLastUsed(tool.lastUsedAt)
+
+  function handleShare(e: React.MouseEvent) {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!networkIp) return
+    const url = `http://${networkIp}:14173/tools/${tool.id}`
+    navigator.clipboard.writeText(url).then(() => {
+      setShareCopied(true)
+      setTimeout(() => setShareCopied(false), 2000)
+    })
+  }
 
   return (
     <div className="group flex flex-col rounded-xl border border-white/5 bg-[var(--color-background-panel)] hover:border-zinc-700 transition-all duration-150 relative overflow-hidden">
@@ -142,6 +158,15 @@ function CustomToolCard({
           <span className="text-xs text-zinc-600">Click to run</span>
         )}
         <div className="flex items-center gap-1.5">
+          {networkIp && (
+            <button
+              onClick={handleShare}
+              className="text-zinc-600 hover:text-zinc-300 transition-colors"
+              title="Copy share URL"
+            >
+              {shareCopied ? <Check size={13} className="text-emerald-400" /> : <ShareNetwork size={13} />}
+            </button>
+          )}
           {tool.sourceUrl && onUpdate && (
             <button
               onClick={(e) => { e.stopPropagation(); onUpdate() }}
@@ -259,6 +284,16 @@ export default function ToolsPage() {
     },
   })
   const isArtist = currentUser?.role === 'artist'
+
+  const { data: networkData } = useQuery<{ ip: string | null }>({
+    queryKey: ['network-ip'],
+    queryFn: async () => {
+      const res = await fetch('/api/network-ip')
+      if (!res.ok) return { ip: null }
+      return res.json()
+    },
+    staleTime: 300_000,
+  })
 
   const { data: myTools = [], refetch: refetchMyTools, isLoading: myToolsLoading } = useQuery<CustomTool[]>({
     queryKey: ['custom-tools'],
@@ -582,6 +617,7 @@ export default function ToolsPage() {
                     onUpdate={tool.sourceUrl ? () => handleUpdateTool(tool.id) : undefined}
                     updating={updatingTools.has(tool.id)}
                     inferenceStatus={tool.engine === 'api' ? inferenceStatus : undefined}
+                    networkIp={networkData?.ip}
                   />
                 ))}
               </div>

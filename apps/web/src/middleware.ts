@@ -46,7 +46,12 @@ export function middleware(request: NextRequest) {
 
   const session = request.cookies.get("fs_session");
   if (!session?.value) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    const loginUrl = new URL("/login", request.url);
+    // Preserve the original URL so we can redirect back after login
+    if (pathname !== "/" && pathname !== "/home") {
+      loginUrl.searchParams.set("next", pathname);
+    }
+    return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();

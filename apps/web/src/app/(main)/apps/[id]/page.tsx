@@ -17,6 +17,7 @@ import {
   Copy,
   Check,
   Stop,
+  ShareNetwork,
 } from 'phosphor-react'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
@@ -1149,6 +1150,27 @@ export default function ToolPage() {
 
   const [stopping, setStopping] = useState(false)
 
+  // Share URL
+  const { data: networkData } = useQuery<{ ip: string | null }>({
+    queryKey: ['network-ip'],
+    queryFn: async () => {
+      const res = await fetch('/api/network-ip')
+      if (!res.ok) return { ip: null }
+      return res.json()
+    },
+    staleTime: 300_000,
+  })
+  const [shareCopied, setShareCopied] = useState(false)
+  const handleShareUrl = useCallback(() => {
+    const ip = networkData?.ip
+    if (!ip) return
+    const url = `http://${ip}:14173/tools/${id}`
+    navigator.clipboard.writeText(url).then(() => {
+      setShareCopied(true)
+      setTimeout(() => setShareCopied(false), 2000)
+    })
+  }, [networkData?.ip, id])
+
   async function handleStopInference() {
     const execId = runningExecution?.id
     if (!execId) return
@@ -1195,6 +1217,16 @@ export default function ToolPage() {
             <p className="text-xs text-zinc-500 mt-0.5">{tool.description}</p>
           )}
         </div>
+        {networkData?.ip && (
+          <button
+            onClick={handleShareUrl}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-500 hover:text-zinc-200 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-md transition-colors"
+            title="Copy share URL"
+          >
+            {shareCopied ? <Check size={13} className="text-emerald-400" /> : <ShareNetwork size={13} />}
+            {shareCopied ? 'Copied!' : 'Share'}
+          </button>
+        )}
         {isRunning && (
           <button
             onClick={handleStopInference}
