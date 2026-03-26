@@ -49,7 +49,7 @@ def _resolve_gpu(gpu_str: str):
     gpu=_resolve_gpu(GPU),
     volumes={"/datasets": datasets_volume, "/outputs": outputs_volume},
     secrets=[modal.Secret.from_name("huggingface-secret", required_keys=["HF_TOKEN"])],
-    scaledown_window=120,
+    scaledown_window=1800,  # 30 min — keep container alive while training runs in background
     timeout=7200,
 )
 class LoRATrainer:
