@@ -269,6 +269,38 @@ def _build_config(req: TrainRequest, dataset_dir: Path, output_dir: Path) -> dic
 
 
 # ---------------------------------------------------------------------------
+# Captioning (Florence-2 via captioner.py)
+# ---------------------------------------------------------------------------
+
+class CaptionBatchRequest(BaseModel):
+    images: list[dict]  # [{"path": "...", "mode": "detailed|brief"}]
+
+
+@app.post("/caption/batch")
+async def caption_batch(req: CaptionBatchRequest):
+    """Caption a batch of images, streaming results as SSE."""
+    import asyncio
+    from captioner import caption_image
+
+    loop = asyncio.get_event_loop()
+
+    async def generate():
+        for img in req.images:
+            path = img.get("path", "")
+            mode = img.get("mode", "detailed")
+            image_name = os.path.basename(path)
+            try:
+                caption = await loop.run_in_executor(
+                    None, lambda p=path, m=mode: caption_image(image_path=p, mode=m),
+                )
+                yield f"data: {json.dumps({'type': 'caption', 'imageName': image_name, 'caption': caption})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to caption {image_name}: {e}'})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
