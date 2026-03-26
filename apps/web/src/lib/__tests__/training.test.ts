@@ -17,6 +17,8 @@ import {
   updateDatasetMeta,
   deleteDataset,
   getDatasetsDir,
+  getDatasetSyncStatus,
+  markDatasetSynced,
 } from '../training'
 
 beforeEach(() => mkdirSync(TEST_DIR, { recursive: true }))
@@ -72,5 +74,31 @@ describe('deleteDataset', () => {
     const ds = createDataset({ name: 'test', triggerWord: 'ohwx' })
     deleteDataset(ds.id)
     expect(existsSync(join(getDatasetsDir(), ds.id))).toBe(false)
+  })
+})
+
+describe('dataset sync status', () => {
+  it('returns not-synced for a fresh dataset', () => {
+    const ds = createDataset({ name: 'test', triggerWord: 'ohwx' })
+    expect(getDatasetSyncStatus(ds.id)).toEqual({ synced: false })
+  })
+
+  it('returns synced after marking as synced', () => {
+    const ds = createDataset({ name: 'test', triggerWord: 'ohwx' })
+    const dsDir = join(getDatasetsDir(), ds.id)
+    writeFileSync(join(dsDir, 'img.jpg'), 'fake')
+    markDatasetSynced(ds.id)
+    const status = getDatasetSyncStatus(ds.id)
+    expect(status.synced).toBe(true)
+    expect(status.fileCount).toBe(1)
+  })
+
+  it('returns not-synced when files changed after sync', () => {
+    const ds = createDataset({ name: 'test', triggerWord: 'ohwx' })
+    const dsDir = join(getDatasetsDir(), ds.id)
+    writeFileSync(join(dsDir, 'img1.jpg'), 'fake')
+    markDatasetSynced(ds.id)
+    writeFileSync(join(dsDir, 'img2.jpg'), 'fake2')
+    expect(getDatasetSyncStatus(ds.id).synced).toBe(false)
   })
 })

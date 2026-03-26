@@ -103,3 +103,33 @@ export function deleteDataset(id: string): void {
   const dir = join(getDatasetsDir(), id)
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
 }
+
+export interface DatasetSyncStatus {
+  synced: boolean
+  fileCount?: number
+  syncedAt?: number
+}
+
+export function getDatasetSyncStatus(id: string): DatasetSyncStatus {
+  const dir = getDatasetDir(id)
+  const syncFile = join(dir, '.modal-synced')
+  if (!existsSync(syncFile)) return { synced: false }
+  const syncData = JSON.parse(readFileSync(syncFile, 'utf-8')) as { fileCount: number; syncedAt: number }
+  const currentCount = countDatasetFiles(dir)
+  if (currentCount !== syncData.fileCount) return { synced: false }
+  return { synced: true, fileCount: syncData.fileCount, syncedAt: syncData.syncedAt }
+}
+
+export function markDatasetSynced(id: string): void {
+  const dir = getDatasetDir(id)
+  const count = countDatasetFiles(dir)
+  writeFileSync(join(dir, '.modal-synced'), JSON.stringify({ fileCount: count, syncedAt: Date.now() }))
+}
+
+function countDatasetFiles(dir: string): number {
+  if (!existsSync(dir)) return 0
+  return readdirSync(dir).filter(f => {
+    const ext = f.substring(f.lastIndexOf('.')).toLowerCase()
+    return ['.jpg', '.jpeg', '.png', '.txt'].includes(ext)
+  }).length
+}

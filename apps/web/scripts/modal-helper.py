@@ -622,6 +622,38 @@ def cmd_deploy_comfyui(config_source: str, gpu: str, app_name: str):
         _json_out({"success": False, "error": str(e)})
 
 
+def cmd_sync_dataset(dataset_dir: str, dataset_id: str, volume_name: str = "flowscale-training-datasets"):
+    """Upload a local dataset directory to a Modal Volume."""
+    if not os.path.isdir(dataset_dir):
+        _json_out({"success": False, "error": f"Dataset directory not found: {dataset_dir}"})
+        return
+    files = [f for f in os.listdir(dataset_dir)
+             if os.path.isfile(os.path.join(dataset_dir, f))
+             and not f.startswith('.')]
+    if not files:
+        _json_out({"success": False, "error": "No files in dataset directory"})
+        return
+    synced = 0
+    errors = []
+    for f in files:
+        full_path = os.path.join(dataset_dir, f)
+        remote_path = f"{dataset_id}/{f}"
+        try:
+            result = subprocess.run(
+                [MODAL_BIN, "volume", "put", "--force", volume_name, full_path, remote_path],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0:
+                synced += 1
+            else:
+                errors.append(f"{f}: {result.stderr.strip() or f'exit {result.returncode}'}")
+        except subprocess.TimeoutExpired:
+            errors.append(f"{f}: upload timed out")
+        except Exception as e:
+            errors.append(f"{f}: {e}")
+    _json_out({"success": len(errors) == 0, "synced": synced, "total": len(files), "errors": errors})
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: modal-helper.py <deploy|undeploy|status|logs|scan-comfyui|deploy-comfyui> [args...]", file=sys.stderr)
@@ -646,6 +678,9 @@ if __name__ == "__main__":
     elif command == "sync-models" and len(sys.argv) >= 3:
         volume = sys.argv[3] if len(sys.argv) >= 4 else "flowscale-comfyui-models"
         cmd_sync_models(sys.argv[2], volume)
+    elif command == "sync-dataset" and len(sys.argv) >= 4:
+        volume = sys.argv[4] if len(sys.argv) >= 5 else "flowscale-training-datasets"
+        cmd_sync_dataset(sys.argv[2], sys.argv[3], volume)
     else:
         print(f"Unknown command or missing args: {sys.argv[1:]}", file=sys.stderr)
         sys.exit(1)
