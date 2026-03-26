@@ -20,11 +20,58 @@ export async function GET(
   }
 
   const metadata = exec.metadataJson ? JSON.parse(exec.metadataJson) as { jobId: string; pluginId: string; modalUrl?: string } : null
+
+  // Ephemeral modal training (no metadataJson) — progress is written directly to progress_json by the route handler
   if (!metadata) {
-    return new Response('No training job metadata', { status: 400 })
+    const progress = exec.progressJson ? JSON.parse(exec.progressJson) as Record<string, unknown> : null
+
+    // Convert progress_json format to SSE events for the TrainingProgress component
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      async start(controller) {
+        const poll = async () => {
+          const [latest] = await db.select().from(executions).where(eq(executions.id, execId))
+          if (!latest) { controller.close(); return }
+
+          const prog = latest.progressJson ? JSON.parse(latest.progressJson) as Record<string, unknown> : null
+          if (prog && typeof prog.step === 'number') {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: 'step',
+              step: prog.step,
+              total: prog.totalSteps ?? 0,
+              loss: null,
+              speed: null,
+              lr: null,
+            })}\n\n`))
+          } else if (prog?.message) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'log', message: prog.message })}\n\n`))
+          }
+
+          if (latest.status === 'completed') {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'complete' })}\n\n`))
+            controller.close()
+            return
+          }
+          if (latest.status === 'error') {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: latest.errorMessage ?? 'Training failed' })}\n\n`))
+            controller.close()
+            return
+          }
+
+          // Poll again in 3s
+          await new Promise(r => setTimeout(r, 3000))
+          await poll()
+        }
+        await poll()
+      },
+    })
+
+    return new Response(stream, {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+    })
   }
 
-  // Modal training — proxy progress from Modal URL or return DB-cached progress
+  // Legacy: Modal training with modalUrl — proxy progress from Modal URL or return DB-cached progress
   if (metadata.modalUrl) {
     try {
       const progressRes = await fetch(`${metadata.modalUrl}/train/${metadata.jobId}/progress`, {
