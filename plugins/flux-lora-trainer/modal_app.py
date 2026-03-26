@@ -136,7 +136,8 @@ def train(config: dict) -> dict:
         for line in proc.stdout:
             line = line.rstrip()
             print(f"[ai-toolkit] {line}")
-            match = re.search(r"step[:\s]+(\d+)", line, re.IGNORECASE)
+            # Match tqdm format "N/M" (e.g. "9/100") or "step: N" / "step N"
+            match = re.search(r"(\d+)/(\d+)\s*\[", line) or re.search(r"step[:\s]+(\d+)", line, re.IGNORECASE)
             if match:
                 current = int(match.group(1))
                 pct = min(100, int(current / max(steps, 1) * 100))
