@@ -31,6 +31,7 @@ trainer_image = (
     .run_commands(
         "git clone https://github.com/ostris/ai-toolkit.git /ai-toolkit",
         "cd /ai-toolkit && pip install -r requirements.txt",
+        "pip install torchaudio",
     )
 )
 
