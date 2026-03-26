@@ -18,6 +18,7 @@ export interface TrainingPayload {
   lr: string
   rank: number
   resolution: number
+  quantize?: boolean
 }
 
 export function buildDatasetSyncArgs(datasetDir: string, datasetId: string): string[] {

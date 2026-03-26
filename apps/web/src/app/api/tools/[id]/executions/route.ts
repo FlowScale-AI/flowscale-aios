@@ -307,7 +307,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!tool) return NextResponse.json({ error: 'Tool not found' }, { status: 404 })
 
   const body = await req.json()
-  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride, device: deviceOverride, provider: providerOverride, modalDeployId } = body
+  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride, device: deviceOverride, provider: providerOverride, modalDeployId, gpu: gpuTier } = body
   const comfyOrgApiKey = comfyOrgApiKeyFromBody || getComfyOrgApiKeyServer()
 
   // ── API-engine tools (non-ComfyUI, plugin-driven) ───────────────────────────
@@ -328,6 +328,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         let payload: TrainingPayload
         try {
           payload = buildTrainingPayload(inputs ?? {})
+          // Disable quantization on high-VRAM GPUs (avoids optimum-quanto CUDA errors)
+          const highVramGpus = ['H100', 'H200', 'B200', 'A100-80GB']
+          if (gpuTier && highVramGpus.includes(gpuTier as string)) {
+            payload.quantize = false
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Invalid training inputs'
           return NextResponse.json({ error: msg }, { status: 400 })
