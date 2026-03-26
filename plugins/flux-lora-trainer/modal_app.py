@@ -28,7 +28,7 @@ trainer_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git", "ffmpeg", "libgl1-mesa-glx", "libglib2.0-0")
     .pip_install(
-        "torch", "torchvision", "transformers", "safetensors", "accelerate",
+        "torch", "torchvision", "torchaudio", "transformers", "safetensors", "accelerate",
         "pyyaml", "peft", "bitsandbytes", "fastapi", "uvicorn", "httpx",
         "huggingface_hub", "diffusers", "starlette",
     )
