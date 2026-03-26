@@ -81,7 +81,10 @@ export function parseProgressLine(line: string): { type: 'progress'; data: Train
   return null
 }
 
-export async function syncDatasetToModal(datasetId: string): Promise<void> {
+export async function syncDatasetToModal(
+  datasetId: string,
+  onProgress?: (message: string) => void,
+): Promise<void> {
   const syncStatus = getDatasetSyncStatus(datasetId)
   if (syncStatus.synced) return
 
@@ -89,8 +92,37 @@ export async function syncDatasetToModal(datasetId: string): Promise<void> {
   if (!existsSync(datasetDir)) throw new Error(`Dataset "${datasetId}" not found locally`)
 
   const args = buildDatasetSyncArgs(datasetDir, datasetId)
-  const result = await runHelper(args)
-  const parsed = JSON.parse(result)
+
+  // Use spawn to read SYNC_PROGRESS lines for UI updates
+  const result = await new Promise<string>((resolve, reject) => {
+    const proc = spawn('python3', [HELPER_SCRIPT, ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 600_000,
+    })
+    let out = ''
+    proc.stdout.on('data', (chunk: Buffer) => {
+      const text = chunk.toString()
+      out += text
+      for (const line of text.split('\n')) {
+        if (line.startsWith('SYNC_PROGRESS:') && onProgress) {
+          try {
+            const prog = JSON.parse(line.slice('SYNC_PROGRESS:'.length)) as { synced: number; total: number; message: string }
+            onProgress(`Syncing dataset: ${prog.message}`)
+          } catch { /* ignore */ }
+        }
+      }
+    })
+    proc.on('close', (code) => {
+      if (code !== 0 && !out.trim()) reject(new Error(`modal-helper exited with code ${code}`))
+      else resolve(out.trim())
+    })
+    proc.on('error', reject)
+  })
+
+  // The last line is the JSON result from _json_out
+  const lines = result.split('\n').filter(l => !l.startsWith('SYNC_PROGRESS:'))
+  const lastLine = lines[lines.length - 1] ?? ''
+  const parsed = JSON.parse(lastLine)
   if (!parsed.success) throw new Error(parsed.error || 'Dataset sync failed')
 
   markDatasetSynced(datasetId)

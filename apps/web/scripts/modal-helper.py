@@ -693,7 +693,7 @@ def cmd_run_training(plugin_dir: str, config_json: str, gpu: str, app_name: str 
 
 
 def cmd_sync_dataset(dataset_dir: str, dataset_id: str, volume_name: str = "flowscale-training-datasets"):
-    """Upload a local dataset directory to a Modal Volume."""
+    """Upload a local dataset directory to a Modal Volume (batch upload)."""
     if not os.path.isdir(dataset_dir):
         _json_out({"success": False, "error": f"Dataset directory not found: {dataset_dir}"})
         return
@@ -703,25 +703,25 @@ def cmd_sync_dataset(dataset_dir: str, dataset_id: str, volume_name: str = "flow
     if not files:
         _json_out({"success": False, "error": "No files in dataset directory"})
         return
-    synced = 0
-    errors = []
-    for f in files:
-        full_path = os.path.join(dataset_dir, f)
-        remote_path = f"{dataset_id}/{f}"
-        try:
-            result = subprocess.run(
-                [MODAL_BIN, "volume", "put", "--force", volume_name, full_path, remote_path],
-                capture_output=True, text=True, timeout=120,
-            )
-            if result.returncode == 0:
-                synced += 1
-            else:
-                errors.append(f"{f}: {result.stderr.strip() or f'exit {result.returncode}'}")
-        except subprocess.TimeoutExpired:
-            errors.append(f"{f}: upload timed out")
-        except Exception as e:
-            errors.append(f"{f}: {e}")
-    _json_out({"success": len(errors) == 0, "synced": synced, "total": len(files), "errors": errors})
+
+    total = len(files)
+    # Batch upload: put the entire directory at once
+    # modal volume put --force <volume> <local_dir> <remote_dir>/
+    try:
+        print(f"SYNC_PROGRESS:{json.dumps({'synced': 0, 'total': total, 'message': f'Uploading {total} files...'})}", flush=True)
+        result = subprocess.run(
+            [MODAL_BIN, "volume", "put", "--force", volume_name, dataset_dir, dataset_id],
+            capture_output=True, text=True, timeout=600,
+        )
+        if result.returncode == 0:
+            print(f"SYNC_PROGRESS:{json.dumps({'synced': total, 'total': total, 'message': f'Uploaded {total} files'})}", flush=True)
+            _json_out({"success": True, "synced": total, "total": total, "errors": []})
+        else:
+            _json_out({"success": False, "synced": 0, "total": total, "errors": [result.stderr.strip() or f"exit {result.returncode}"]})
+    except subprocess.TimeoutExpired:
+        _json_out({"success": False, "error": "Dataset upload timed out (10 min)"})
+    except Exception as e:
+        _json_out({"success": False, "error": str(e)})
 
 
 def cmd_download_training_output(volume_name: str, remote_path: str, dest_path: str):

@@ -359,7 +359,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           try {
             await db.update(executions).set({ progressJson: JSON.stringify({ message: 'Syncing dataset to cloud...' }) })
               .where(eq(executions.id, executionId))
-            await syncDatasetToModal(payload.datasetId)
+            await syncDatasetToModal(payload.datasetId, (msg) => {
+              db.update(executions).set({ progressJson: JSON.stringify({ message: msg }) })
+                .where(eq(executions.id, executionId)).run()
+            })
 
             await db.update(executions).set({ progressJson: JSON.stringify({ message: 'Starting training on Modal...' }) })
               .where(eq(executions.id, executionId))
