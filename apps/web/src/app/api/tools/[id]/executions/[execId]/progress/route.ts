@@ -19,9 +19,33 @@ export async function GET(
     return new Response('Not found', { status: 404 })
   }
 
-  const metadata = exec.metadataJson ? JSON.parse(exec.metadataJson) as { jobId: string; pluginId: string } : null
+  const metadata = exec.metadataJson ? JSON.parse(exec.metadataJson) as { jobId: string; pluginId: string; modalUrl?: string } : null
   if (!metadata) {
     return new Response('No training job metadata', { status: 400 })
+  }
+
+  // Modal training — proxy progress from Modal URL or return DB-cached progress
+  if (metadata.modalUrl) {
+    try {
+      const progressRes = await fetch(`${metadata.modalUrl}/train/${metadata.jobId}/progress`, {
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (progressRes.ok) {
+        const progress = await progressRes.json()
+        return new Response(JSON.stringify(progress), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+    } catch { /* fall through to DB */ }
+
+    if (exec.progressJson) {
+      return new Response(exec.progressJson, {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    return new Response(JSON.stringify({ status: exec.status, message: 'Waiting for progress...' }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
 
   const plugin = getPlugin(metadata.pluginId)
