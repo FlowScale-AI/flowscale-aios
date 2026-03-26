@@ -1664,7 +1664,10 @@ function BuildToolPageInner() {
   return (
     <div className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
+      <div className="flex items-center gap-4 px-8 py-6 border-b border-white/5 shrink-0">
+        <button onClick={() => window.history.back()} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+          <ArrowLeft size={18} />
+        </button>
         <div>
           <h1 className="font-tech text-xl font-semibold text-zinc-100">
             {editId ? 'Edit Tool' : 'Build Tool'}
