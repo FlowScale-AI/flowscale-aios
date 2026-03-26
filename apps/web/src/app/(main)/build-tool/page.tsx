@@ -23,6 +23,7 @@ import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
 import { useModalComfyInstances } from '@/hooks/useModalComfyInstances'
+import { ComputeDropdown, type ComputeGroup } from '@/components/ComputeDropdown'
 
 interface WorkflowIO {
   nodeId: string
@@ -1336,36 +1337,38 @@ function StepTest({
         </div>
       )}
 
-      {/* Run on + Run button */}
+      {/* Compute + Run button */}
       <div className="flex items-center gap-3">
-        <label className="text-xs text-zinc-500 shrink-0">Compute</label>
-        <select
+        <ComputeDropdown
           value={runOn}
-          onChange={(e) => setRunOn(e.target.value)}
-          className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600 max-w-[220px]"
-        >
-          <optgroup label="Local">
-            <option value="auto">Local &middot; Auto-route</option>
-            {comfyInstances.map((inst) => (
-              <option key={inst.id} value={`local:${inst.port}`} disabled={inst.status !== 'running'}>
-                Local &middot; {inst.label}{inst.status !== 'running' ? ` (${inst.status})` : ''}
-              </option>
-            ))}
-          </optgroup>
-          {modalComfyInstances.filter(i => i.status === 'deployed').length > 0 && (
-            <optgroup label="Cloud (Modal)">
-              <option value="modal:auto">Cloud &middot; Auto-route</option>
-              {modalComfyInstances
-                .filter(i => i.status === 'deployed')
-                .map(i => (
-                  <option key={i.id} value={`modal:${i.virtualPort}`}>
-                    Cloud &middot; {i.name} ({i.gpu})
-                  </option>
-                ))
-              }
-            </optgroup>
-          )}
-        </select>
+          onChange={setRunOn}
+          groups={[
+            {
+              label: 'Local',
+              icon: 'local',
+              options: [
+                { value: 'auto', label: 'Auto-route' },
+                ...comfyInstances.map((inst) => ({
+                  value: `local:${inst.port}`,
+                  label: inst.label,
+                  disabled: inst.status !== 'running',
+                })),
+              ],
+            },
+            ...(modalComfyInstances.filter(i => i.status === 'deployed').length > 0
+              ? [{
+                  label: 'Cloud (Modal)',
+                  icon: 'cloud' as const,
+                  options: [
+                    { value: 'modal:auto', label: 'Auto-route' },
+                    ...modalComfyInstances
+                      .filter(i => i.status === 'deployed')
+                      .map(i => ({ value: `modal:${i.virtualPort}`, label: `${i.name} (${i.gpu})` })),
+                  ],
+                }]
+              : []),
+          ]}
+        />
         <button
           onClick={handleRun}
           disabled={running || !resolvedPort}
