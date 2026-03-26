@@ -368,16 +368,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               .where(eq(executions.id, executionId))
 
             const recentLogs: string[] = []
+            let lastProgress: Record<string, unknown> = { step: 0, totalSteps: payload.steps, pct: 0, message: 'Starting training on Modal...' }
+            const flushLogs = () => {
+              db.update(executions).set({ progressJson: JSON.stringify({ ...lastProgress, logs: recentLogs.slice(-50) }) })
+                .where(eq(executions.id, executionId)).run()
+            }
             const handle = runModalTraining(
               { ...payload, jobId: executionId },
               resolvedGpu,
               (progress) => {
-                db.update(executions).set({ progressJson: JSON.stringify({ ...progress, logs: recentLogs.slice(-50) }) })
-                  .where(eq(executions.id, executionId)).run()
+                lastProgress = progress
+                flushLogs()
               },
               (line) => {
                 recentLogs.push(line)
                 if (recentLogs.length > 100) recentLogs.shift()
+                flushLogs()
               },
             )
 
