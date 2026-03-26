@@ -934,6 +934,11 @@ export default function ToolPage() {
 
   // Derive provider/target from runOn
   const isModalSelected = runOn.startsWith('modal:')
+  const isTrainingPlugin = tool?.engine === 'api' && (() => {
+    try { const wf = JSON.parse(tool.workflowJson ?? '{}'); return wf.pluginId?.includes('trainer') }
+    catch { return false }
+  })()
+  const [selectedGpuTier, setSelectedGpuTier] = useState('A100-40GB')
   const selectedProvider: 'local' | 'modal' = isModalSelected ? 'modal' : 'local'
   const selectedTarget = runOn === 'auto' ? '' : runOn.includes(':') ? runOn.split(':').slice(1).join(':') : runOn
 
@@ -1058,7 +1063,7 @@ export default function ToolPage() {
           comfyOrgApiKey: getComfyOrgApiKey() || undefined,
           ...(pinnedPort != null ? { comfyPort: pinnedPort } : {}),
           ...(selectedProvider === 'modal'
-            ? { provider: 'modal', modalDeployId: selectedTarget || 'auto' }
+            ? { provider: 'modal', modalDeployId: selectedTarget || 'auto', ...(isTrainingPlugin ? { gpu: selectedGpuTier } : {}) }
             : effectiveDevice ? { device: effectiveDevice } : {}),
         }),
       })
@@ -1290,6 +1295,20 @@ export default function ToolPage() {
                 </>
               )}
             </select>
+            {isModalSelected && isTrainingPlugin && (
+              <select
+                value={selectedGpuTier}
+                onChange={(e) => setSelectedGpuTier(e.target.value)}
+                className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
+              >
+                <option value="T4">T4 (16 GB)</option>
+                <option value="L4">L4 (24 GB)</option>
+                <option value="A10">A10 (24 GB)</option>
+                <option value="A100-40GB">A100 40 GB</option>
+                <option value="A100-80GB">A100 80 GB</option>
+                <option value="H100">H100 (80 GB)</option>
+              </select>
+            )}
           </div>
         )}
         <button
