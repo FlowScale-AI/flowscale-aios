@@ -131,12 +131,21 @@ class LoRATrainer:
             self._jobs[job_id]["message"] = "Starting training..."
 
         try:
+            cmd = ["python", "run.py", config_path]
+            print(f"[trainer] Running: {' '.join(cmd)}")
+            print(f"[trainer] Config: {config_path}")
+            print(f"[trainer] Dataset dir: {dataset_dir} (exists={dataset_dir.exists()}, files={list(dataset_dir.iterdir()) if dataset_dir.exists() else []})")
+            print(f"[trainer] Output dir: {output_dir}")
+
             proc = subprocess.Popen(
-                ["python", "-m", "toolkit.job", config_path],
+                cmd,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd="/ai-toolkit",
             )
+            all_lines = []
             for line in proc.stdout:
                 line = line.rstrip()
+                all_lines.append(line)
+                print(f"[ai-toolkit] {line}")
                 match = re.search(r"step[:\s]+(\d+)", line, re.IGNORECASE)
                 if match:
                     current = int(match.group(1))
@@ -150,6 +159,9 @@ class LoRATrainer:
                         proc.terminate()
                         return
             proc.wait()
+            print(f"[trainer] Process exited with code {proc.returncode}")
+            if all_lines:
+                print(f"[trainer] Last 5 lines: {all_lines[-5:]}")
             if proc.returncode == 0:
                 # ai-toolkit may write to a subdirectory — find the .safetensors file
                 # Search the entire output dir recursively
@@ -222,6 +234,42 @@ class LoRATrainer:
                 job["message"] = "Cancelled by user"
             return JSONResponse({"ok": True, "status": "cancelled"})
 
+        async def debug(request: Request):
+            """Run diagnostics on the container."""
+            import subprocess as sp
+            info = {}
+            # Check ai-toolkit
+            try:
+                r = sp.run(["python", "-c", "import toolkit; print(toolkit.__file__)"], capture_output=True, text=True, cwd="/ai-toolkit", timeout=10)
+                info["toolkit_import"] = r.stdout.strip() or r.stderr.strip()
+                info["toolkit_ok"] = r.returncode == 0
+            except Exception as e:
+                info["toolkit_import"] = str(e)
+                info["toolkit_ok"] = False
+            # Check yaml
+            try:
+                r = sp.run(["python", "-c", "import yaml; print(yaml.__version__)"], capture_output=True, text=True, timeout=5)
+                info["yaml_version"] = r.stdout.strip()
+            except Exception as e:
+                info["yaml_version"] = str(e)
+            # Check datasets volume
+            ds_path = Path("/datasets")
+            info["datasets_exists"] = ds_path.exists()
+            if ds_path.exists():
+                info["datasets_contents"] = [str(p) for p in list(ds_path.rglob("*"))[:20]]
+            # Check outputs volume
+            out_path = Path("/outputs")
+            info["outputs_exists"] = out_path.exists()
+            if out_path.exists():
+                info["outputs_contents"] = [str(p) for p in list(out_path.rglob("*"))[:20]]
+            # Check GPU
+            try:
+                r = sp.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"], capture_output=True, text=True, timeout=5)
+                info["gpu"] = r.stdout.strip()
+            except Exception as e:
+                info["gpu"] = str(e)
+            return JSONResponse(info)
+
         async def download_output(request: Request):
             """Stream the trained .safetensors file directly from the container."""
             from starlette.responses import FileResponse
@@ -239,6 +287,7 @@ class LoRATrainer:
 
         return Starlette(routes=[
             Route("/health", health, methods=["GET"]),
+            Route("/debug", debug, methods=["GET"]),
             Route("/train", start_train, methods=["POST"]),
             Route("/train/{job_id}/progress", get_progress, methods=["GET"]),
             Route("/train/{job_id}/cancel", cancel_train, methods=["POST"]),
