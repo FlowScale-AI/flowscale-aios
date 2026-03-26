@@ -288,6 +288,10 @@ export function getDeployments(pluginId: string): ModalDeploymentRecord[] {
   return readDeployments()[pluginId] ?? []
 }
 
+export function getAllDeployments(): DeploymentsFile {
+  return readDeployments()
+}
+
 export function getDeploymentById(pluginId: string, deployId: string): ModalDeploymentRecord | null {
   const records = readDeployments()[pluginId] ?? []
   return records.find((r) => r.id === deployId) ?? null

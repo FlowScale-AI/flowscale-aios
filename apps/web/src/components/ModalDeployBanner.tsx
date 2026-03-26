@@ -180,32 +180,70 @@ export function ModalDeployBanner({
     setPopupName(generateDeployName(pluginId, gpu, deployments))
   }
 
+  const [expanded, setExpanded] = useState(false)
+  const deployedCount = allDeployments.filter(d => d.status === 'deployed').length
+  const failedCount = allDeployments.filter(d => d.status === 'failed').length
+  const deployingCount = allDeployments.filter(d => d.status === 'deploying').length
+
+  // Build compact status summary
+  const statusParts: string[] = []
+  if (deployedCount > 0) statusParts.push(`${deployedCount} deployed`)
+  if (deployingCount > 0) statusParts.push(`${deployingCount} deploying`)
+  if (failedCount > 0) statusParts.push(`${failedCount} failed`)
+
   return (
-    <div className="px-6 py-2.5 bg-purple-950/20 border-b border-purple-900/30 text-sm relative">
-      {/* Header row */}
+    <div className="px-6 py-2 bg-purple-950/20 border-b border-purple-900/30 text-sm relative">
+      {/* Compact header row */}
       <div className="flex items-center gap-2">
-        <Cloud size={16} weight="duotone" className="text-purple-400" />
-        <span className="text-purple-300 font-medium">Modal Cloud</span>
-        <span className="text-purple-400/60 text-xs">
-          {allDeployments.length} deployment{allDeployments.length !== 1 ? 's' : ''}
-        </span>
-        {isAnyDeploying && (
-          <span className="flex items-center gap-1 text-purple-400 text-xs">
-            <Spinner size={12} className="animate-spin" />
-            Deploying...
-          </span>
+        <Cloud size={14} weight="duotone" className="text-purple-400 shrink-0" />
+        <span className="text-purple-300 text-xs font-medium">Modal</span>
+
+        {/* Compact status chips */}
+        {allDeployments.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            {deployedCount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                {deployedCount}
+              </span>
+            )}
+            {deployingCount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-purple-400">
+                <Spinner size={10} className="animate-spin" />
+                {deployingCount}
+              </span>
+            )}
+            {failedCount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-red-400">
+                <Warning size={10} />
+                {failedCount}
+              </span>
+            )}
+          </div>
         )}
+
+        {/* Expand/collapse toggle when there are deployments */}
+        {allDeployments.length > 0 && (
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="text-purple-400/60 hover:text-purple-300 transition-colors"
+            title={expanded ? 'Collapse' : 'Expand'}
+          >
+            {expanded ? <CaretUp size={12} /> : <CaretDown size={12} />}
+          </button>
+        )}
+
         <button
           onClick={handleOpenPopup}
           disabled={isAnyDeploying}
-          className="ml-auto flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
+          className="ml-auto flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
         >
           + Deploy
         </button>
       </div>
 
-      {/* Deployment list */}
-      {allDeployments.length > 0 && (
+      {/* Expanded deployment list */}
+      {expanded && allDeployments.length > 0 && (
         <div className="mt-2 flex flex-col gap-1">
           {allDeployments.map((deployment) => {
             const isStopping = undployingIds.has(deployment.id)
@@ -220,7 +258,6 @@ export function ModalDeployBanner({
                     : 'bg-purple-950/30 border-purple-900/20'
                 } ${isStopping ? 'opacity-50' : ''}`}
               >
-                {/* Status indicator */}
                 {(deployment.status === 'deploying' || isStopping) && (
                   <Spinner size={12} className="animate-spin text-purple-400 shrink-0" />
                 )}
@@ -233,39 +270,23 @@ export function ModalDeployBanner({
                   {isFailed && <span className="text-red-400 ml-1">Failed</span>}
                 </span>
 
-                {/* GPU badge */}
                 <span className="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-800 border border-zinc-700 text-zinc-400 rounded shrink-0">
                   {deployment.gpu}
                 </span>
 
-                {/* Warm/Cold indicator */}
                 {deployment.status === 'deployed' && deployment.warm !== null && (
-                  <span
-                    className={`flex items-center gap-1 text-xs shrink-0 ${
-                      deployment.warm ? 'text-emerald-400' : 'text-zinc-500'
-                    }`}
-                  >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                        deployment.warm ? 'bg-emerald-400' : 'bg-zinc-600'
-                      }`}
-                    />
+                  <span className={`flex items-center gap-1 text-[10px] shrink-0 ${deployment.warm ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${deployment.warm ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
                     {deployment.warm ? 'Warm' : 'Cold'}
                   </span>
                 )}
 
-                {/* Error expand toggle */}
                 {isFailed && deployment.error && (
-                  <button
-                    onClick={() => toggleError(deployment.id)}
-                    className="text-red-400 hover:text-red-300 transition-colors shrink-0"
-                    title="Show error details"
-                  >
+                  <button onClick={() => toggleError(deployment.id)} className="text-red-400 hover:text-red-300 transition-colors shrink-0" title="Show error details">
                     {isErrorExpanded ? <CaretUp size={12} /> : <CaretDown size={12} />}
                   </button>
                 )}
 
-                {/* Undeploy / Dismiss button */}
                 <button
                   onClick={() => handleUndeploy(deployment.id)}
                   disabled={isStopping}
@@ -276,7 +297,6 @@ export function ModalDeployBanner({
                 </button>
               </div>
 
-              {/* Error details */}
               {isFailed && isErrorExpanded && deployment.error && (
                 <div className="mt-1 px-2 py-1.5 bg-red-950/20 border border-red-500/10 rounded text-[11px] font-mono text-red-300/80 max-h-40 overflow-y-auto whitespace-pre-wrap break-all">
                   {deployment.error}
@@ -285,24 +305,24 @@ export function ModalDeployBanner({
             </div>
             )
           })}
-        </div>
-      )}
 
-      {/* Deploy logs toggle + panel */}
-      {hasFailedOrDeploying && (
-        <button
-          onClick={() => setShowLogs((v) => !v)}
-          className="mt-2 flex items-center gap-1 text-[11px] text-purple-400/70 hover:text-purple-300 transition-colors"
-        >
-          {showLogs ? <CaretUp size={10} /> : <CaretDown size={10} />}
-          {showLogs ? 'Hide deploy logs' : 'View deploy logs'}
-        </button>
-      )}
-      {showLogs && (
-        <div className="mt-1.5 rounded border border-purple-900/30 bg-black/30 overflow-hidden">
-          <pre className="px-3 py-2 text-[11px] font-mono text-zinc-400 max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
-            {logData?.logs || 'No logs available yet...'}
-          </pre>
+          {/* Deploy logs toggle + panel */}
+          {hasFailedOrDeploying && (
+            <button
+              onClick={() => setShowLogs((v) => !v)}
+              className="mt-1 flex items-center gap-1 text-[11px] text-purple-400/70 hover:text-purple-300 transition-colors"
+            >
+              {showLogs ? <CaretUp size={10} /> : <CaretDown size={10} />}
+              {showLogs ? 'Hide deploy logs' : 'View deploy logs'}
+            </button>
+          )}
+          {showLogs && (
+            <div className="mt-1.5 rounded border border-purple-900/30 bg-black/30 overflow-hidden">
+              <pre className="px-3 py-2 text-[11px] font-mono text-zinc-400 max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
+                {logData?.logs || 'No logs available yet...'}
+              </pre>
+            </div>
+          )}
         </div>
       )}
 

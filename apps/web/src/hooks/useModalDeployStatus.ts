@@ -59,13 +59,16 @@ export function useModalDeployStatus(pluginId: string | null, selectedTarget?: s
 
 /**
  * Fetches Modal logs (deploy + runtime). Only enable when the user
- * is actively viewing the Logs tab with Modal selected.
+ * is actively viewing the Logs tab — not just when Modal is selected,
+ * since fetching logs hits the Modal API and can wake cold containers.
+ *
+ * Always skips health checks to avoid burning GPU credits.
  */
 export function useModalLogs(pluginId: string | null, enabled: boolean) {
   return useQuery<{ logs: string }>({
     queryKey: ['modal-logs', pluginId],
     queryFn: async () => {
-      const res = await fetch(`/api/modal/deploy/${pluginId}`)
+      const res = await fetch(`/api/modal/deploy/${pluginId}?health=false`)
       if (!res.ok) throw new Error('Failed to fetch Modal logs')
       const data = await res.json()
       return { logs: data.logs ?? '' }

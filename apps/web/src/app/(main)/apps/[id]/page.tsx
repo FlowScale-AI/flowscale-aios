@@ -673,7 +673,7 @@ function BottomTabs({
   effectiveComfyPort,
   comfyInstanceLabel,
   isModalSelected,
-  modalLogs,
+  pluginId,
 }: {
   tool: Tool
   executions: Execution[]
@@ -682,12 +682,19 @@ function BottomTabs({
   effectiveComfyPort?: number | null
   comfyInstanceLabel?: string
   isModalSelected?: boolean
-  modalLogs?: string
+  pluginId?: string | null
 }) {
   const inferenceStatus = useInferenceStatus()
   const availableTabs = (['logs', 'history'] as const)
   const defaultTab = tool.engine === 'api' ? 'logs' : 'logs'
   const [tab, setTab] = useState<'history' | 'logs'>(defaultTab)
+
+  // Only fetch Modal logs when user is on the logs tab AND modal is selected
+  const { data: modalLogsData } = useModalLogs(
+    pluginId ?? null,
+    tab === 'logs' && !!isModalSelected,
+  )
+  const modalLogs = modalLogsData?.logs
 
   // Auto-switch to logs when server is starting
   useEffect(() => {
@@ -834,7 +841,6 @@ export default function ToolPage() {
   })
   const comfyInstances = comfyManageData?.instances ?? []
   const runningInstances = comfyInstances.filter((i) => i.status === 'running')
-  const [selectedComfyPort, setSelectedComfyPort] = useState<number | 'auto' | 'modal' | null>(null)
   const { data: modalStatus } = useModalStatus()
   const { data: modalComfyData } = useModalComfyInstances()
   const modalComfyInstances = modalComfyData?.instances ?? []
@@ -858,36 +864,66 @@ export default function ToolPage() {
     enabled: tool?.engine === 'api',
   })
   const gpuDevices = gpuData?.instances ?? []
-  // Devices occupied by running ComfyUI instances
   const busyDevices = new Set(runningInstances.map((i) => i.device))
-  const [selectedProvider, setSelectedProvider] = useState<'local' | 'modal'>('local')
-  const [selectedTarget, setSelectedTarget] = useState<string>('')  // '' = Auto
-  const isModalSelected = selectedProvider === 'modal'
 
-  // Always fetch to get `supported` flag for showing Modal button,
-  // but only do live status polling when Modal is actually selected
+  // ── Unified "Run on" selection ─────────────────────────────────────────────────
+  // Values: "auto" (local auto), "local:{port|device}" (specific local), "modal:auto", "modal:{id|port}"
+  const STORAGE_KEY = `flowscale-tool-compute-${id}`
+  const [runOn, setRunOnState] = useState<string>('auto')
+  const runOnInitialized = useRef(false)
+
+  // Load persisted value once tool + instances are ready
+  useEffect(() => {
+    if (runOnInitialized.current || !tool) return
+    runOnInitialized.current = true
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY)
+      if (saved) {
+        setRunOnState(saved)
+        return
+      }
+    } catch { /* ignore */ }
+    // Default: check tool's preferred compute if set
+    const wf = tool.workflowJson ? (() => { try { return JSON.parse(tool.workflowJson) } catch { return null } })() : null
+    if (wf?.preferredCompute === 'modal') {
+      setRunOnState('modal:auto')
+    }
+  }, [tool, STORAGE_KEY])
+
+  const setRunOn = useCallback((value: string) => {
+    setRunOnState(value)
+    try { localStorage.setItem(STORAGE_KEY, value) } catch { /* ignore */ }
+  }, [STORAGE_KEY])
+
+  // Derive provider/target from runOn
+  const isModalSelected = runOn.startsWith('modal:')
+  const selectedProvider: 'local' | 'modal' = isModalSelected ? 'modal' : 'local'
+  const selectedTarget = runOn === 'auto' ? '' : runOn.includes(':') ? runOn.split(':').slice(1).join(':') : runOn
+
+  // Always fetch to get `supported` flag for showing Modal button
   const { data: modalDeployData } = useModalDeployStatus(pluginId, isModalSelected ? selectedTarget : undefined)
   const modalSupported = modalDeployData?.supported ?? false
 
-  // Fetch Modal logs separately — only when Modal is selected (avoids expensive subprocess)
-  const { data: modalLogsData } = useModalLogs(pluginId, isModalSelected)
-  // If auto, pick the first available (non-busy) device
-  const effectiveDevice = selectedProvider === 'local'
+  // Modal logs are fetched inside BottomTabs only when the logs tab is active
+
+  // Effective device for API tools
+  const effectiveDevice = !isModalSelected
     ? (selectedTarget || (gpuDevices.find((d) => !busyDevices.has(d.device))?.device ?? ''))
     : ''
 
-  // Default to tool's configured port or first running instance
-  // When Modal provider is selected for ComfyUI tools, use the virtual port
-  const effectiveComfyPort: number | null =
-    tool?.engine === 'comfyui' && selectedProvider === 'modal'
-      ? (selectedTarget ? Number(selectedTarget) : (modalComfyInstances.find(i => i.status === 'deployed')?.virtualPort ?? null))
-      : tool?.engine === 'comfyui' && selectedProvider === 'local'
-      ? (selectedTarget ? Number(selectedTarget) : (tool?.comfyPort ?? runningInstances[0]?.port ?? null))
-      : selectedComfyPort === 'modal'
-      ? null
-      : selectedComfyPort === 'auto' || selectedComfyPort === null
-      ? (tool?.comfyPort ?? runningInstances[0]?.port ?? null)
-      : selectedComfyPort
+  // Effective ComfyUI port
+  const effectiveComfyPort: number | null = (() => {
+    if (tool?.engine === 'comfyui' && isModalSelected) {
+      const target = selectedTarget === 'auto' ? '' : selectedTarget
+      return target ? Number(target) : (modalComfyInstances.find(i => i.status === 'deployed')?.virtualPort ?? null)
+    }
+    if (tool?.engine === 'comfyui') {
+      return selectedTarget ? Number(selectedTarget) : (tool?.comfyPort ?? runningInstances[0]?.port ?? null)
+    }
+    // API-engine tools
+    if (isModalSelected) return null
+    return tool?.comfyPort ?? runningInstances[0]?.port ?? null
+  })()
   const comfyInstanceLabel = effectiveComfyPort
     ? comfyInstances.find((i) => i.port === effectiveComfyPort)?.label ?? `:${effectiveComfyPort}`
     : undefined
@@ -927,20 +963,21 @@ export default function ToolPage() {
   /** Resolve the port: pinned port if user selected one, Modal virtual port for cloud ComfyUI, undefined to let server auto-route. */
   const resolveComfyPort = useCallback((): number | 'modal' | undefined => {
     // ComfyUI-engine tools with Modal provider: use virtual port
-    if (tool?.engine === 'comfyui' && selectedProvider === 'modal') {
-      return selectedTarget
-        ? Number(selectedTarget)
+    if (tool?.engine === 'comfyui' && isModalSelected) {
+      const target = selectedTarget === 'auto' ? '' : selectedTarget
+      return target
+        ? Number(target)
         : (modalComfyInstances.find(i => i.status === 'deployed')?.virtualPort ?? undefined)
     }
     // ComfyUI-engine tools with local provider: use selected target port or auto-route
-    if (tool?.engine === 'comfyui' && selectedProvider === 'local') {
+    if (tool?.engine === 'comfyui') {
       return selectedTarget ? Number(selectedTarget) : undefined
     }
-    if (selectedComfyPort === 'modal') return 'modal'
-    if (selectedComfyPort !== null && selectedComfyPort !== 'auto') return selectedComfyPort
+    // API-engine tools on Modal
+    if (isModalSelected) return 'modal'
     // Let the server handle auto-routing (least-busy across all users)
     return undefined
-  }, [selectedComfyPort, selectedProvider, selectedTarget, tool?.engine, modalComfyInstances])
+  }, [isModalSelected, selectedTarget, tool?.engine, modalComfyInstances])
 
   const runMutation = useMutation<ExecResult, Error>({
     mutationFn: async () => {
@@ -1123,80 +1160,69 @@ export default function ToolPage() {
             {stopping ? 'Stopping…' : 'Stop'}
           </button>
         )}
-        {/* Instance selector for ComfyUI tools */}
-        {!isArtist && tool.engine === 'comfyui' && (
-          <>
+        {/* Unified "Run on" selector */}
+        {!isArtist && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-zinc-500">Compute</span>
             <select
-              value={selectedProvider}
-              onChange={(e) => { setSelectedProvider(e.target.value as 'local' | 'modal'); setSelectedTarget('') }}
-              className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
+              value={runOn}
+              onChange={(e) => setRunOn(e.target.value)}
+              className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600 max-w-[220px]"
             >
-              <option value="local">Local</option>
-              {modalComfyInstances.filter(i => i.status === 'deployed').length > 0 && (
-                <option value="modal">Modal</option>
+              {tool.engine === 'comfyui' ? (
+                <>
+                  <optgroup label="Local">
+                    <option value="auto">Local &middot; Auto-route</option>
+                    {comfyInstances.map((inst) => (
+                      <option key={inst.id} value={`local:${inst.port}`} disabled={inst.status !== 'running'}>
+                        Local &middot; {inst.label}{inst.status !== 'running' ? ` (${inst.status})` : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                  {modalComfyInstances.filter(i => i.status === 'deployed').length > 0 && (
+                    <optgroup label="Cloud (Modal)">
+                      <option value="modal:auto">Cloud &middot; Auto-route</option>
+                      {modalComfyInstances
+                        .filter(i => i.status === 'deployed')
+                        .map(i => (
+                          <option key={i.id} value={`modal:${i.virtualPort}`}>
+                            Cloud &middot; {i.name} ({i.gpu})
+                          </option>
+                        ))
+                      }
+                    </optgroup>
+                  )}
+                </>
+              ) : (
+                <>
+                  <optgroup label="Local">
+                    <option value="auto">Local &middot; Auto-route</option>
+                    {gpuDevices.map((d) => {
+                      const busy = busyDevices.has(d.device)
+                      return (
+                        <option key={d.id} value={`local:${d.device}`} disabled={busy}>
+                          Local &middot; {d.label}{busy ? ' — in use' : ''}
+                        </option>
+                      )
+                    })}
+                  </optgroup>
+                  {(modalSupported || isModalSelected) && modalStatus?.authenticated && (
+                    <optgroup label="Cloud (Modal)">
+                      <option value="modal:auto">Cloud &middot; Auto-route</option>
+                      {(modalDeployData?.deployments ?? [])
+                        .filter(d => d.status === 'deployed')
+                        .map((d) => (
+                          <option key={d.id} value={`modal:${d.id}`}>
+                            Cloud &middot; {d.name} ({d.gpu})
+                          </option>
+                        ))
+                      }
+                    </optgroup>
+                  )}
+                </>
               )}
             </select>
-            <select
-              value={selectedTarget}
-              onChange={(e) => setSelectedTarget(e.target.value)}
-              className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
-            >
-              <option value="">Auto</option>
-              {selectedProvider === 'local' && comfyInstances.map((inst) => (
-                <option key={inst.id} value={String(inst.port)} disabled={inst.status !== 'running'}>
-                  {inst.label}{inst.status !== 'running' ? ` (${inst.status})` : ''}
-                </option>
-              ))}
-              {selectedProvider === 'modal' && modalComfyInstances
-                .filter(i => i.status === 'deployed')
-                .map(i => (
-                  <option key={i.id} value={String(i.virtualPort)}>
-                    {i.name} ({i.gpu})
-                  </option>
-                ))
-              }
-            </select>
-          </>
-        )}
-        {/* Provider + Target selectors for API tools */}
-        {!isArtist && tool.engine === 'api' && (
-          <>
-            {/* Provider dropdown */}
-            <select
-              value={selectedProvider}
-              onChange={(e) => { setSelectedProvider(e.target.value as 'local' | 'modal'); setSelectedTarget('') }}
-              className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
-            >
-              <option value="local">Local</option>
-              {(modalSupported || selectedProvider === 'modal') && modalStatus?.authenticated && (
-                <option value="modal">Modal</option>
-              )}
-            </select>
-            {/* Target dropdown */}
-            <select
-              value={selectedTarget}
-              onChange={(e) => setSelectedTarget(e.target.value)}
-              className="px-2 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-md text-zinc-300 focus:outline-none focus:border-zinc-600"
-            >
-              <option value="">Auto</option>
-              {selectedProvider === 'local' && gpuDevices.map((d) => {
-                const busy = busyDevices.has(d.device)
-                return (
-                  <option key={d.id} value={d.device} disabled={busy}>
-                    {d.label}{busy ? ' — in use' : ''}
-                  </option>
-                )
-              })}
-              {selectedProvider === 'modal' && (modalDeployData?.deployments ?? [])
-                .filter(d => d.status === 'deployed')
-                .map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} ({d.gpu})
-                  </option>
-                ))
-              }
-            </select>
-          </>
+          </div>
         )}
         <button
           onClick={() => runMutation.mutate()}
@@ -1344,7 +1370,7 @@ export default function ToolPage() {
                 effectiveComfyPort={effectiveComfyPort}
                 comfyInstanceLabel={comfyInstanceLabel}
                 isModalSelected={isModalSelected}
-                modalLogs={modalLogsData?.logs}
+                pluginId={pluginId}
               />
             </div>
           </Panel>
