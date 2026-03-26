@@ -368,7 +368,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               .where(eq(executions.id, executionId))
 
             const recentLogs: string[] = []
-            let lastProgress: Record<string, unknown> = { step: 0, totalSteps: payload.steps, pct: 0, message: 'Starting training on Modal...' }
+            let lastProgress: Record<string, unknown> = { step: 0, totalSteps: payload.steps, pct: 0, message: 'Starting training on Modal...' } as Record<string, unknown>
             const flushLogs = () => {
               db.update(executions).set({ progressJson: JSON.stringify({ ...lastProgress, logs: recentLogs.slice(-50) }) })
                 .where(eq(executions.id, executionId)).run()
@@ -377,7 +377,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               { ...payload, jobId: executionId },
               resolvedGpu,
               (progress) => {
-                lastProgress = progress
+                lastProgress = progress as unknown as Record<string, unknown>
                 flushLogs()
               },
               (line) => {
