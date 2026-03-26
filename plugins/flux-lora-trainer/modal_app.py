@@ -106,7 +106,7 @@ class LoRATrainer:
                         "noise_scheduler": "flowmatch", "optimizer": "adamw8bit", "lr": lr,
                         "ema_config": {"use_ema": True, "ema_decay": 0.99}, "dtype": "bf16",
                     },
-                    "model": {"name_or_path": model_id, "is_flux": "flux" in model_id.lower(), "quantize": config.get("quantize", True)},
+                    "model": {"name_or_path": model_id, "is_flux": "flux" in model_id.lower(), "quantize": config.get("quantize", False)},
                     "sample": {
                         "sampler": "flowmatch", "sample_every": max(200, steps // 5),
                         "width": resolution, "height": resolution,
