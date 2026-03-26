@@ -27,11 +27,7 @@ outputs_volume = modal.Volume.from_name("flowscale-training-outputs", create_if_
 trainer_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git", "ffmpeg", "libgl1-mesa-glx", "libglib2.0-0")
-    .pip_install(
-        "torch", "torchvision", "torchaudio", "transformers", "safetensors", "accelerate",
-        "pyyaml", "peft", "bitsandbytes", "fastapi", "uvicorn", "httpx",
-        "huggingface_hub", "diffusers", "starlette",
-    )
+    .pip_install("fastapi", "uvicorn", "starlette", "httpx", "pyyaml")
     .run_commands(
         "git clone https://github.com/ostris/ai-toolkit.git /ai-toolkit",
         "cd /ai-toolkit && pip install -r requirements.txt",
