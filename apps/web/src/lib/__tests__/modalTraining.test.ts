@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDatasetSyncArgs, buildTrainingPayload } from '../modalTraining'
+import { buildDatasetSyncArgs, buildTrainingPayload, parseProgressLine } from '../modalTraining'
 
 describe('buildDatasetSyncArgs', () => {
   it('returns correct args for sync-dataset command', () => {
@@ -48,5 +48,34 @@ describe('buildTrainingPayload', () => {
 
   it('throws if outputName is missing', () => {
     expect(() => buildTrainingPayload({ 'api__datasetId': 'x' })).toThrow('outputName is required')
+  })
+})
+
+describe('parseProgressLine', () => {
+  it('parses a PROGRESS line', () => {
+    const line = 'PROGRESS:{"step":50,"totalSteps":1000,"pct":5,"message":"step 50"}'
+    const result = parseProgressLine(line)
+    expect(result).toEqual({ type: 'progress', data: { step: 50, totalSteps: 1000, pct: 5, message: 'step 50' } })
+  })
+
+  it('parses a RESULT line with completed status', () => {
+    const line = 'RESULT:{"status":"completed","outputVolumePath":"/outputs/abc/my-lora.safetensors"}'
+    const result = parseProgressLine(line)
+    expect(result).toEqual({ type: 'result', data: { status: 'completed', outputVolumePath: '/outputs/abc/my-lora.safetensors' } })
+  })
+
+  it('parses a RESULT line with failed status', () => {
+    const line = 'RESULT:{"status":"failed","error":"Dataset not found"}'
+    const result = parseProgressLine(line)
+    expect(result).toEqual({ type: 'result', data: { status: 'failed', error: 'Dataset not found' } })
+  })
+
+  it('returns null for non-protocol lines', () => {
+    expect(parseProgressLine('[ai-toolkit] Loading model...')).toBeNull()
+    expect(parseProgressLine('')).toBeNull()
+  })
+
+  it('returns null for malformed JSON', () => {
+    expect(parseProgressLine('PROGRESS:{bad json')).toBeNull()
   })
 })

@@ -1,7 +1,7 @@
 import { spawn } from 'child_process'
 import { join } from 'path'
 import { homedir } from 'os'
-import { existsSync, copyFileSync, mkdirSync, writeFileSync } from 'fs'
+import { existsSync, copyFileSync, mkdirSync } from 'fs'
 import { getDatasetDir, getDatasetSyncStatus, markDatasetSynced } from './training'
 import { getComfyManagedPath } from './providerSettings'
 
@@ -9,6 +9,9 @@ const HELPER_SCRIPT = join(process.cwd(), 'scripts', 'modal-helper.py')
 const API_OUTPUTS_DIR = join(homedir(), '.flowscale', 'aios-outputs')
 const DATASETS_VOLUME = 'flowscale-training-datasets'
 const OUTPUTS_VOLUME = 'flowscale-training-outputs'
+
+// Path to the trainer plugin directory (contains modal_app.py)
+const TRAINER_PLUGIN_DIR = join(process.cwd(), '..', '..', 'plugins', 'flux-lora-trainer')
 
 export interface TrainingPayload {
   datasetId: string
@@ -19,6 +22,27 @@ export interface TrainingPayload {
   rank: number
   resolution: number
   quantize?: boolean
+}
+
+export interface TrainingProgress {
+  step: number
+  totalSteps: number
+  pct: number
+  message: string
+}
+
+export interface TrainingResult {
+  success: boolean
+  status?: string
+  outputVolumePath?: string
+  error?: string
+}
+
+export interface TrainingHandle {
+  /** Resolves when training completes or fails. */
+  result: Promise<TrainingResult>
+  /** Kill the subprocess tree — Modal will terminate the remote container. */
+  cancel: () => void
 }
 
 export function buildDatasetSyncArgs(datasetDir: string, datasetId: string): string[] {
@@ -42,6 +66,20 @@ export function buildTrainingPayload(inputs: Record<string, unknown>): TrainingP
   }
 }
 
+export function parseProgressLine(line: string): { type: 'progress'; data: TrainingProgress } | { type: 'result'; data: Record<string, unknown> } | null {
+  if (line.startsWith('PROGRESS:')) {
+    try {
+      return { type: 'progress', data: JSON.parse(line.slice('PROGRESS:'.length)) as TrainingProgress }
+    } catch { return null }
+  }
+  if (line.startsWith('RESULT:')) {
+    try {
+      return { type: 'result', data: JSON.parse(line.slice('RESULT:'.length)) as Record<string, unknown> }
+    } catch { return null }
+  }
+  return null
+}
+
 export async function syncDatasetToModal(datasetId: string): Promise<void> {
   const syncStatus = getDatasetSyncStatus(datasetId)
   if (syncStatus.synced) return
@@ -57,37 +95,95 @@ export async function syncDatasetToModal(datasetId: string): Promise<void> {
   markDatasetSynced(datasetId)
 }
 
-export async function startModalTraining(
-  modalUrl: string,
-  payload: TrainingPayload,
-): Promise<{ jobId: string }> {
-  const res = await fetch(`${modalUrl}/train`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(30_000),
+/**
+ * Run Modal training via `modal run` (ephemeral).
+ *
+ * Spawns `modal-helper.py run-training`, streams progress via callback.
+ * Returns a handle with a `result` promise and a `cancel()` method.
+ */
+export function runModalTraining(
+  payload: TrainingPayload & { jobId: string },
+  gpu: string,
+  onProgress: (progress: TrainingProgress) => void,
+): TrainingHandle {
+  const configJson = JSON.stringify(payload)
+  const args = ['run-training', TRAINER_PLUGIN_DIR, configJson, gpu]
+
+  const proc = spawn('python3', [HELPER_SCRIPT, ...args], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 7_500_000, // slightly above Modal's 7200s timeout
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => `HTTP ${res.status}`)
-    throw new Error(`Failed to start Modal training: ${text}`)
+
+  const result = new Promise<TrainingResult>((resolve, reject) => {
+    let lineBuf = ''
+    let lastJsonLine = ''  // last non-protocol line that could be _json_out() result
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      const text = chunk.toString()
+      const lines = (lineBuf + text).split('\n')
+      lineBuf = lines.pop() ?? ''
+
+      for (const raw of lines) {
+        const line = raw.trim()
+        if (!line) continue
+        const parsed = parseProgressLine(line)
+        if (parsed?.type === 'progress') {
+          onProgress(parsed.data)
+        } else if (!parsed) {
+          // Non-protocol line — could be the final _json_out() JSON
+          lastJsonLine = line
+        }
+      }
+    })
+
+    let stderr = ''
+    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+
+    proc.on('close', (code) => {
+      // Process any remaining buffered content
+      const trailing = lineBuf.trim()
+      if (trailing) {
+        const parsed = parseProgressLine(trailing)
+        if (parsed?.type === 'progress') {
+          onProgress(parsed.data)
+        } else if (!parsed) {
+          lastJsonLine = trailing
+        }
+      }
+
+      // The final JSON line from modal-helper's _json_out()
+      let resultData: TrainingResult | null = null
+      if (lastJsonLine) {
+        try {
+          resultData = JSON.parse(lastJsonLine) as TrainingResult
+        } catch {
+          // Could not parse result
+        }
+      }
+
+      if (resultData) {
+        resolve(resultData)
+      } else if (code !== 0) {
+        reject(new Error(stderr.trim() || `modal-helper exited with code ${code}`))
+      } else {
+        reject(new Error('No result received from training'))
+      }
+    })
+
+    proc.on('error', reject)
+  })
+
+  return {
+    result,
+    cancel: () => { proc.kill('SIGTERM') },
   }
-  return await res.json() as { jobId: string }
 }
 
-export async function getModalTrainingProgress(
-  modalUrl: string,
-  jobId: string,
-): Promise<Record<string, unknown>> {
-  const res = await fetch(`${modalUrl}/train/${jobId}/progress`, {
-    signal: AbortSignal.timeout(10_000),
-  })
-  if (!res.ok) throw new Error(`Progress fetch failed: HTTP ${res.status}`)
-  return await res.json() as Record<string, unknown>
-}
-
+/**
+ * Download trained LoRA from Modal Volume and save locally.
+ */
 export async function downloadTrainingOutput(
-  modalUrl: string,
-  jobId: string,
+  volumePath: string,
   outputName: string,
   toolId: string,
   executionId: string,
@@ -97,17 +193,13 @@ export async function downloadTrainingOutput(
   const destFilename = `${executionId.slice(0, 8)}_${outputName}.safetensors`
   const destPath = join(toolDir, destFilename)
 
-  // Download directly from the Modal container via HTTP (file is in container memory)
-  const res = await fetch(`${modalUrl}/download/${jobId}`, {
-    signal: AbortSignal.timeout(300_000), // 5 min for large files
-  })
-  if (!res.ok) {
-    const errText = await res.text().catch(() => `HTTP ${res.status}`)
-    throw new Error(`Failed to download LoRA from Modal: ${errText}`)
-  }
-  const buffer = Buffer.from(await res.arrayBuffer())
-  writeFileSync(destPath, buffer)
+  // Download from Modal Volume
+  const args = ['download-training-output', OUTPUTS_VOLUME, volumePath, destPath]
+  const result = await runHelper(args)
+  const parsed = JSON.parse(result)
+  if (!parsed.success) throw new Error(parsed.error || 'Failed to download from Volume')
 
+  // Copy to ComfyUI loras dir if available
   let lorasCopyPath: string | null = null
   try {
     const comfyPath = getComfyManagedPath()
