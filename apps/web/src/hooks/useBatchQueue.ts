@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type BatchJobStatus = 'queued' | 'dispatching' | 'running' | 'completed' | 'error'
+export type BatchJobStatus = 'dispatching' | 'running' | 'completed' | 'error'
 
 export interface BatchJob {
   /** Client-side ID (incremental) */
@@ -46,7 +46,6 @@ export interface ComputeTarget {
 
 interface DispatchPayload {
   inputs: Record<string, unknown>
-  execId?: string
   comfyPort?: number | 'modal'
   device?: string
   provider?: 'modal'
@@ -77,7 +76,6 @@ interface UseBatchQueueOptions {
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useBatchQueue({
-  toolId,
   getTargets,
   dispatchJob,
   onJobComplete,
@@ -85,67 +83,92 @@ export function useBatchQueue({
 }: UseBatchQueueOptions) {
   const [jobs, setJobs] = useState<BatchJob[]>([])
   const nextId = useRef(1)
-  const dispatchingRef = useRef(false)
 
   // ── Counts ──────────────────────────────────────────────────────────────────
-  const queuedCount = jobs.filter((j) => j.status === 'queued').length
   const runningCount = jobs.filter((j) => j.status === 'running' || j.status === 'dispatching').length
   const completedCount = jobs.filter((j) => j.status === 'completed').length
   const errorCount = jobs.filter((j) => j.status === 'error').length
   const totalCount = jobs.length
-  const hasActiveJobs = queuedCount > 0 || runningCount > 0
-  const isBatchMode = totalCount > 1 || (totalCount === 1 && queuedCount > 0)
+  const hasActiveJobs = runningCount > 0
+  const isBatchMode = totalCount > 1
 
-  // ── Enqueue ─────────────────────────────────────────────────────────────────
-  const enqueue = useCallback((inputs: Record<string, unknown>, seed: number) => {
+  // ── Check if compute is available ─────────────────────────────────────────
+  const hasFreeTarget = useCallback(() => {
+    const targets = getTargets()
+    if (targets.length === 0) return false
+    const busyTargetIds = new Set(
+      jobs
+        .filter((j) => j.status === 'running' || j.status === 'dispatching')
+        .map((j) => j.computeLabel)
+        .filter(Boolean),
+    )
+    return targets.some((t) => !busyTargetIds.has(t.label))
+  }, [getTargets, jobs])
+
+  // ── Run immediately (no queuing) ──────────────────────────────────────────
+  const run = useCallback(async (inputs: Record<string, unknown>, seed: number): Promise<number | null> => {
+    const targets = getTargets()
+    if (targets.length === 0) return null
+
+    // Find a free target
+    const busyTargetIds = new Set(
+      jobs
+        .filter((j) => j.status === 'running' || j.status === 'dispatching')
+        .map((j) => j.computeLabel)
+        .filter(Boolean),
+    )
+    const freeTarget = targets.find((t) => !busyTargetIds.has(t.label))
+    if (!freeTarget) return null
+
     const jobId = nextId.current++
     const job: BatchJob = {
       id: jobId,
       inputs: { ...inputs },
       seed,
-      status: 'queued',
+      status: 'dispatching',
       outputs: [],
+      computeLabel: freeTarget.label,
+      startedAt: Date.now(),
     }
     setJobs((prev) => [...prev, job])
 
-    // Persist to DB immediately so the record survives page navigation
-    fetch(`/api/tools/${toolId}/executions/enqueue`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inputs, seed }),
-    })
-      .then((res) => res.json())
-      .then((data: { executionId: string }) => {
-        setJobs((prev) => prev.map((j) =>
-          j.id === jobId ? { ...j, execId: data.executionId } : j,
-        ))
-      })
-      .catch(() => {
-        // If enqueue fails, mark job as errored
-        setJobs((prev) => prev.map((j) =>
-          j.id === jobId
-            ? { ...j, status: 'error' as const, errorMessage: 'Failed to enqueue' }
-            : j,
-        ))
-      })
+    // Build dispatch payload
+    const payload: DispatchPayload = { inputs }
+    if (freeTarget.provider === 'modal' && freeTarget.port) {
+      payload.comfyPort = freeTarget.port
+    } else if (freeTarget.provider === 'modal' && freeTarget.modalDeployId) {
+      payload.provider = 'modal'
+      payload.modalDeployId = freeTarget.modalDeployId
+    } else if (freeTarget.port) {
+      payload.comfyPort = freeTarget.port
+    } else if (freeTarget.device) {
+      payload.device = freeTarget.device
+    }
+
+    try {
+      const result = await dispatchJob(payload)
+      const updated: BatchJob = {
+        ...job,
+        status: 'running',
+        execId: result.executionId,
+        comfyPort: result.comfyPort ?? freeTarget.port,
+      }
+      setJobs((prev) => prev.map((j) => j.id === jobId ? updated : j))
+
+      // Notify about ComfyUI jobs that need SSE tracking
+      if (result.type === 'comfyui' && onComfyJobStarted) {
+        onComfyJobStarted(updated, result)
+      }
+    } catch (err) {
+      setJobs((prev) => prev.map((j) =>
+        j.id === jobId
+          ? { ...j, status: 'error' as const, errorMessage: err instanceof Error ? err.message : 'Failed to dispatch', completedAt: Date.now() }
+          : j,
+      ))
+    }
 
     return jobId
-  }, [toolId])
-
-  // ── Cancel a queued job ────────────────────────────────────────────────────
-  const cancelQueued = useCallback((jobId: number) => {
-    const job = jobs.find((j) => j.id === jobId && j.status === 'queued')
-    if (!job) return
-    // Update DB record if it was persisted
-    if (job.execId) {
-      fetch(`/api/executions/${job.execId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'error', errorMessage: 'Cancelled' }),
-      }).catch(() => { /* ignore */ })
-    }
-    setJobs((prev) => prev.filter((j) => j.id !== jobId))
-  }, [jobs])
+  }, [getTargets, jobs, dispatchJob, onComfyJobStarted])
 
   // ── Cancel a running job ──────────────────────────────────────────────────
   const cancelRunning = useCallback(async (jobId: number) => {
@@ -161,12 +184,9 @@ export function useBatchQueue({
     } catch { /* ignore */ }
   }, [jobs])
 
-  // ── Cancel all ──────────────────────────────────────────────────────────────
+  // ── Cancel all running ────────────────────────────────────────────────────
   const cancelAll = useCallback(async () => {
-    // Remove all queued
     const running = jobs.filter((j) => j.status === 'running' && j.execId)
-    setJobs((prev) => prev.filter((j) => j.status !== 'queued'))
-    // Cancel all running
     for (const job of running) {
       try {
         await fetch(`/api/executions/${job.execId}/cancel`, { method: 'POST' })
@@ -181,7 +201,7 @@ export function useBatchQueue({
 
   // ── Clear completed/errored jobs ───────────────────────────────────────────
   const clearFinished = useCallback(() => {
-    setJobs((prev) => prev.filter((j) => j.status === 'queued' || j.status === 'running' || j.status === 'dispatching'))
+    setJobs((prev) => prev.filter((j) => j.status === 'running' || j.status === 'dispatching'))
   }, [])
 
   // ── Clear all jobs (reset) ────────────────────────────────────────────────
@@ -208,91 +228,6 @@ export function useBatchQueue({
     ))
     onJobComplete?.()
   }, [onJobComplete])
-
-  // ── Dispatch logic ─────────────────────────────────────────────────────────
-  // Determines available slots and fires jobs
-  useEffect(() => {
-    if (dispatchingRef.current) return
-    // Only dispatch jobs that have been persisted (have execId from enqueue)
-    const queued = jobs.filter((j) => j.status === 'queued' && j.execId)
-    if (queued.length === 0) return
-
-    const targets = getTargets()
-    if (targets.length === 0) return
-
-    // Find targets not currently used by a running/dispatching job
-    const busyTargetIds = new Set(
-      jobs
-        .filter((j) => j.status === 'running' || j.status === 'dispatching')
-        .map((j) => j.computeLabel)
-        .filter(Boolean),
-    )
-
-    const freeTargets = targets.filter((t) => !busyTargetIds.has(t.label))
-    if (freeTargets.length === 0) return
-
-    // Dispatch as many queued jobs as we have free targets
-    const toDispatch = queued.slice(0, freeTargets.length)
-
-    dispatchingRef.current = true
-
-    // Mark jobs as dispatching with assigned targets
-    setJobs((prev) => prev.map((j) => {
-      const idx = toDispatch.findIndex((q) => q.id === j.id)
-      if (idx === -1) return j
-      return { ...j, status: 'dispatching' as const, computeLabel: freeTargets[idx].label, startedAt: Date.now() }
-    }))
-
-    // Fire all dispatches in parallel
-    Promise.all(
-      toDispatch.map(async (job, idx) => {
-        const target = freeTargets[idx]
-        const payload: DispatchPayload = { inputs: job.inputs, execId: job.execId }
-
-        if (target.provider === 'modal' && target.port) {
-          // Modal ComfyUI instance
-          payload.comfyPort = target.port
-        } else if (target.provider === 'modal' && target.modalDeployId) {
-          // Modal API-engine deployment
-          payload.provider = 'modal'
-          payload.modalDeployId = target.modalDeployId
-        } else if (target.port) {
-          // Local ComfyUI instance
-          payload.comfyPort = target.port
-        } else if (target.device) {
-          // Local API-engine device
-          payload.device = target.device
-        }
-
-        try {
-          const result = await dispatchJob(payload)
-          return { jobId: job.id, result, target, error: null }
-        } catch (err) {
-          return { jobId: job.id, result: null, target, error: err instanceof Error ? err.message : 'Failed to dispatch' }
-        }
-      }),
-    ).then((results) => {
-      setJobs((prev) => prev.map((j) => {
-        const res = results.find((r) => r.jobId === j.id)
-        if (!res) return j
-        if (res.error) {
-          return { ...j, status: 'error' as const, errorMessage: res.error, completedAt: Date.now() }
-        }
-        const updated: BatchJob = {
-          ...j,
-          status: 'running',
-          execId: res.result!.executionId,
-          comfyPort: res.result!.comfyPort ?? res.target.port,
-        }
-        // Notify about ComfyUI jobs that need SSE tracking
-        if (res.result!.type === 'comfyui' && onComfyJobStarted) {
-          onComfyJobStarted(updated, res.result!)
-        }
-        return updated
-      }))
-      dispatchingRef.current = false
-    })
-  }, [jobs, getTargets, dispatchJob, onComfyJobStarted])
 
   // ── Poll for API/Modal job completion ─────────────────────────────────────
   useEffect(() => {
@@ -322,8 +257,8 @@ export function useBatchQueue({
 
   return {
     jobs,
-    enqueue,
-    cancelQueued,
+    run,
+    hasFreeTarget,
     cancelRunning,
     cancelAll,
     clearFinished,
@@ -331,7 +266,6 @@ export function useBatchQueue({
     markCompleted,
     markErrored,
     // Counts
-    queuedCount,
     runningCount,
     completedCount,
     errorCount,

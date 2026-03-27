@@ -4,8 +4,6 @@ import { useState, useEffect, useRef } from 'react'
 import {
   CheckCircle,
   XCircle,
-  Clock,
-  X,
   Stop,
   Trash,
   ImageSquare,
@@ -16,7 +14,7 @@ type OutputItem =
   | { kind: 'image' | 'video' | 'audio' | 'model' | 'file'; filename: string; path: string }
   | { kind: 'text'; text: string }
 
-export type BatchJobStatus = 'queued' | 'dispatching' | 'running' | 'completed' | 'error'
+export type BatchJobStatus = 'dispatching' | 'running' | 'completed' | 'error'
 
 export interface BatchJobView {
   id: number
@@ -116,7 +114,6 @@ function JobRow({
 
       {/* Status indicator */}
       <span className="shrink-0">
-        {job.status === 'queued' && <Clock size={14} className="text-zinc-500" />}
         {job.status === 'dispatching' && <Dots />}
         {job.status === 'running' && <Dots />}
         {job.status === 'completed' && <CheckCircle size={14} weight="fill" className="text-emerald-500" />}
@@ -126,13 +123,11 @@ function JobRow({
       {/* Status label */}
       <span className={[
         'w-16 shrink-0',
-        job.status === 'queued' ? 'text-zinc-500' : '',
         job.status === 'dispatching' ? 'text-amber-400' : '',
         job.status === 'running' ? 'text-amber-400' : '',
         job.status === 'completed' ? 'text-emerald-400' : '',
         job.status === 'error' ? 'text-red-400' : '',
       ].join(' ')}>
-        {job.status === 'queued' && 'Queued'}
         {job.status === 'dispatching' && 'Starting'}
         {job.status === 'running' && 'Running'}
         {job.status === 'completed' && 'Done'}
@@ -187,16 +182,7 @@ function JobRow({
             <Eye size={12} />
           </button>
         )}
-        {job.status === 'queued' && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onCancel(job) }}
-            className="p-1 text-zinc-600 hover:text-red-400 transition-colors"
-            title="Remove from queue"
-          >
-            <X size={12} />
-          </button>
-        )}
-        {job.status === 'running' && (
+        {(job.status === 'running' || job.status === 'dispatching') && (
           <button
             onClick={(e) => { e.stopPropagation(); onCancel(job) }}
             className="p-1 text-zinc-600 hover:text-red-400 transition-colors"
@@ -219,7 +205,6 @@ interface BatchJobRackProps {
   onCancelJob: (job: BatchJobView) => void
   onCancelAll: () => void
   onClearFinished: () => void
-  queuedCount: number
   runningCount: number
   completedCount: number
   errorCount: number
@@ -232,7 +217,6 @@ export function BatchJobRack({
   onCancelJob,
   onCancelAll,
   onClearFinished,
-  queuedCount,
   runningCount,
   completedCount,
   errorCount,
@@ -244,7 +228,7 @@ export function BatchJobRack({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [jobs.length])
 
-  const hasActive = queuedCount > 0 || runningCount > 0
+  const hasActive = runningCount > 0
   const hasFinished = completedCount > 0 || errorCount > 0
 
   return (
@@ -255,11 +239,6 @@ export function BatchJobRack({
           {runningCount > 0 && (
             <span className="flex items-center gap-1 text-amber-400">
               <Dots /> {runningCount} running
-            </span>
-          )}
-          {queuedCount > 0 && (
-            <span className="text-zinc-500">
-              {queuedCount} queued
             </span>
           )}
           {completedCount > 0 && (

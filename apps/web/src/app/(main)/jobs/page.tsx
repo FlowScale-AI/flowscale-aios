@@ -2,13 +2,16 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CircleNotch,
   CheckCircle,
   XCircle,
   ClockCounterClockwise,
   MagnifyingGlass,
+  Clock,
+  Stop,
+  X,
 } from 'phosphor-react'
 import { PageTransition } from '@/components/ui'
 
@@ -82,6 +85,8 @@ function getJobName(row: ExecutionRow): string {
 
 function StatusIcon({ status }: { status: string }) {
   switch (status) {
+    case 'queued':
+      return <Clock size={14} className="text-zinc-400" />
     case 'running':
       return <CircleNotch size={14} weight="bold" className="text-amber-400 animate-spin" />
     case 'completed':
@@ -95,6 +100,7 @@ function StatusIcon({ status }: { status: string }) {
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
+    queued: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',
     running: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
     completed: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
     error: 'text-red-400 bg-red-500/10 border-red-500/20',
@@ -109,7 +115,10 @@ function StatusBadge({ status }: { status: string }) {
 export default function JobsPage() {
   const [tab, setTab] = useState<Tab>('active')
   const [search, setSearch] = useState('')
+  const [cancellingAll, setCancellingAll] = useState(false)
+  const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set())
   const router = useRouter()
+  const qc = useQueryClient()
 
   const { data: comfyManage } = useQuery<{ instances: ComfyManagedInstance[] }>({
     queryKey: ['comfy-manage'],
@@ -138,7 +147,7 @@ export default function JobsPage() {
 
   const filtered = allExecutions.filter((row) => {
     // Tab filter
-    if (tab === 'active' && row.status !== 'running') return false
+    if (tab === 'active' && row.status !== 'running' && row.status !== 'queued') return false
     if (tab === 'completed' && row.status !== 'completed') return false
     if (tab === 'failed' && row.status !== 'error') return false
     // Search filter
@@ -152,7 +161,7 @@ export default function JobsPage() {
   })
 
   const counts = {
-    active: allExecutions.filter((r) => r.status === 'running').length,
+    active: allExecutions.filter((r) => r.status === 'running' || r.status === 'queued').length,
     completed: allExecutions.filter((r) => r.status === 'completed').length,
     failed: allExecutions.filter((r) => r.status === 'error').length,
   }
@@ -162,6 +171,36 @@ export default function JobsPage() {
     { key: 'completed', label: 'Completed', count: counts.completed },
     { key: 'failed', label: 'Failed', count: counts.failed },
   ]
+
+  async function handleCancelAll() {
+    setCancellingAll(true)
+    try {
+      await fetch('/api/executions/cancel-active', { method: 'POST' })
+      qc.invalidateQueries({ queryKey: ['executions-all'] })
+    } finally {
+      setCancellingAll(false)
+    }
+  }
+
+  async function handleCancelOne(execId: string) {
+    setCancellingIds(prev => new Set(prev).add(execId))
+    try {
+      const exec = allExecutions.find(r => r.id === execId)
+      if (exec?.status === 'queued') {
+        // For queued items, PATCH to error
+        await fetch(`/api/executions/${execId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'error', errorMessage: 'Cancelled', completedAt: Date.now() }),
+        })
+      } else {
+        await fetch(`/api/executions/${execId}/cancel`, { method: 'POST' })
+      }
+      qc.invalidateQueries({ queryKey: ['executions-all'] })
+    } finally {
+      setCancellingIds(prev => { const s = new Set(prev); s.delete(execId); return s })
+    }
+  }
 
   return (
     <PageTransition className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
@@ -199,6 +238,18 @@ export default function JobsPage() {
             )}
           </button>
         ))}
+
+        {/* Stop All button on active tab */}
+        {tab === 'active' && counts.active > 0 && (
+          <button
+            onClick={handleCancelAll}
+            disabled={cancellingAll}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-md transition-colors disabled:opacity-50 -mb-px"
+          >
+            <Stop size={12} weight="fill" />
+            {cancellingAll ? 'Stopping…' : 'Stop All'}
+          </button>
+        )}
       </div>
 
       <div className="flex-1 p-8 overflow-y-auto">
@@ -239,41 +290,54 @@ export default function JobsPage() {
         ) : (
           <div className="border border-white/5 rounded-xl overflow-hidden">
             {/* Table header */}
-            <div className="grid grid-cols-[1fr_150px_100px_100px_120px_100px] gap-4 px-5 py-3 bg-zinc-900/50 border-b border-white/5">
+            <div className={`grid ${tab === 'active' ? 'grid-cols-[1fr_150px_100px_100px_120px_100px_40px]' : 'grid-cols-[1fr_150px_100px_100px_120px_100px]'} gap-4 px-5 py-3 bg-zinc-900/50 border-b border-white/5`}>
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Job</span>
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Tool</span>
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Status</span>
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Compute</span>
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Started</span>
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Duration</span>
+              {tab === 'active' && <span />}
             </div>
 
             {/* Table rows */}
-            {filtered.map((row) => (
-              <button
+            {filtered.map((row) => {
+              const isCancelling = cancellingIds.has(row.id)
+              return (
+              <div
                 key={row.id}
-                onClick={() => router.push(`/jobs/${row.id}`)}
-                className="w-full grid grid-cols-[1fr_150px_100px_100px_120px_100px] gap-4 px-5 py-3 border-b border-white/5 last:border-b-0 hover:bg-white/[0.02] transition-colors text-left"
+                className={`w-full grid ${tab === 'active' ? 'grid-cols-[1fr_150px_100px_100px_120px_100px_40px]' : 'grid-cols-[1fr_150px_100px_100px_120px_100px]'} gap-4 px-5 py-3 border-b border-white/5 last:border-b-0 hover:bg-white/[0.02] transition-colors text-left ${isCancelling ? 'opacity-50' : ''}`}
               >
-                <div className="flex items-center gap-2.5 min-w-0">
+                <button onClick={() => router.push(`/jobs/${row.id}`)} className="flex items-center gap-2.5 min-w-0 text-left">
                   <StatusIcon status={row.status} />
                   <span className="text-sm text-zinc-300 truncate">{getJobName(row)}</span>
-                </div>
-                <span className="text-sm text-zinc-500 truncate">{row.toolName}</span>
-                <div>
+                </button>
+                <span className="text-sm text-zinc-500 truncate self-center">{row.toolName}</span>
+                <div className="self-center">
                   <StatusBadge status={row.status} />
                 </div>
-                <span className="text-xs font-mono text-zinc-500 truncate">
+                <span className="text-xs font-mono text-zinc-500 truncate self-center">
                   {row.comfyPort
                     ? instanceLabelByPort.get(row.comfyPort) ?? `:${row.comfyPort}`
                     : '--'}
                 </span>
-                <span className="text-sm text-zinc-500">{timeAgo(row.createdAt)}</span>
-                <span className="text-sm text-zinc-500 font-mono">
+                <span className="text-sm text-zinc-500 self-center">{timeAgo(row.createdAt)}</span>
+                <span className="text-sm text-zinc-500 font-mono self-center">
                   {formatDuration(row.createdAt, row.completedAt)}
                 </span>
-              </button>
-            ))}
+                {tab === 'active' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleCancelOne(row.id) }}
+                    disabled={isCancelling}
+                    className="self-center text-zinc-600 hover:text-red-400 disabled:opacity-40 transition-colors"
+                    title="Cancel"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              )
+            })}
           </div>
         )}
       </div>

@@ -18,6 +18,7 @@ import {
   Check,
   Stop,
   ShareNetwork,
+  X,
 } from 'phosphor-react'
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComputeDropdown, type ComputeGroup } from '@/components/ComputeDropdown'
@@ -90,10 +91,19 @@ function inferOutputKind(nodeType: string): 'image' | 'video' | 'audio' | 'model
   return 'file'
 }
 
-function OutputLoadingPlaceholder({ kind }: { kind: 'image' | 'video' | 'audio' | 'model' | 'text' | 'file' }) {
+function OutputLoadingPlaceholder({ kind, onCancel }: { kind: 'image' | 'video' | 'audio' | 'model' | 'text' | 'file'; onCancel?: () => void }) {
   if (kind === 'text') {
     return (
-      <div className="col-span-2 sm:col-span-3 rounded-xl border border-white/5 bg-zinc-900/50 px-4 py-3 flex flex-col gap-2">
+      <div className="col-span-2 sm:col-span-3 rounded-xl border border-white/5 bg-zinc-900/50 px-4 py-3 flex flex-col gap-2 relative group">
+        {onCancel && (
+          <button
+            onClick={onCancel}
+            className="absolute top-2 right-2 p-1 rounded-md bg-zinc-800/80 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 opacity-0 group-hover:opacity-100 transition-all z-10"
+            title="Stop generation"
+          >
+            <X size={14} />
+          </button>
+        )}
         {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="h-3 rounded bg-zinc-800 animate-pulse" style={{ width: `${70 - i * 15}%`, animationDelay: `${i * 120}ms` }} />
         ))}
@@ -101,7 +111,16 @@ function OutputLoadingPlaceholder({ kind }: { kind: 'image' | 'video' | 'audio' 
     )
   }
   return (
-    <div className="flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50">
+    <div className="flex flex-col rounded-xl overflow-hidden border border-white/5 bg-zinc-900/50 relative group">
+      {onCancel && (
+        <button
+          onClick={onCancel}
+          className="absolute top-2 right-2 p-1 rounded-md bg-zinc-800/80 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 opacity-0 group-hover:opacity-100 transition-all z-10"
+          title="Stop generation"
+        >
+          <X size={14} />
+        </button>
+      )}
       <div className="h-36 bg-zinc-950 flex items-center justify-center relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 to-zinc-950 animate-pulse" />
         <LottieSpinner size={28} />
@@ -435,11 +454,13 @@ function ExecutionHistoryItem({
   exec,
   onRestore,
   onView,
+  onCancel,
   isActive,
 }: {
   exec: Execution
   onRestore: (inputs: Record<string, unknown>) => void
   onView: (execId: string, outputs: OutputItem[]) => void
+  onCancel?: (execId: string) => void
   isActive: boolean
 }) {
   const date = new Date(exec.createdAt).toLocaleString('en-US', {
@@ -496,8 +517,20 @@ function ExecutionHistoryItem({
         {exec.status === 'running' && (
           <LottieSpinner size={14} />
         )}
+        {exec.status === 'queued' && (
+          <Clock size={14} className="text-zinc-500 shrink-0" />
+        )}
         <span className="text-xs text-zinc-400 flex-1">{date}</span>
         {elapsed && <span className="text-xs text-zinc-600">{elapsed}</span>}
+        {exec.status === 'queued' && onCancel && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onCancel(exec.id) }}
+            title="Cancel queued job"
+            className="text-zinc-600 hover:text-red-400 transition-colors"
+          >
+            <XCircle size={14} />
+          </button>
+        )}
         <button
           onClick={(e) => { e.stopPropagation(); onRestore(inputs) }}
           title="Restore inputs"
@@ -727,6 +760,7 @@ function BottomTabs({
   execLoading,
   onRestore,
   onViewOutputs,
+  onCancelExecution,
   activeExecId,
   effectiveComfyPort,
   comfyInstanceLabel,
@@ -738,6 +772,7 @@ function BottomTabs({
   execLoading: boolean
   onRestore: (inputs: Record<string, unknown>) => void
   onViewOutputs: (execId: string, outputs: OutputItem[]) => void
+  onCancelExecution?: (execId: string) => void
   activeExecId: string | null
   effectiveComfyPort?: number | null
   comfyInstanceLabel?: string
@@ -802,6 +837,7 @@ function BottomTabs({
                     exec={exec}
                     onRestore={onRestore}
                     onView={onViewOutputs}
+                    onCancel={onCancelExecution}
                     isActive={exec.id === activeExecId}
                   />
                 ))}
@@ -1373,7 +1409,7 @@ export default function ToolPage() {
       body: JSON.stringify({
         inputs: payload.inputs,
         comfyOrgApiKey: getComfyOrgApiKey() || undefined,
-        ...(payload.execId ? { existingExecId: payload.execId } : {}),
+        ...(payload.execId ? { execId: payload.execId } : {}),
         ...(payload.comfyPort != null ? { comfyPort: payload.comfyPort } : {}),
         ...(payload.provider === 'modal'
           ? { provider: 'modal', modalDeployId: payload.modalDeployId || 'auto' }
@@ -1527,9 +1563,7 @@ export default function ToolPage() {
   }, [])
 
   const handleCancelBatchJob = useCallback((job: BatchJobView) => {
-    if (job.status === 'queued') {
-      batch.cancelQueued(job.id)
-    } else if (job.status === 'running') {
+    if (job.status === 'running' || job.status === 'dispatching') {
       batch.cancelRunning(job.id)
     }
   }, [batch])
@@ -1548,17 +1582,17 @@ export default function ToolPage() {
     }
   }, [batch.totalCount, batch.completedCount, batch.jobs, latestOutputs.length])
 
-  // Handle Run click — adds to batch queue
+  // Handle Run click — dispatches immediately to available compute
   const handleRunClick = useCallback(() => {
     const seed = generateSeed()
     const jobInputs = { ...inputs, seed }
-    batch.enqueue(jobInputs, seed)
     // Clear single-view state when adding a job
     if (!batch.isBatchMode) {
       setLatestOutputs([])
       setLatestExecId(null)
       setViewingBatchJobId(null)
     }
+    batch.run(jobInputs, seed)
   }, [inputs, batch, generateSeed])
 
   if (toolLoading) {
@@ -1682,14 +1716,17 @@ export default function ToolPage() {
         })()}
         <button
           onClick={handleRunClick}
-          disabled={tool.engine === 'comfyui' && selectedProvider !== 'modal' && !isAllSelected && runningInstances.length === 0 && !effectiveComfyPort}
+          disabled={
+            (tool.engine === 'comfyui' && selectedProvider !== 'modal' && !isAllSelected && runningInstances.length === 0 && !effectiveComfyPort)
+            || !batch.hasFreeTarget()
+          }
           className="relative flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
         >
           <Play size={14} weight="fill" />
           Run
           {batch.hasActiveJobs && (
             <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold bg-emerald-500 text-white rounded-full">
-              {batch.runningCount + batch.queuedCount}
+              {batch.runningCount}
             </span>
           )}
         </button>
@@ -1862,7 +1899,6 @@ export default function ToolPage() {
                       onCancelJob={handleCancelBatchJob}
                       onCancelAll={batch.cancelAll}
                       onClearFinished={batch.clearFinished}
-                      queuedCount={batch.queuedCount}
                       runningCount={batch.runningCount}
                       completedCount={batch.completedCount}
                       errorCount={batch.errorCount}
@@ -1880,13 +1916,26 @@ export default function ToolPage() {
                       const batchHasRunning = batch.totalCount === 1 && batch.runningCount > 0
                       const showLoading = (isRunning || selectedIsRunning || batchHasRunning) && latestOutputs.length === 0
 
-                      if (showLoading) return (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                          {(expectedOutputKinds.length > 0 ? expectedOutputKinds : ['image' as const]).map((kind, i) => (
-                            <OutputLoadingPlaceholder key={i} kind={kind} />
-                          ))}
-                        </div>
-                      )
+                      if (showLoading) {
+                        const handleCancelRunning = () => {
+                          // Cancel the batch job if it's a single running batch
+                          if (batchHasRunning && batch.jobs.length > 0) {
+                            const runningJob = batch.jobs.find((j) => j.status === 'running' || j.status === 'dispatching')
+                            if (runningJob) batch.cancelRunning(runningJob.id)
+                          }
+                          // Also cancel via execution ID if available
+                          if (latestExecId) {
+                            fetch(`/api/executions/${latestExecId}/cancel`, { method: 'POST' })
+                          }
+                        }
+                        return (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            {(expectedOutputKinds.length > 0 ? expectedOutputKinds : ['image' as const]).map((kind, i) => (
+                              <OutputLoadingPlaceholder key={i} kind={kind} onCancel={i === 0 ? handleCancelRunning : undefined} />
+                            ))}
+                          </div>
+                        )
+                      }
                       if (latestOutputs.length > 0) return (
                         <OutputGrid outputs={latestOutputs} comfyPort={tool.comfyPort} />
                       )
@@ -1916,6 +1965,14 @@ export default function ToolPage() {
                 comfyInstanceLabel={comfyInstanceLabel}
                 isModalSelected={isModalSelected}
                 pluginId={pluginId}
+                onCancelExecution={async (execId) => {
+                  await fetch(`/api/executions/${execId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'error', errorMessage: 'Cancelled', completedAt: Date.now() }),
+                  })
+                  qc.invalidateQueries({ queryKey: ['executions', id] })
+                }}
               />
             </div>
           </Panel>
