@@ -433,9 +433,13 @@ function InputField({
 function ExecutionHistoryItem({
   exec,
   onRestore,
+  onView,
+  isActive,
 }: {
   exec: Execution
   onRestore: (inputs: Record<string, unknown>) => void
+  onView: (execId: string, outputs: OutputItem[]) => void
+  isActive: boolean
 }) {
   const date = new Date(exec.createdAt).toLocaleString('en-US', {
     month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
@@ -445,13 +449,42 @@ function ExecutionHistoryItem({
     : null
 
   const outputs = exec.outputsJson
-    ? (JSON.parse(exec.outputsJson) as { kind: string; filename?: string; path?: string }[]).filter((o): o is { kind: string; filename: string; path: string } => !!o.filename)
+    ? (() => {
+        try {
+          const parsed = JSON.parse(exec.outputsJson) as { kind?: string; filename?: string; path?: string; text?: string }[]
+          return parsed
+            .map((o) => {
+              if (o.text) return { kind: 'text' as const, text: o.text }
+              if (!o.filename) return null
+              const kind = (o.kind || inferKind(o.filename)) as 'image' | 'video' | 'audio' | 'model' | 'file'
+              return { kind, filename: o.filename, path: o.path ?? '' }
+            })
+            .filter((o): o is OutputItem => o !== null)
+        } catch { return [] }
+      })()
     : []
 
   const inputs: Record<string, unknown> = exec.inputsJson ? JSON.parse(exec.inputsJson) : {}
 
+  const hasViewableOutputs = exec.status === 'completed' && outputs.length > 0
+  const isClickable = hasViewableOutputs || exec.status === 'running'
+
   return (
-    <div className="border border-white/5 rounded-lg p-3 flex flex-col gap-2">
+    <div
+      onClick={() => {
+        if (exec.status === 'running') {
+          // Show loading placeholders for this running execution
+          onView(exec.id, [])
+        } else if (hasViewableOutputs) {
+          onView(exec.id, outputs)
+        }
+      }}
+      className={[
+        'border rounded-lg p-3 flex flex-col gap-2 transition-all',
+        isClickable ? 'cursor-pointer hover:border-emerald-500/30' : '',
+        isActive ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-white/5',
+      ].join(' ')}
+    >
       <div className="flex items-center gap-2">
         {exec.status === 'completed' && (
           <CheckCircle size={14} weight="fill" className="text-emerald-500 shrink-0" />
@@ -465,7 +498,7 @@ function ExecutionHistoryItem({
         <span className="text-xs text-zinc-400 flex-1">{date}</span>
         {elapsed && <span className="text-xs text-zinc-600">{elapsed}</span>}
         <button
-          onClick={() => onRestore(inputs)}
+          onClick={(e) => { e.stopPropagation(); onRestore(inputs) }}
           title="Restore inputs"
           className="text-zinc-600 hover:text-zinc-400 transition-colors"
         >
@@ -479,16 +512,14 @@ function ExecutionHistoryItem({
 
       {outputs.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {outputs.map((out) => (
-            <a
+          {outputs.filter((o): o is Exclude<OutputItem, { kind: 'text' }> => o.kind !== 'text').map((out) => (
+            <span
               key={out.filename}
-              href={out.path.startsWith('/') ? out.path : `/api/comfy/output?path=${encodeURIComponent(out.path)}`}
-              download={out.filename}
-              className="flex items-center gap-1 px-2 py-1 bg-zinc-800 rounded text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+              className="flex items-center gap-1 px-2 py-1 bg-zinc-800 rounded text-xs text-zinc-400"
             >
               <ImageSquare size={11} />
               {out.filename}
-            </a>
+            </span>
           ))}
         </div>
       )}
@@ -694,6 +725,8 @@ function BottomTabs({
   executions,
   execLoading,
   onRestore,
+  onViewOutputs,
+  activeExecId,
   effectiveComfyPort,
   comfyInstanceLabel,
   isModalSelected,
@@ -703,6 +736,8 @@ function BottomTabs({
   executions: Execution[]
   execLoading: boolean
   onRestore: (inputs: Record<string, unknown>) => void
+  onViewOutputs: (execId: string, outputs: OutputItem[]) => void
+  activeExecId: string | null
   effectiveComfyPort?: number | null
   comfyInstanceLabel?: string
   isModalSelected?: boolean
@@ -761,7 +796,13 @@ function BottomTabs({
             {!execLoading && executions.length > 0 && (
               <div className="flex flex-col gap-2">
                 {executions.map((exec) => (
-                  <ExecutionHistoryItem key={exec.id} exec={exec} onRestore={onRestore} />
+                  <ExecutionHistoryItem
+                    key={exec.id}
+                    exec={exec}
+                    onRestore={onRestore}
+                    onView={onViewOutputs}
+                    isActive={exec.id === activeExecId}
+                  />
                 ))}
               </div>
             )}
@@ -961,6 +1002,18 @@ export default function ToolPage() {
   // Track execution IDs started by *this* session so we don't show other users' runs as ours
   const myExecIds = useRef(new Set<string>())
 
+  // ── Auto-select running execution on page load ─────────────────────────────────
+  const didAutoSelect = useRef(false)
+  useEffect(() => {
+    if (didAutoSelect.current || execLoading || latestExecId) return
+    const running = executions.find((e) => e.status === 'running')
+    if (running) {
+      setLatestExecId(running.id)
+      setLatestOutputs([])
+      didAutoSelect.current = true
+    }
+  }, [executions, execLoading, latestExecId])
+
   // ── Derive running state from actual DB data ──────────────────────────────────
   // Only consider executions started by this session as "our" running state.
   const runningExecution = executions.find((e) => e.status === 'running' && myExecIds.current.has(e.id)) ?? null
@@ -1006,6 +1059,42 @@ export default function ToolPage() {
       }
     }
   }, [runningExecution, executions])
+
+  // When a history-selected running execution completes, surface its outputs
+  useEffect(() => {
+    if (!latestExecId) return
+    // Skip if this is our own session's run (handled above)
+    if (myExecIds.current.has(latestExecId)) return
+    const exec = executions.find((e) => e.id === latestExecId)
+    if (!exec) return
+    if (exec.status === 'completed' && exec.outputsJson && latestOutputs.length === 0) {
+      try {
+        const items = JSON.parse(exec.outputsJson) as OutputItem[]
+        setLatestOutputs(items)
+        // Poll for disk-saved paths
+        const hasPath = items.some((it: OutputItem) => 'path' in it && (it as { path?: string }).path?.startsWith('/'))
+        if (!hasPath) {
+          let attempts = 0
+          const poll = setInterval(async () => {
+            attempts++
+            try {
+              const res = await fetch(`/api/executions/${latestExecId}`)
+              if (!res.ok) return
+              const data = await res.json()
+              if (data?.outputsJson) {
+                const saved = JSON.parse(data.outputsJson) as OutputItem[]
+                if (saved.some((s: OutputItem) => 'path' in s && (s as { path?: string }).path?.startsWith('/'))) {
+                  setLatestOutputs(saved)
+                  clearInterval(poll)
+                }
+              }
+            } catch { /* ignore */ }
+            if (attempts >= 10) clearInterval(poll)
+          }, 2000)
+        }
+      } catch { /* ignore */ }
+    }
+  }, [latestExecId, executions, latestOutputs.length])
 
   /** Resolve the port: pinned port if user selected one, Modal virtual port for cloud ComfyUI, undefined to let server auto-route. */
   const resolveComfyPort = useCallback((): number | 'modal' | undefined => {
@@ -1412,24 +1501,30 @@ export default function ToolPage() {
                   Output
                 </h2>
 
-                {isRunning && latestOutputs.length === 0 && (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {(expectedOutputKinds.length > 0 ? expectedOutputKinds : ['image' as const]).map((kind, i) => (
-                      <OutputLoadingPlaceholder key={i} kind={kind} />
-                    ))}
-                  </div>
-                )}
+                {(() => {
+                  // Show loading if: our run is active, or user clicked a running history item
+                  const selectedIsRunning = latestExecId
+                    ? executions.some((e) => e.id === latestExecId && e.status === 'running')
+                    : false
+                  const showLoading = (isRunning || selectedIsRunning) && latestOutputs.length === 0
 
-                {latestOutputs.length > 0 && (
-                  <OutputGrid outputs={latestOutputs} comfyPort={tool.comfyPort} />
-                )}
-
-                {!isRunning && latestOutputs.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-16 text-center">
-                    <ImageSquare size={32} weight="duotone" className="text-zinc-700 mb-3" />
-                    <p className="text-sm text-zinc-600">Run the tool to see output here</p>
-                  </div>
-                )}
+                  if (showLoading) return (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {(expectedOutputKinds.length > 0 ? expectedOutputKinds : ['image' as const]).map((kind, i) => (
+                        <OutputLoadingPlaceholder key={i} kind={kind} />
+                      ))}
+                    </div>
+                  )
+                  if (latestOutputs.length > 0) return (
+                    <OutputGrid outputs={latestOutputs} comfyPort={tool.comfyPort} />
+                  )
+                  return (
+                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                      <ImageSquare size={32} weight="duotone" className="text-zinc-700 mb-3" />
+                      <p className="text-sm text-zinc-600">Run the tool to see output here</p>
+                    </div>
+                  )
+                })()}
               </div>
 
               {/* Run history / Logs tabs */}
@@ -1438,6 +1533,11 @@ export default function ToolPage() {
                 executions={executions}
                 execLoading={execLoading}
                 onRestore={handleRestore}
+                onViewOutputs={(execId, outputs) => {
+                  setLatestOutputs(outputs)
+                  setLatestExecId(execId)
+                }}
+                activeExecId={latestExecId}
                 effectiveComfyPort={effectiveComfyPort}
                 comfyInstanceLabel={comfyInstanceLabel}
                 isModalSelected={isModalSelected}
