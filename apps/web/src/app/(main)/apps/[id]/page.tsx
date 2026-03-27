@@ -1198,53 +1198,62 @@ export default function ToolPage() {
 
       const finish = async () => {
         if (run.done) return
-        run.done = true
-        sseRef.current?.close()
-        sseRef.current = null
-        if (run.pollInterval) clearInterval(run.pollInterval)
+        // Don't set run.done = true yet — only lock once we've successfully finished
+        // so that the fallback poll can retry if the history fetch fails.
 
         try {
           const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
-          if (histRes.ok) {
-            const hist = await histRes.json() as Record<string, {
-              status?: { status_str?: string }
-              outputs?: Record<string, {
-                images?: { filename: string; subfolder: string }[]
-                gifs?: { filename: string; subfolder: string }[]
-                videos?: { filename: string; subfolder: string }[]
-                audio?: { filename: string; subfolder: string }[]
-                text?: string[]
-                string?: string[]
-              }>
+          if (!histRes.ok) return // leave run.done = false so poll retries
+          const hist = await histRes.json() as Record<string, {
+            status?: { status_str?: string }
+            outputs?: Record<string, {
+              images?: { filename: string; subfolder: string }[]
+              gifs?: { filename: string; subfolder: string }[]
+              videos?: { filename: string; subfolder: string }[]
+              audio?: { filename: string; subfolder: string }[]
+              text?: string[]
+              string?: string[]
             }>
-            const entry = hist[run.promptId]
-            const items: OutputItem[] = []
-            for (const nodeOut of Object.values(entry?.outputs ?? {})) {
-              for (const f of nodeOut.images ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
-              for (const f of nodeOut.gifs ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
-              for (const f of nodeOut.videos ?? []) items.push({ kind: 'video', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
-              for (const f of nodeOut.audio ?? []) items.push({ kind: 'audio', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
-              for (const t of [...(nodeOut.text ?? []), ...(nodeOut.string ?? [])]) {
-                if (typeof t === 'string' && t.trim()) {
-                  const k = inferKind(t)
-                  if (k !== 'file') items.push({ kind: k, filename: t, path: t })
-                  else items.push({ kind: 'text', text: t })
-                }
+          }>
+          const entry = hist[run.promptId]
+          const items: OutputItem[] = []
+          for (const nodeOut of Object.values(entry?.outputs ?? {})) {
+            for (const f of nodeOut.images ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+            for (const f of nodeOut.gifs ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+            for (const f of nodeOut.videos ?? []) items.push({ kind: 'video', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+            for (const f of nodeOut.audio ?? []) items.push({ kind: 'audio', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+            for (const t of [...(nodeOut.text ?? []), ...(nodeOut.string ?? [])]) {
+              if (typeof t === 'string' && t.trim()) {
+                const k = inferKind(t)
+                if (k !== 'file') items.push({ kind: k, filename: t, path: t })
+                else items.push({ kind: 'text', text: t })
               }
             }
-            setLatestOutputs(items)
-            await fetch(`/api/executions/${run.executionId}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                status: entry?.status?.status_str === 'error' ? 'error' : 'completed',
-                outputsJson: JSON.stringify(items),
-                completedAt: Date.now(),
-              }),
-            })
-            qc.invalidateQueries({ queryKey: ['executions', id] })
           }
-        } catch { /* ignore */ }
+          // Lock now — history fetched successfully, we're committing the result
+          run.done = true
+          sseRef.current?.close()
+          sseRef.current = null
+          if (run.pollInterval) clearInterval(run.pollInterval)
+          setLatestOutputs(items)
+          const patchRes = await fetch(`/api/executions/${run.executionId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              status: entry?.status?.status_str === 'error' ? 'error' : 'completed',
+              outputsJson: JSON.stringify(items),
+              completedAt: Date.now(),
+            }),
+          })
+          // Update with server-saved paths (PATCH downloads files and updates paths)
+          if (patchRes.ok) {
+            try {
+              const saved = await patchRes.json()
+              if (saved?.outputsJson) setLatestOutputs(JSON.parse(saved.outputsJson))
+            } catch { /* keep raw items */ }
+          }
+          qc.invalidateQueries({ queryKey: ['executions', id] })
+        } catch { /* ignore — poll will retry */ }
       }
 
       // SSE proxy for completion detection (avoids CORS on direct WS)
@@ -1459,58 +1468,68 @@ export default function ToolPage() {
 
       const finish = async () => {
         if (run.done) return
-        run.done = true
-        if (run.pollInterval) clearInterval(run.pollInterval)
+        // Don't lock yet — only set run.done after a successful history fetch
+        // so the fallback poll can retry if the request fails.
 
         try {
           const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
-          if (histRes.ok) {
-            const hist = await histRes.json() as Record<string, {
-              status?: { status_str?: string }
-              outputs?: Record<string, {
-                images?: { filename: string; subfolder: string }[]
-                gifs?: { filename: string; subfolder: string }[]
-                videos?: { filename: string; subfolder: string }[]
-                audio?: { filename: string; subfolder: string }[]
-                text?: string[]
-                string?: string[]
-              }>
+          if (!histRes.ok) return // leave run.done = false so poll retries
+          const hist = await histRes.json() as Record<string, {
+            status?: { status_str?: string }
+            outputs?: Record<string, {
+              images?: { filename: string; subfolder: string }[]
+              gifs?: { filename: string; subfolder: string }[]
+              videos?: { filename: string; subfolder: string }[]
+              audio?: { filename: string; subfolder: string }[]
+              text?: string[]
+              string?: string[]
             }>
-            const entry = hist[run.promptId]
-            const items: OutputItem[] = []
-            for (const nodeOut of Object.values(entry?.outputs ?? {})) {
-              for (const f of nodeOut.images ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
-              for (const f of nodeOut.gifs ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
-              for (const f of nodeOut.videos ?? []) items.push({ kind: 'video', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
-              for (const f of nodeOut.audio ?? []) items.push({ kind: 'audio', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
-              for (const t of [...(nodeOut.text ?? []), ...(nodeOut.string ?? [])]) {
-                if (typeof t === 'string' && t.trim()) {
-                  const k = inferKind(t)
-                  if (k !== 'file') items.push({ kind: k, filename: t, path: t })
-                  else items.push({ kind: 'text', text: t })
-                }
+          }>
+          const entry = hist[run.promptId]
+          const items: OutputItem[] = []
+          for (const nodeOut of Object.values(entry?.outputs ?? {})) {
+            for (const f of nodeOut.images ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+            for (const f of nodeOut.gifs ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+            for (const f of nodeOut.videos ?? []) items.push({ kind: 'video', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+            for (const f of nodeOut.audio ?? []) items.push({ kind: 'audio', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+            for (const t of [...(nodeOut.text ?? []), ...(nodeOut.string ?? [])]) {
+              if (typeof t === 'string' && t.trim()) {
+                const k = inferKind(t)
+                if (k !== 'file') items.push({ kind: k, filename: t, path: t })
+                else items.push({ kind: 'text', text: t })
               }
             }
-
-            // PATCH execution to completed
-            const isError = entry?.status?.status_str === 'error'
-            await fetch(`/api/executions/${run.executionId}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                status: isError ? 'error' : 'completed',
-                outputsJson: JSON.stringify(items),
-                completedAt: Date.now(),
-              }),
-            })
-
-            if (isError) {
-              batchRef.current.markErrored(run.executionId, 'Execution failed')
-            } else {
-              batchRef.current.markCompleted(run.executionId, items)
-            }
           }
-        } catch { /* ignore */ }
+
+          // Lock now — history fetched successfully
+          run.done = true
+          if (run.pollInterval) clearInterval(run.pollInterval)
+
+          // PATCH execution to completed — server saves files to disk and returns updated paths
+          const isError = entry?.status?.status_str === 'error'
+          const patchRes = await fetch(`/api/executions/${run.executionId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              status: isError ? 'error' : 'completed',
+              outputsJson: JSON.stringify(items),
+              completedAt: Date.now(),
+            }),
+          })
+          let savedItems = items
+          if (patchRes.ok) {
+            try {
+              const saved = await patchRes.json()
+              if (saved?.outputsJson) savedItems = JSON.parse(saved.outputsJson)
+            } catch { /* use raw items */ }
+          }
+
+          if (isError) {
+            batchRef.current.markErrored(run.executionId, 'Execution failed')
+          } else {
+            batchRef.current.markCompleted(run.executionId, savedItems)
+          }
+        } catch { /* ignore — poll will retry */ }
       }
 
       // SSE for completion detection

@@ -673,5 +673,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     clientId,
     comfyPort,
     seed,
+    type: 'comfyui' as const,
   }, { status: 202 })
 }
