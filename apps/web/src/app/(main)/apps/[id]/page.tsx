@@ -1196,6 +1196,23 @@ export default function ToolPage() {
       }
       comfyRunRef.current = run
 
+      const fetchHistory = async () => {
+        const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
+        if (!histRes.ok) return null
+        const hist = await histRes.json() as Record<string, {
+          status?: { status_str?: string; completed?: boolean }
+          outputs?: Record<string, {
+            images?: { filename: string; subfolder: string }[]
+            gifs?: { filename: string; subfolder: string }[]
+            videos?: { filename: string; subfolder: string }[]
+            audio?: { filename: string; subfolder: string }[]
+            text?: string[]
+            string?: string[]
+          }>
+        }>
+        return hist[run.promptId] ?? null
+      }
+
       const finish = async () => {
         if (run.done) return
         // Don't set run.done = true yet — only lock once we've successfully finished
@@ -1257,28 +1274,36 @@ export default function ToolPage() {
       }
 
       // SSE proxy for completion detection (avoids CORS on direct WS)
-      const sse = new EventSource(`/api/comfy/${run.comfyPort}/ws`)
-      sseRef.current = sse
-      sse.onmessage = (evt) => {
-        try {
-          const msg = JSON.parse(evt.data) as { type: string; data?: Record<string, unknown> }
-          if (msg.data?.prompt_id !== run.promptId) return
-          if (msg.type === 'executing' && msg.data?.node === null) { sse.close(); finish() }
-          else if (msg.type === 'execution_error') { sse.close(); finish() }
-        } catch { /* ignore */ }
+      let sseRetries = 0
+      const connectSSE = () => {
+        const sse = new EventSource(`/api/comfy/${run.comfyPort}/ws`)
+        sseRef.current = sse
+        sse.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data) as { type: string; data?: Record<string, unknown> }
+            if (msg.data?.prompt_id !== run.promptId) return
+            if (msg.type === 'executing' && msg.data?.node === null) { sse.close(); finish() }
+            else if (msg.type === 'execution_error') { sse.close(); finish() }
+          } catch { /* ignore parse errors */ }
+        }
+        sse.onerror = () => {
+          sse.close()
+          // Reconnect SSE up to 3 times with backoff
+          if (!run.done && sseRetries < 3) {
+            sseRetries++
+            setTimeout(connectSSE, sseRetries * 2000)
+          }
+        }
       }
-      sse.onerror = () => { sse.close() }
+      connectSSE()
 
-      // Fallback poll
+      // Fallback poll — catches completion if SSE misses it
       run.pollInterval = setInterval(async () => {
         if (run.done) { clearInterval(run.pollInterval); return }
         try {
-          const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
-          if (!histRes.ok) return
-          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
-          const s = hist[run.promptId]?.status
-          if (s?.completed || s?.status_str === 'error') finish()
-        } catch { /* ignore */ }
+          const entry = await fetchHistory()
+          if (entry?.status?.completed || entry?.status?.status_str === 'error') finish()
+        } catch { /* ignore poll errors — next tick will retry */ }
       }, 3000)
 
       setTimeout(() => {
@@ -1466,6 +1491,23 @@ export default function ToolPage() {
         pollInterval: undefined as ReturnType<typeof setInterval> | undefined,
       }
 
+      const fetchHistory = async () => {
+        const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
+        if (!histRes.ok) return null
+        const hist = await histRes.json() as Record<string, {
+          status?: { status_str?: string; completed?: boolean }
+          outputs?: Record<string, {
+            images?: { filename: string; subfolder: string }[]
+            gifs?: { filename: string; subfolder: string }[]
+            videos?: { filename: string; subfolder: string }[]
+            audio?: { filename: string; subfolder: string }[]
+            text?: string[]
+            string?: string[]
+          }>
+        }>
+        return hist[run.promptId] ?? null
+      }
+
       const finish = async () => {
         if (run.done) return
         // Don't lock yet — only set run.done after a successful history fetch
@@ -1532,33 +1574,41 @@ export default function ToolPage() {
         } catch { /* ignore — poll will retry */ }
       }
 
-      // SSE for completion detection
-      const sse = new EventSource(`/api/comfy/${run.comfyPort}/ws`)
-      sse.onmessage = (evt) => {
-        try {
-          const msg = JSON.parse(evt.data) as { type: string; data?: Record<string, unknown> }
-          if (msg.data?.prompt_id !== run.promptId) return
-          if (msg.type === 'executing' && msg.data?.node === null) { sse.close(); finish() }
-          else if (msg.type === 'execution_error') { sse.close(); finish() }
-        } catch { /* ignore */ }
+      // SSE for completion detection with reconnection
+      let sseRetries = 0
+      let batchSse: EventSource | null = null
+      const connectBatchSSE = () => {
+        batchSse = new EventSource(`/api/comfy/${run.comfyPort}/ws`)
+        batchSse.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data) as { type: string; data?: Record<string, unknown> }
+            if (msg.data?.prompt_id !== run.promptId) return
+            if (msg.type === 'executing' && msg.data?.node === null) { batchSse?.close(); finish() }
+            else if (msg.type === 'execution_error') { batchSse?.close(); finish() }
+          } catch { /* ignore parse errors */ }
+        }
+        batchSse.onerror = () => {
+          batchSse?.close()
+          if (!run.done && sseRetries < 3) {
+            sseRetries++
+            setTimeout(connectBatchSSE, sseRetries * 2000)
+          }
+        }
       }
-      sse.onerror = () => { sse.close() }
+      connectBatchSSE()
 
       // Fallback polling
       run.pollInterval = setInterval(async () => {
         if (run.done) { clearInterval(run.pollInterval); return }
         try {
-          const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
-          if (!histRes.ok) return
-          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
-          const s = hist[run.promptId]?.status
-          if (s?.completed || s?.status_str === 'error') finish()
-        } catch { /* ignore */ }
+          const entry = await fetchHistory()
+          if (entry?.status?.completed || entry?.status?.status_str === 'error') finish()
+        } catch { /* ignore poll errors — next tick will retry */ }
       }, 3000)
 
       // Timeout after 5 minutes
       setTimeout(() => {
-        if (!run.done) { run.done = true; sse.close(); if (run.pollInterval) clearInterval(run.pollInterval) }
+        if (!run.done) { run.done = true; batchSse?.close(); if (run.pollInterval) clearInterval(run.pollInterval) }
       }, 300_000)
     }, []),
   })

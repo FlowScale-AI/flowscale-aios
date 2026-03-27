@@ -172,6 +172,12 @@ const TAB_CONFIG: {
     description: "Manage GPUs, devices, and cloud compute",
   },
   {
+    id: "comfyui",
+    label: "ComfyUI",
+    icon: GearSix,
+    description: "ComfyUI instances and configuration",
+  },
+  {
     id: "users",
     label: "Users",
     icon: UsersThree,
@@ -182,12 +188,6 @@ const TAB_CONFIG: {
     label: "Storage",
     icon: Database,
     description: "Output storage and disk usage",
-  },
-  {
-    id: "comfyui",
-    label: "ComfyUI",
-    icon: GearSix,
-    description: "ComfyUI instances and configuration",
   },
   {
     id: "providers",

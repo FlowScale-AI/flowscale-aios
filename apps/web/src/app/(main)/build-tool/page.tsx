@@ -32,6 +32,7 @@ interface WorkflowIO {
   paramName: string
   paramType: string
   defaultValue?: unknown
+  label?: string
   options?: string[]
   isInput: boolean
 }
@@ -566,6 +567,14 @@ function StepConfigure({
     )
   }, [])
 
+  const handleLabelChange = useCallback((nodeId: string, paramName: string, label: string) => {
+    setSchema((prev) =>
+      prev?.map((f) =>
+        f.nodeId === nodeId && f.paramName === paramName ? { ...f, label: label || undefined } : f
+      ) ?? null
+    )
+  }, [])
+
   const scanPorts = async () => {
     setScanning(true)
     try {
@@ -695,6 +704,7 @@ function StepConfigure({
                       </th>
                       <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Node</th>
                       <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Field</th>
+                      <th className="px-4 py-2.5 text-xs font-medium text-zinc-500 w-36">Label</th>
                       <th className="px-4 py-2.5 text-xs font-medium text-zinc-500">Type</th>
                       <th className="px-4 py-2.5 text-xs font-medium text-zinc-500 w-48">Default Value</th>
                     </tr>
@@ -733,6 +743,15 @@ function StepConfigure({
                             {f.nodeTitle || f.nodeType}
                           </td>
                           <td className="px-4 py-2.5 text-zinc-400 font-mono-custom text-xs">{f.paramName}</td>
+                          <td className="px-4 py-2 w-36" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              value={f.label ?? ''}
+                              onChange={(e) => handleLabelChange(f.nodeId, f.paramName, e.target.value)}
+                              placeholder={f.paramName}
+                              className="w-full px-2 py-1 text-xs bg-transparent border border-zinc-800 rounded text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
+                            />
+                          </td>
                           <td className="px-4 py-2.5">
                             <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-xs font-mono-custom">
                               {f.paramType}
