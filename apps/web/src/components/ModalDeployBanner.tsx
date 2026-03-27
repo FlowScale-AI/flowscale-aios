@@ -222,24 +222,26 @@ export function ModalDeployBanner({
           </div>
         )}
 
-        {/* Expand/collapse toggle when there are deployments */}
-        {allDeployments.length > 0 && (
-          <button
-            onClick={() => setExpanded(v => !v)}
-            className="text-purple-400/60 hover:text-purple-300 transition-colors"
-            title={expanded ? 'Collapse' : 'Expand'}
-          >
-            {expanded ? <CaretUp size={12} /> : <CaretDown size={12} />}
-          </button>
-        )}
+        <div className="ml-auto flex items-center gap-1.5">
+          {/* View Deployments button — only when deployments exist */}
+          {allDeployments.length > 0 && (
+            <button
+              onClick={() => setExpanded(v => !v)}
+              className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-purple-300 hover:text-purple-200 bg-purple-900/40 hover:bg-purple-900/60 border border-purple-800/30 rounded transition-colors"
+            >
+              {expanded ? 'Hide' : 'View'} Deployments
+              {expanded ? <CaretUp size={10} /> : <CaretDown size={10} />}
+            </button>
+          )}
 
-        <button
-          onClick={handleOpenPopup}
-          disabled={isAnyDeploying}
-          className="ml-auto flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
-        >
-          + Deploy
-        </button>
+          <button
+            onClick={handleOpenPopup}
+            disabled={isAnyDeploying}
+            className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded transition-colors"
+          >
+            + Deploy
+          </button>
+        </div>
       </div>
 
       {/* Expanded deployment list */}

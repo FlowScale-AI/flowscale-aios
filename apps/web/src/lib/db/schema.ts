@@ -32,7 +32,7 @@ export const executions = sqliteTable('executions', {
   seed: integer('seed'),
   promptId: text('prompt_id'),
   workflowHash: text('workflow_hash').notNull(),
-  status: text('status').notNull().default('running'), // 'running' | 'completed' | 'error'
+  status: text('status').notNull().default('running'), // 'queued' | 'running' | 'completed' | 'error'
   errorMessage: text('error_message'),
   metadataJson: text('metadata_json'), // timing, model_version, etc.
   comfyPort: integer('comfy_port'),

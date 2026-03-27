@@ -1343,6 +1343,13 @@ function StepTest({
           value={runOn}
           onChange={setRunOn}
           groups={[
+            ...(modalComfyInstances.filter(i => i.status === 'deployed').length > 0
+              ? [{
+                  label: 'All',
+                  icon: 'all' as const,
+                  options: [{ value: 'all:auto', label: 'All: Auto-route' }],
+                }]
+              : []),
             {
               label: 'Local',
               icon: 'local',

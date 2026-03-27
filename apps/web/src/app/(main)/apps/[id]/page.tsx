@@ -24,11 +24,12 @@ import { ComputeDropdown, type ComputeGroup } from '@/components/ComputeDropdown
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
 import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
-import { LocalInferenceSetup, useInferenceStatus } from '@/components/LocalInferenceSetup'
 import { useModalStatus } from '@/hooks/useModalStatus'
-import { ModalDeployBanner } from '@/components/ModalDeployBanner'
+import { ComputeBanner, type LocalComputeItem, useInferenceServer, useInferenceStatusOnly } from '@/components/ComputeBanner'
 import { useModalDeployStatus, useModalLogs } from '@/hooks/useModalDeployStatus'
 import { useModalComfyInstances } from '@/hooks/useModalComfyInstances'
+import { useBatchQueue, type ComputeTarget, type BatchJob } from '@/hooks/useBatchQueue'
+import { BatchJobRack, type BatchJobView } from '@/components/BatchJobRack'
 
 interface WorkflowIO {
   nodeId: string
@@ -743,7 +744,7 @@ function BottomTabs({
   isModalSelected?: boolean
   pluginId?: string | null
 }) {
-  const inferenceStatus = useInferenceStatus()
+  const inferenceStatus = useInferenceStatusOnly()
   const availableTabs = (['logs', 'history'] as const)
   const defaultTab = tool.engine === 'api' ? 'logs' : 'logs'
   const [tab, setTab] = useState<'history' | 'logs'>(defaultTab)
@@ -909,6 +910,8 @@ export default function ToolPage() {
   const { data: modalStatus } = useModalStatus()
   const { data: modalComfyData } = useModalComfyInstances()
   const modalComfyInstances = modalComfyData?.instances ?? []
+  const infServer = useInferenceServer(undefined, tool?.engine === 'api')
+  const inferenceStatus = infServer.status
 
   // Derive pluginId from API-engine tool's workflowJson
   const pluginId = (() => {
@@ -961,9 +964,10 @@ export default function ToolPage() {
   }, [STORAGE_KEY])
 
   // Derive provider/target from runOn
-  const isModalSelected = runOn.startsWith('modal:')
-  const selectedProvider: 'local' | 'modal' = isModalSelected ? 'modal' : 'local'
-  const selectedTarget = runOn === 'auto' ? '' : runOn.includes(':') ? runOn.split(':').slice(1).join(':') : runOn
+  const isAllSelected = runOn === 'all:auto'
+  const isModalSelected = runOn.startsWith('modal:') || isAllSelected
+  const selectedProvider: 'local' | 'modal' = runOn.startsWith('modal:') ? 'modal' : 'local'
+  const selectedTarget = runOn === 'auto' || runOn === 'all:auto' ? '' : runOn.includes(':') ? runOn.split(':').slice(1).join(':') : runOn
 
   // Always fetch to get `supported` flag for showing Modal button
   const { data: modalDeployData } = useModalDeployStatus(pluginId, isModalSelected ? selectedTarget : undefined)
@@ -1278,6 +1282,285 @@ export default function ToolPage() {
 
   const isRunning = runMutation.isPending || !!runningExecution
 
+  // ── Batch queue ──────────────────────────────────────────────────────────────
+
+  const getTargets = useCallback((): ComputeTarget[] => {
+    if (!tool) return []
+
+    if (tool.engine === 'comfyui') {
+      // Specific instance selected
+      if (runOn.startsWith('local:')) {
+        const port = Number(runOn.split(':')[1])
+        const inst = comfyInstances.find((i) => i.port === port)
+        if (inst && inst.status === 'running') {
+          return [{ id: `local:${port}`, label: inst.label, provider: 'local', port }]
+        }
+        return []
+      }
+      if (runOn.startsWith('modal:') && runOn !== 'modal:auto') {
+        const vport = Number(runOn.split(':')[1])
+        const inst = modalComfyInstances.find((i) => i.virtualPort === vport)
+        if (inst) return [{ id: `modal:${vport}`, label: `${inst.name} (${inst.gpu})`, provider: 'modal', port: vport }]
+        return []
+      }
+
+      const localTargets: ComputeTarget[] = runningInstances.map((i) => ({
+        id: `local:${i.port}`,
+        label: i.label,
+        provider: 'local' as const,
+        port: i.port,
+      }))
+      const cloudTargets: ComputeTarget[] = modalComfyInstances
+        .filter((i) => i.status === 'deployed')
+        .map((i) => ({
+          id: `modal:${i.virtualPort}`,
+          label: `${i.name} (${i.gpu})`,
+          provider: 'modal' as const,
+          port: i.virtualPort,
+        }))
+
+      if (runOn === 'all:auto') return [...localTargets, ...cloudTargets]
+      if (runOn === 'modal:auto') return cloudTargets
+      // 'auto' = local auto-route
+      return localTargets
+    }
+
+    // API-engine tools
+    if (runOn.startsWith('local:')) {
+      const device = runOn.split(':').slice(1).join(':')
+      const d = gpuDevices.find((g) => g.device === device)
+      if (d) return [{ id: `local:${device}`, label: d.label, provider: 'local', device }]
+      return []
+    }
+    if (runOn.startsWith('modal:') && runOn !== 'modal:auto') {
+      const deployId = runOn.split(':').slice(1).join(':')
+      const dep = (modalDeployData?.deployments ?? []).find((d) => d.id === deployId)
+      if (dep) return [{ id: `modal:${deployId}`, label: `${dep.name} (${dep.gpu})`, provider: 'modal', modalDeployId: deployId }]
+      return []
+    }
+
+    const localApiTargets: ComputeTarget[] = gpuDevices.map((d) => ({
+      id: `local:${d.device}`,
+      label: d.label,
+      provider: 'local' as const,
+      device: d.device,
+    }))
+    const cloudApiTargets: ComputeTarget[] = (modalDeployData?.deployments ?? [])
+      .filter((d) => d.status === 'deployed')
+      .map((d) => ({
+        id: `modal:${d.id}`,
+        label: `${d.name} (${d.gpu})`,
+        provider: 'modal' as const,
+        modalDeployId: d.id,
+      }))
+
+    if (runOn === 'all:auto') return [...localApiTargets, ...cloudApiTargets]
+    if (runOn === 'modal:auto') return cloudApiTargets
+    return localApiTargets
+  }, [tool, runOn, comfyInstances, runningInstances, modalComfyInstances, gpuDevices, modalDeployData])
+
+  const batchDispatchJob = useCallback(async (payload: {
+    inputs: Record<string, unknown>
+    execId?: string
+    comfyPort?: number | 'modal'
+    device?: string
+    provider?: 'modal'
+    modalDeployId?: string
+  }) => {
+    const res = await fetch(`/api/tools/${id}/executions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        inputs: payload.inputs,
+        comfyOrgApiKey: getComfyOrgApiKey() || undefined,
+        ...(payload.execId ? { existingExecId: payload.execId } : {}),
+        ...(payload.comfyPort != null ? { comfyPort: payload.comfyPort } : {}),
+        ...(payload.provider === 'modal'
+          ? { provider: 'modal', modalDeployId: payload.modalDeployId || 'auto' }
+          : payload.device ? { device: payload.device } : {}),
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.json()
+      throw new Error(err.error ?? 'Failed to run')
+    }
+    const result = await res.json()
+    return {
+      executionId: result.executionId,
+      type: result.type as 'api' | 'comfyui' | 'modal' | undefined,
+      seed: result.seed,
+      promptId: result.promptId,
+      comfyPort: result.comfyPort,
+    }
+  }, [id])
+
+  // Ref to access batch.markCompleted/markErrored from within the callback
+  // (avoids circular dependency: callback → batch → callback)
+  const batchRef = useRef<{ markCompleted: (execId: string, outputs: OutputItem[]) => void; markErrored: (execId: string, msg: string) => void }>({
+    markCompleted: () => {},
+    markErrored: () => {},
+  })
+
+  const batch = useBatchQueue({
+    toolId: id,
+    getTargets,
+    dispatchJob: batchDispatchJob,
+    onJobComplete: () => {
+      qc.invalidateQueries({ queryKey: ['executions', id] })
+    },
+    onComfyJobStarted: useCallback((job: BatchJob, result: { executionId: string; promptId?: string; comfyPort?: number }) => {
+      // Track for SSE-based completion detection
+      if (!result.promptId || !result.comfyPort) return
+      myExecIds.current.add(result.executionId)
+
+      const run = {
+        executionId: result.executionId,
+        promptId: result.promptId,
+        comfyPort: result.comfyPort,
+        done: false,
+        pollInterval: undefined as ReturnType<typeof setInterval> | undefined,
+      }
+
+      const finish = async () => {
+        if (run.done) return
+        run.done = true
+        if (run.pollInterval) clearInterval(run.pollInterval)
+
+        try {
+          const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
+          if (histRes.ok) {
+            const hist = await histRes.json() as Record<string, {
+              status?: { status_str?: string }
+              outputs?: Record<string, {
+                images?: { filename: string; subfolder: string }[]
+                gifs?: { filename: string; subfolder: string }[]
+                videos?: { filename: string; subfolder: string }[]
+                audio?: { filename: string; subfolder: string }[]
+                text?: string[]
+                string?: string[]
+              }>
+            }>
+            const entry = hist[run.promptId]
+            const items: OutputItem[] = []
+            for (const nodeOut of Object.values(entry?.outputs ?? {})) {
+              for (const f of nodeOut.images ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+              for (const f of nodeOut.gifs ?? []) items.push({ kind: inferKind(f.filename), filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+              for (const f of nodeOut.videos ?? []) items.push({ kind: 'video', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+              for (const f of nodeOut.audio ?? []) items.push({ kind: 'audio', filename: f.filename, path: `${f.subfolder ? f.subfolder + '/' : ''}${f.filename}` })
+              for (const t of [...(nodeOut.text ?? []), ...(nodeOut.string ?? [])]) {
+                if (typeof t === 'string' && t.trim()) {
+                  const k = inferKind(t)
+                  if (k !== 'file') items.push({ kind: k, filename: t, path: t })
+                  else items.push({ kind: 'text', text: t })
+                }
+              }
+            }
+
+            // PATCH execution to completed
+            const isError = entry?.status?.status_str === 'error'
+            await fetch(`/api/executions/${run.executionId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                status: isError ? 'error' : 'completed',
+                outputsJson: JSON.stringify(items),
+                completedAt: Date.now(),
+              }),
+            })
+
+            if (isError) {
+              batchRef.current.markErrored(run.executionId, 'Execution failed')
+            } else {
+              batchRef.current.markCompleted(run.executionId, items)
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
+      // SSE for completion detection
+      const sse = new EventSource(`/api/comfy/${run.comfyPort}/ws`)
+      sse.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data) as { type: string; data?: Record<string, unknown> }
+          if (msg.data?.prompt_id !== run.promptId) return
+          if (msg.type === 'executing' && msg.data?.node === null) { sse.close(); finish() }
+          else if (msg.type === 'execution_error') { sse.close(); finish() }
+        } catch { /* ignore */ }
+      }
+      sse.onerror = () => { sse.close() }
+
+      // Fallback polling
+      run.pollInterval = setInterval(async () => {
+        if (run.done) { clearInterval(run.pollInterval); return }
+        try {
+          const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
+          if (!histRes.ok) return
+          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
+          const s = hist[run.promptId]?.status
+          if (s?.completed || s?.status_str === 'error') finish()
+        } catch { /* ignore */ }
+      }, 3000)
+
+      // Timeout after 5 minutes
+      setTimeout(() => {
+        if (!run.done) { run.done = true; sse.close(); if (run.pollInterval) clearInterval(run.pollInterval) }
+      }, 300_000)
+    }, []),
+  })
+
+  // Keep ref in sync with batch functions
+  batchRef.current.markCompleted = batch.markCompleted
+  batchRef.current.markErrored = batch.markErrored
+
+  const [viewingBatchJobId, setViewingBatchJobId] = useState<number | null>(null)
+
+  // When a batch job is viewed, load its outputs into the output area
+  const handleViewBatchJob = useCallback((job: BatchJobView) => {
+    setViewingBatchJobId(job.id)
+    if (job.status === 'completed' && job.outputs.length > 0) {
+      setLatestOutputs(job.outputs)
+      setLatestExecId(job.execId ?? null)
+    } else if (job.status === 'running') {
+      setLatestOutputs([])
+      setLatestExecId(job.execId ?? null)
+    }
+  }, [])
+
+  const handleCancelBatchJob = useCallback((job: BatchJobView) => {
+    if (job.status === 'queued') {
+      batch.cancelQueued(job.id)
+    } else if (job.status === 'running') {
+      batch.cancelRunning(job.id)
+    }
+  }, [batch])
+
+  // Generate a random seed
+  const generateSeed = useCallback(() => Math.floor(Math.random() * 2147483647), [])
+
+  // When a single batch job completes, show its outputs in single-output view
+  useEffect(() => {
+    if (batch.totalCount === 1 && batch.completedCount === 1) {
+      const job = batch.jobs[0]
+      if (job.outputs.length > 0 && latestOutputs.length === 0) {
+        setLatestOutputs(job.outputs)
+        setLatestExecId(job.execId ?? null)
+      }
+    }
+  }, [batch.totalCount, batch.completedCount, batch.jobs, latestOutputs.length])
+
+  // Handle Run click — adds to batch queue
+  const handleRunClick = useCallback(() => {
+    const seed = generateSeed()
+    const jobInputs = { ...inputs, seed }
+    batch.enqueue(jobInputs, seed)
+    // Clear single-view state when adding a job
+    if (!batch.isBatchMode) {
+      setLatestOutputs([])
+      setLatestExecId(null)
+      setViewingBatchJobId(null)
+    }
+  }, [inputs, batch, generateSeed])
+
   if (toolLoading) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -1329,8 +1612,16 @@ export default function ToolPage() {
         )}
         {/* Compute selector */}
         {!isArtist && (() => {
+          const hasCloud = tool.engine === 'comfyui'
+            ? modalComfyInstances.filter(i => i.status === 'deployed').length > 0
+            : (modalSupported || isModalSelected) && modalStatus?.authenticated
           const computeGroups: ComputeGroup[] = tool.engine === 'comfyui'
             ? [
+                ...(hasCloud ? [{
+                  label: 'All',
+                  icon: 'all' as const,
+                  options: [{ value: 'all:auto', label: 'All: Auto-route' }],
+                }] : []),
                 {
                   label: 'Local',
                   icon: 'local',
@@ -1343,7 +1634,7 @@ export default function ToolPage() {
                     })),
                   ],
                 },
-                ...(modalComfyInstances.filter(i => i.status === 'deployed').length > 0
+                ...(hasCloud
                   ? [{
                       label: 'Cloud (Modal)',
                       icon: 'cloud' as const,
@@ -1357,6 +1648,11 @@ export default function ToolPage() {
                   : []),
               ]
             : [
+                ...(hasCloud ? [{
+                  label: 'All',
+                  icon: 'all' as const,
+                  options: [{ value: 'all:auto', label: 'All: Auto-route' }],
+                }] : []),
                 {
                   label: 'Local',
                   icon: 'local',
@@ -1369,7 +1665,7 @@ export default function ToolPage() {
                     })),
                   ],
                 },
-                ...((modalSupported || isModalSelected) && modalStatus?.authenticated
+                ...(hasCloud
                   ? [{
                       label: 'Cloud (Modal)',
                       icon: 'cloud' as const,
@@ -1385,20 +1681,16 @@ export default function ToolPage() {
           return <ComputeDropdown value={runOn} onChange={setRunOn} groups={computeGroups} />
         })()}
         <button
-          onClick={() => runMutation.mutate()}
-          disabled={isRunning || (tool.engine === 'comfyui' && selectedProvider !== 'modal' && runningInstances.length === 0 && !effectiveComfyPort)}
-          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
+          onClick={handleRunClick}
+          disabled={tool.engine === 'comfyui' && selectedProvider !== 'modal' && !isAllSelected && runningInstances.length === 0 && !effectiveComfyPort}
+          className="relative flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
         >
-          {isRunning ? (
-            <>
-              <LottieSpinner size={14} />
-              Running…
-            </>
-          ) : (
-            <>
-              <Play size={14} weight="fill" />
-              Run
-            </>
+          <Play size={14} weight="fill" />
+          Run
+          {batch.hasActiveJobs && (
+            <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold bg-emerald-500 text-white rounded-full">
+              {batch.runningCount + batch.queuedCount}
+            </span>
           )}
         </button>
       </div>
@@ -1418,19 +1710,80 @@ export default function ToolPage() {
         </div>
       )}
 
-      {/* Local inference setup (API tools — hidden when Modal is selected) */}
-      {tool.engine === 'api' && !isModalSelected && <LocalInferenceSetup />}
+      {/* Compute banner — unified for local, cloud, and all modes */}
+      {(() => {
+        // Determine banner mode from runOn selection
+        const bannerMode: 'local' | 'cloud' | 'all' | null = (() => {
+          if (isAllSelected) return 'all'
+          if (runOn.startsWith('modal:')) return 'cloud'
+          if (runOn === 'auto') return 'local'
+          return null // specific target selected — no banner
+        })()
+        if (!bannerMode) return null
 
-      {/* Modal deploy banner (API tools when Modal selected) */}
-      {tool.engine === 'api' && isModalSelected && pluginId && modalSupported && (
-        <ModalDeployBanner
-          pluginId={pluginId}
-          defaultGpu={modalDeployData?.defaultGpu ?? 'A10'}
-          requiredSecrets={modalDeployData?.requiredSecrets}
-          deployments={modalDeployData?.deployments ?? []}
-          onDeployed={() => qc.invalidateQueries({ queryKey: ['modal-deploy-status', pluginId] })}
-        />
-      )}
+        // Build local compute items
+        const localItems: LocalComputeItem[] = tool.engine === 'comfyui'
+          ? comfyInstances.map((inst) => ({
+              id: inst.id,
+              label: inst.label,
+              status: inst.status as 'running' | 'stopped' | 'starting',
+              type: 'comfyui' as const,
+              port: inst.port,
+              device: inst.device,
+              gpu: gpuHardwareData?.gpus?.find(g => inst.device === `cuda:${g.index}`)?.name,
+            }))
+          : gpuDevices.map((d) => ({
+              id: d.id,
+              label: d.label,
+              status: (inferenceStatus === 'running' ? 'running' : inferenceStatus === 'starting' ? 'starting' : 'stopped') as 'running' | 'stopped' | 'starting',
+              type: 'gpu' as const,
+              device: d.device,
+            }))
+
+        // Cloud props (only for API tools with Modal support)
+        const showCloudDeploy = tool.engine === 'api' && pluginId && modalSupported
+        const cloudProps = showCloudDeploy ? {
+          pluginId: pluginId!,
+          defaultGpu: modalDeployData?.defaultGpu ?? 'A10',
+          requiredSecrets: modalDeployData?.requiredSecrets,
+          deployments: modalDeployData?.deployments ?? [],
+          onDeployed: () => qc.invalidateQueries({ queryKey: ['modal-deploy-status', pluginId] }),
+        } : {}
+
+        // For ComfyUI cloud mode, show Modal ComfyUI instances as deployments
+        const comfyCloudDeployments = tool.engine === 'comfyui'
+          ? modalComfyInstances.map(i => ({
+                id: i.id ?? i.name,
+                name: i.name,
+                status: (i.status === 'error' ? 'failed' : i.status) as 'deployed' | 'deploying' | 'failed',
+                gpu: i.gpu,
+                warm: null,
+                url: '',
+                error: i.errorMessage,
+              }))
+          : undefined
+
+        // Inference server props for API tools (local/all modes)
+        const infProps = tool.engine === 'api' && (bannerMode === 'local' || bannerMode === 'all')
+          ? infServer.inferenceServerProps
+          : undefined
+
+        // For API tools, always show the banner (server status is useful even without compute items)
+        const hasLocal = localItems.length > 0
+        const hasCloud = (cloudProps.deployments?.length ?? 0) > 0 || (comfyCloudDeployments?.length ?? 0) > 0
+        if (bannerMode === 'local' && !hasLocal && !infProps) return null
+        if (bannerMode === 'cloud' && !hasCloud && !showCloudDeploy) return null
+
+        return (
+          <ComputeBanner
+            mode={bannerMode}
+            localCompute={localItems}
+            {...cloudProps}
+            {...(comfyCloudDeployments ? { deployments: comfyCloudDeployments } : {})}
+            inferenceServer={infProps}
+          />
+        )
+      })()}
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
@@ -1497,34 +1850,55 @@ export default function ToolPage() {
             <div className="h-full flex flex-col">
               {/* Output viewer */}
               <div className="flex-1 overflow-y-auto px-6 py-5 border-b border-white/5">
-                <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
-                  Output
-                </h2>
+                {batch.isBatchMode ? (
+                  <>
+                    <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
+                      Batch Jobs
+                    </h2>
+                    <BatchJobRack
+                      jobs={batch.jobs}
+                      viewingJobId={viewingBatchJobId}
+                      onViewJob={handleViewBatchJob}
+                      onCancelJob={handleCancelBatchJob}
+                      onCancelAll={batch.cancelAll}
+                      onClearFinished={batch.clearFinished}
+                      queuedCount={batch.queuedCount}
+                      runningCount={batch.runningCount}
+                      completedCount={batch.completedCount}
+                      errorCount={batch.errorCount}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
+                      Output
+                    </h2>
+                    {(() => {
+                      const selectedIsRunning = latestExecId
+                        ? executions.some((e) => e.id === latestExecId && e.status === 'running')
+                        : false
+                      const batchHasRunning = batch.totalCount === 1 && batch.runningCount > 0
+                      const showLoading = (isRunning || selectedIsRunning || batchHasRunning) && latestOutputs.length === 0
 
-                {(() => {
-                  // Show loading if: our run is active, or user clicked a running history item
-                  const selectedIsRunning = latestExecId
-                    ? executions.some((e) => e.id === latestExecId && e.status === 'running')
-                    : false
-                  const showLoading = (isRunning || selectedIsRunning) && latestOutputs.length === 0
-
-                  if (showLoading) return (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {(expectedOutputKinds.length > 0 ? expectedOutputKinds : ['image' as const]).map((kind, i) => (
-                        <OutputLoadingPlaceholder key={i} kind={kind} />
-                      ))}
-                    </div>
-                  )
-                  if (latestOutputs.length > 0) return (
-                    <OutputGrid outputs={latestOutputs} comfyPort={tool.comfyPort} />
-                  )
-                  return (
-                    <div className="flex flex-col items-center justify-center py-16 text-center">
-                      <ImageSquare size={32} weight="duotone" className="text-zinc-700 mb-3" />
-                      <p className="text-sm text-zinc-600">Run the tool to see output here</p>
-                    </div>
-                  )
-                })()}
+                      if (showLoading) return (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          {(expectedOutputKinds.length > 0 ? expectedOutputKinds : ['image' as const]).map((kind, i) => (
+                            <OutputLoadingPlaceholder key={i} kind={kind} />
+                          ))}
+                        </div>
+                      )
+                      if (latestOutputs.length > 0) return (
+                        <OutputGrid outputs={latestOutputs} comfyPort={tool.comfyPort} />
+                      )
+                      return (
+                        <div className="flex flex-col items-center justify-center py-16 text-center">
+                          <ImageSquare size={32} weight="duotone" className="text-zinc-700 mb-3" />
+                          <p className="text-sm text-zinc-600">Run the tool to see output here</p>
+                        </div>
+                      )
+                    })()}
+                  </>
+                )}
               </div>
 
               {/* Run history / Logs tabs */}

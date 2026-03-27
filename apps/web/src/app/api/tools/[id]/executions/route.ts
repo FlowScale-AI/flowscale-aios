@@ -305,8 +305,44 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!tool) return NextResponse.json({ error: 'Tool not found' }, { status: 404 })
 
   const body = await req.json()
-  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride, device: deviceOverride, provider: providerOverride, modalDeployId } = body
+  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride, device: deviceOverride, provider: providerOverride, modalDeployId, execId: existingExecId } = body
   const comfyOrgApiKey = comfyOrgApiKeyFromBody || getComfyOrgApiKeyServer()
+
+  /** If an existing execId is provided (from enqueue), update it to 'running'.
+   *  Otherwise, create a new record. Returns the execution ID. */
+  async function upsertExecution(values: {
+    userId: string | null
+    inputsJson: string
+    workflowHash: string
+    seed: number
+    comfyPort?: number
+  }): Promise<string> {
+    const now = Date.now()
+    if (existingExecId) {
+      // Transition queued → running
+      await db.update(executions).set({
+        status: 'running',
+        inputsJson: values.inputsJson,
+        seed: values.seed,
+        comfyPort: values.comfyPort ?? null,
+        createdAt: now,
+      }).where(eq(executions.id, existingExecId))
+      return existingExecId
+    }
+    const executionId = uuidv4()
+    await db.insert(executions).values({
+      id: executionId,
+      toolId,
+      userId: values.userId,
+      inputsJson: values.inputsJson,
+      workflowHash: values.workflowHash,
+      seed: values.seed,
+      status: 'running',
+      comfyPort: values.comfyPort,
+      createdAt: now,
+    })
+    return executionId
+  }
 
   // ── API-engine tools (non-ComfyUI, plugin-driven) ───────────────────────────
   if (tool.engine === 'api') {
@@ -340,17 +376,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
       const currentUser = getRequestUser(req)
       const seed = inputs?.['api__seed'] ?? Math.floor(Math.random() * 2 ** 32)
-      const executionId = uuidv4()
-
-      await db.insert(executions).values({
-        id: executionId,
-        toolId,
+      const executionId = await upsertExecution({
         userId: currentUser?.id ?? null,
         inputsJson: JSON.stringify({ ...inputs, seed }),
         workflowHash: tool.workflowHash,
         seed,
-        status: 'running',
-        createdAt: Date.now(),
       })
       db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()
 
@@ -373,18 +403,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const currentUser = getRequestUser(req)
     const seed = inputs?.['api__seed'] ?? Math.floor(Math.random() * 2 ** 32)
-    const executionId = uuidv4()
-    const now = Date.now()
-
-    await db.insert(executions).values({
-      id: executionId,
-      toolId,
+    const executionId = await upsertExecution({
       userId: currentUser?.id ?? null,
       inputsJson: JSON.stringify({ ...inputs, seed }),
       workflowHash: tool.workflowHash,
       seed,
-      status: 'running',
-      createdAt: now,
     })
     db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()
 
@@ -442,8 +465,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Generate a random seed if not provided in inputs
   const seed = inputs?.seed ?? Math.floor(Math.random() * 2 ** 32)
 
-  const executionId = uuidv4()
-  const now = Date.now()
   const clientId = uuidv4()
 
   // Parse workflow, normalize to API format, and inject inputs.
@@ -490,17 +511,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const currentUser = getRequestUser(req)
 
-  // Insert execution row
-  await db.insert(executions).values({
-    id: executionId,
-    toolId,
+  // Insert or update execution row
+  const executionId = await upsertExecution({
     userId: currentUser?.id ?? null,
     inputsJson: JSON.stringify({ ...inputs, seed }),
     workflowHash: tool.workflowHash,
     seed,
-    status: 'running',
     comfyPort,
-    createdAt: now,
   })
   db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()
   trackExecStart(comfyPort, executionId)

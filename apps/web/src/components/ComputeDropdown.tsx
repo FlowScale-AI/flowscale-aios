@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { CaretDown, Check, Lightning, Cloud, Cpu } from 'phosphor-react'
+import { CaretDown, Check, Lightning, Cloud, Shuffle } from 'phosphor-react'
 
 export interface ComputeOption {
   value: string
@@ -11,7 +11,7 @@ export interface ComputeOption {
 
 export interface ComputeGroup {
   label: string
-  icon: 'local' | 'cloud'
+  icon: 'local' | 'cloud' | 'all'
   options: ComputeOption[]
 }
 
@@ -29,7 +29,7 @@ function getSelectedLabel(groups: ComputeGroup[], value: string): string {
   return 'Select…'
 }
 
-function getSelectedGroup(groups: ComputeGroup[], value: string): 'local' | 'cloud' {
+function getSelectedGroup(groups: ComputeGroup[], value: string): 'local' | 'cloud' | 'all' {
   for (const group of groups) {
     if (group.options.some((o) => o.value === value)) return group.icon
   }
@@ -80,6 +80,8 @@ export function ComputeDropdown({ value, onChange, groups }: ComputeDropdownProp
         <span className="w-px h-3 bg-zinc-700" />
         {selectedIcon === 'cloud' ? (
           <Cloud size={12} weight="duotone" className="text-purple-400 shrink-0" />
+        ) : selectedIcon === 'all' ? (
+          <Shuffle size={12} weight="duotone" className="text-cyan-400 shrink-0" />
         ) : (
           <Lightning size={12} weight="duotone" className="text-emerald-400 shrink-0" />
         )}
@@ -98,6 +100,8 @@ export function ComputeDropdown({ value, onChange, groups }: ComputeDropdownProp
                 <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
                   {group.icon === 'cloud' ? (
                     <Cloud size={11} weight="duotone" className="text-purple-400/70" />
+                  ) : group.icon === 'all' ? (
+                    <Shuffle size={11} weight="duotone" className="text-cyan-400/70" />
                   ) : (
                     <Lightning size={11} weight="duotone" className="text-emerald-400/70" />
                   )}
