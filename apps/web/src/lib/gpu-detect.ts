@@ -128,6 +128,40 @@ export function clearGpuCache(): void {
   cachedGpus = null
 }
 
+/**
+ * Returns a human-readable CPU name for the current system.
+ * Works on macOS (Apple Silicon / Intel), Linux, and Windows.
+ */
+export function getCpuName(): string {
+  try {
+    if (process.platform === 'darwin') {
+      // macOS: "Apple M2 Pro", "Apple M1 Max", etc.
+      const chip = execSync('sysctl -n machdep.cpu.brand_string', {
+        encoding: 'utf-8',
+        timeout: 3000,
+      }).trim()
+      if (chip) return chip
+    } else if (process.platform === 'linux') {
+      const raw = execSync("grep -m1 'model name' /proc/cpuinfo", {
+        encoding: 'utf-8',
+        timeout: 3000,
+      }).trim()
+      const match = raw.match(/:\s*(.+)/)
+      if (match) return match[1].trim()
+    } else if (process.platform === 'win32') {
+      const raw = execSync('wmic cpu get name', {
+        encoding: 'utf-8',
+        timeout: 3000,
+      }).trim()
+      const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean)
+      if (lines.length > 1) return lines[1]
+    }
+  } catch {
+    // fall through
+  }
+  return 'CPU'
+}
+
 export interface GpuUtilization {
   index: number
   vramUsedMB: number

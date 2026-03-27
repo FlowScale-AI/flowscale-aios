@@ -1246,7 +1246,7 @@ export default function ToolPage() {
                   label: 'Local',
                   icon: 'local',
                   options: [
-                    { value: 'auto', label: 'Auto-route' },
+                    { value: 'auto', label: 'Local: Auto-route' },
                     ...comfyInstances.map((inst) => ({
                       value: `local:${inst.port}`,
                       label: inst.label,
@@ -1259,7 +1259,7 @@ export default function ToolPage() {
                       label: 'Cloud (Modal)',
                       icon: 'cloud' as const,
                       options: [
-                        { value: 'modal:auto', label: 'Auto-route' },
+                        { value: 'modal:auto', label: 'Cloud: Auto-route' },
                         ...modalComfyInstances
                           .filter(i => i.status === 'deployed')
                           .map(i => ({ value: `modal:${i.virtualPort}`, label: `${i.name} (${i.gpu})` })),
@@ -1272,7 +1272,7 @@ export default function ToolPage() {
                   label: 'Local',
                   icon: 'local',
                   options: [
-                    { value: 'auto', label: 'Auto-route' },
+                    { value: 'auto', label: 'Local: Auto-route' },
                     ...gpuDevices.map((d) => ({
                       value: `local:${d.device}`,
                       label: d.label,
@@ -1285,7 +1285,7 @@ export default function ToolPage() {
                       label: 'Cloud (Modal)',
                       icon: 'cloud' as const,
                       options: [
-                        { value: 'modal:auto', label: 'Auto-route' },
+                        { value: 'modal:auto', label: 'Cloud: Auto-route' },
                         ...(modalDeployData?.deployments ?? [])
                           .filter(d => d.status === 'deployed')
                           .map((d) => ({ value: `modal:${d.id}`, label: `${d.name} (${d.gpu})` })),

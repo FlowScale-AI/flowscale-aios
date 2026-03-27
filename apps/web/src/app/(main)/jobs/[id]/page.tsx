@@ -16,6 +16,15 @@ import {
   Warning,
 } from 'phosphor-react'
 import { PageTransition } from '@/components/ui'
+import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
+
+interface ComfyInstance {
+  id: string
+  port: number
+  device: string
+  label: string
+  status?: string
+}
 
 interface ExecutionDetail {
   id: string
@@ -30,6 +39,7 @@ interface ExecutionDetail {
   status: string
   errorMessage: string | null
   metadataJson: string | null
+  comfyPort: number | null
   createdAt: number
   completedAt: number | null
 }
@@ -125,6 +135,17 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
     },
   })
 
+  // Fetch ComfyUI instances to resolve port → label
+  const { data: instancesData } = useQuery<{ instances: ComfyInstance[] }>({
+    queryKey: ['comfy-instances'],
+    queryFn: async () => {
+      const res = await fetch('/api/comfy/instances/detect')
+      if (!res.ok) return { instances: [] }
+      return res.json()
+    },
+    staleTime: 60_000,
+  })
+
   if (isLoading) {
     return (
       <PageTransition className="h-full flex items-center justify-center bg-[var(--color-background)]">
@@ -156,6 +177,16 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   // Parse metadata
   let metadata: Record<string, unknown> = {}
   try { metadata = JSON.parse(execution.metadataJson || '{}') } catch { /* skip */ }
+
+  // Resolve comfyPort → compute label
+  const computeLabel = (() => {
+    if (!execution.comfyPort) return null
+    const inst = instancesData?.instances?.find((i) => i.port === execution.comfyPort)
+    if (inst) return inst.label
+    // Modal virtual ports (50000–50999)
+    if (execution.comfyPort >= 50000 && execution.comfyPort <= 50999) return `Cloud (Modal :${execution.comfyPort})`
+    return `Local :${execution.comfyPort}`
+  })()
 
   const handleCancel = async () => {
     try {
@@ -345,6 +376,12 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
                 <p className="text-[11px] text-zinc-500 mb-0.5">Tool ID</p>
                 <p className="text-sm text-zinc-400 font-mono">{execution.toolId}</p>
               </div>
+              {computeLabel && (
+                <div>
+                  <p className="text-[11px] text-zinc-500 mb-0.5">Compute</p>
+                  <p className="text-sm text-zinc-400 font-mono">{computeLabel}</p>
+                </div>
+              )}
               {execution.promptId && (
                 <div>
                   <p className="text-[11px] text-zinc-500 mb-0.5">Prompt ID</p>
@@ -359,6 +396,15 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
               )}
             </div>
           </Section>
+
+          {/* Live logs (running jobs only) */}
+          {execution.status === 'running' && execution.comfyPort && (
+            <Section title="Logs">
+              <div className="h-64">
+                <ComfyLogsPanel port={execution.comfyPort} instanceLabel={computeLabel ?? undefined} />
+              </div>
+            </Section>
+          )}
         </div>
       </div>
     </PageTransition>

@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { getCpuName } from '@/lib/gpu-detect'
 
 export type ProviderName = 'fal' | 'replicate' | 'openrouter' | 'huggingface'
 
@@ -120,7 +121,8 @@ export function getComfyInstances(): ComfyInstanceConfig[] {
 
   // Legacy fallback: synthesize a single instance from the old key
   const port = getComfyManagedPort()
-  return [{ id: 'gpu-0', port, device: 'cuda:0', label: 'ComfyUI' }]
+  const cpuLabel = getCpuName()
+  return [{ id: 'gpu-0', port, device: 'cpu', label: cpuLabel }]
 }
 
 export function setComfyInstances(instances: ComfyInstanceConfig[]): void {
