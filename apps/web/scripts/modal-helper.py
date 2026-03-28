@@ -362,7 +362,7 @@ def _generate_comfyui_modal_app(custom_nodes, gpu, app_name):
         cn_commands.append(
             f'    .run_commands(\n'
             f'        "git clone {repo} /comfyui/custom_nodes/{name}",\n'
-            f'        "cd /comfyui/custom_nodes/{name} && git checkout {commit}",\n'
+            f'        "cd /comfyui/custom_nodes/{name} && (git checkout {commit} 2>/dev/null || echo \'Commit {commit} not found, using default branch\')",\n'
             f'        "if [ -f /comfyui/custom_nodes/{name}/requirements.txt ]; then pip install -r /comfyui/custom_nodes/{name}/requirements.txt; fi",\n'
             f'    )\n'
         )
