@@ -15,7 +15,7 @@ import { spawn } from "child_process";
 import { join } from "path";
 import { writeFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
-import { getComfyUIPath } from "@/lib/providerSettings";
+import { getComfyUserDataPath } from "@/lib/providerSettings";
 
 /**
  * Extract the last JSON object/array from a multi-line string.
@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
 
     // Fire and forget — scan local ComfyUI, generate config, deploy via helper
     const helperScript = join(process.cwd(), "scripts", "modal-helper.py");
-    const comfyuiPath = getComfyUIPath();
+    const comfyuiPath = getComfyUserDataPath();
     const pythonCmd = getPythonCommand();
 
     (async () => {
@@ -253,7 +253,7 @@ export async function POST(req: NextRequest) {
     });
 
     const helperScript = join(process.cwd(), "scripts", "modal-helper.py");
-    const comfyuiPath = getComfyUIPath();
+    const comfyuiPath = getComfyUserDataPath();
     const pythonCmd = getPythonCommand();
 
     (async () => {

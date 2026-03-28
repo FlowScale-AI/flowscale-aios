@@ -362,35 +362,60 @@ function StepCloud({ onNext }: { onNext: () => void }) {
 
 /* ─── Step 3: ComfyUI Path ─── */
 function StepComfyUI({ onNext }: { onNext: () => void }) {
-  const [path, setPath] = useState('')
+  const [installType, setInstallType] = useState<'clone' | 'desktop' | null>(null)
+  const [comfyPath, setComfyPath] = useState('')
+  const [userDataPath, setUserDataPath] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function handleBrowse() {
+  // Auto-detect user data path when Desktop App is selected
+  useEffect(() => {
+    if (installType === 'desktop') {
+      fetch('/api/comfy/detect-user-data')
+        .then((r) => r.json())
+        .then((data: { detected: string | null }) => {
+          if (data.detected && !userDataPath) setUserDataPath(data.detected)
+        })
+        .catch(() => {})
+    }
+  }, [installType]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleBrowse(setter: (v: string) => void) {
     if (typeof window !== 'undefined' && window.desktop?.dialog?.openDirectory) {
       const result = await window.desktop.dialog.openDirectory()
       if (result) {
         try {
           const parsed = JSON.parse(result)
-          if (typeof parsed === 'string') setPath(parsed)
-          else if (Array.isArray(parsed) && parsed.length > 0) setPath(parsed[0])
+          if (typeof parsed === 'string') setter(parsed)
+          else if (Array.isArray(parsed) && parsed.length > 0) setter(parsed[0])
         } catch {
-          setPath(result)
+          setter(result)
         }
       }
     }
   }
 
   async function handleSave() {
-    if (!path.trim()) return
+    if (installType === 'clone' && !comfyPath.trim()) return
+    if (installType === 'desktop' && !userDataPath.trim()) return
     setSaving(true)
     setError(null)
     try {
+      const body: Record<string, string> = {}
+      if (installType === 'clone') {
+        body.comfyuiPath = comfyPath.trim()
+      } else {
+        // Desktop App: installation path is optional (may be auto-detected later),
+        // but user data path is required
+        if (comfyPath.trim()) body.comfyuiPath = comfyPath.trim()
+        body.comfyDesktopUserDataPath = userDataPath.trim()
+        body.installType = 'desktop-app'
+      }
       const res = await fetch('/api/setup/comfyui-path', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ comfyuiPath: path.trim() }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error('Failed to save')
       setSaved(true)
@@ -403,78 +428,158 @@ function StepComfyUI({ onNext }: { onNext: () => void }) {
   }
 
   const isDesktop = typeof window !== 'undefined' && !!window.desktop
+  const canSave = installType === 'clone' ? !!comfyPath.trim() : installType === 'desktop' ? !!userDataPath.trim() : false
 
   return (
     <div>
       <h1 className="text-xl font-semibold text-white mb-1 font-tech">ComfyUI</h1>
       <p className="text-sm text-zinc-400 mb-6">
-        Set the path to your local ComfyUI installation. You can change this later in Settings.
+        Connect your local ComfyUI installation. You can change this later in Settings.
       </p>
 
-      <div className="space-y-3 mb-6">
-        <div>
-          <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-            Installation Path
-          </label>
-          <div className="mt-1 flex items-center gap-2">
-            <input
-              type="text"
-              value={path}
-              onChange={(e) => {
-                setPath(e.target.value)
-                setSaved(false)
-              }}
-              placeholder="/home/user/ComfyUI"
-              className="flex-1 bg-white/5 border border-zinc-800 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm text-white font-mono placeholder:text-zinc-600 outline-none transition-colors"
-            />
-            {isDesktop && (
-              <button
-                onClick={handleBrowse}
-                className="flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium py-2.5 px-3 rounded-lg transition-colors border border-zinc-700/50"
-              >
-                <FolderOpen size={16} />
-                Browse
-              </button>
-            )}
+      {/* Install type selection */}
+      {!installType && (
+        <div className="space-y-3 mb-6">
+          <button
+            onClick={() => setInstallType('clone')}
+            className="w-full flex items-center gap-3 p-4 rounded-xl border border-zinc-800 hover:border-emerald-500/30 bg-white/[0.02] hover:bg-white/[0.04] transition-all text-left"
+          >
+            <Cpu size={20} className="text-emerald-400 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-white">Git Clone / Manual Install</p>
+              <p className="text-xs text-zinc-500">ComfyUI installed via git clone (single directory)</p>
+            </div>
+          </button>
+          <button
+            onClick={() => setInstallType('desktop')}
+            className="w-full flex items-center gap-3 p-4 rounded-xl border border-zinc-800 hover:border-emerald-500/30 bg-white/[0.02] hover:bg-white/[0.04] transition-all text-left"
+          >
+            <FolderOpen size={20} className="text-emerald-400 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-white">Desktop App</p>
+              <p className="text-xs text-zinc-500">ComfyUI installed via the Desktop App (macOS / Windows)</p>
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* Git Clone: single path */}
+      {installType === 'clone' && (
+        <div className="space-y-3 mb-6">
+          <div>
+            <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+              ComfyUI Directory
+            </label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="text"
+                value={comfyPath}
+                onChange={(e) => { setComfyPath(e.target.value); setSaved(false) }}
+                placeholder="/home/user/ComfyUI"
+                className="flex-1 bg-white/5 border border-zinc-800 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm text-white font-mono placeholder:text-zinc-600 outline-none transition-colors"
+              />
+              {isDesktop && (
+                <button onClick={() => handleBrowse(setComfyPath)} className="flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium py-2.5 px-3 rounded-lg transition-colors border border-zinc-700/50">
+                  <FolderOpen size={16} /> Browse
+                </button>
+              )}
+            </div>
           </div>
         </div>
+      )}
 
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
-            <p className="text-xs text-red-400">{error}</p>
+      {/* Desktop App: installation path + user data path */}
+      {installType === 'desktop' && (
+        <div className="space-y-4 mb-6">
+          <div>
+            <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+              Installation Path <span className="text-zinc-600">(optional)</span>
+            </label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="text"
+                value={comfyPath}
+                onChange={(e) => { setComfyPath(e.target.value); setSaved(false) }}
+                placeholder={process.platform === 'darwin' ? '/Applications/ComfyUI.app/Contents/Resources/ComfyUI' : 'C:\\Program Files\\ComfyUI'}
+                className="flex-1 bg-white/5 border border-zinc-800 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm text-white font-mono placeholder:text-zinc-600 outline-none transition-colors"
+              />
+              {isDesktop && (
+                <button onClick={() => handleBrowse(setComfyPath)} className="flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium py-2.5 px-3 rounded-lg transition-colors border border-zinc-700/50">
+                  <FolderOpen size={16} /> Browse
+                </button>
+              )}
+            </div>
           </div>
-        )}
-      </div>
+          <div>
+            <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+              User Data Path <span className="text-red-400">*</span>
+            </label>
+            <p className="text-xs text-zinc-600 mt-0.5 mb-1">
+              Where your models, custom nodes, and workflows are stored
+            </p>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="text"
+                value={userDataPath}
+                onChange={(e) => { setUserDataPath(e.target.value); setSaved(false) }}
+                placeholder="~/ComfyUI"
+                className="flex-1 bg-white/5 border border-zinc-800 focus:border-emerald-500/50 rounded-lg px-3 py-2.5 text-sm text-white font-mono placeholder:text-zinc-600 outline-none transition-colors"
+              />
+              {isDesktop && (
+                <button onClick={() => handleBrowse(setUserDataPath)} className="flex items-center gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium py-2.5 px-3 rounded-lg transition-colors border border-zinc-700/50">
+                  <FolderOpen size={16} /> Browse
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 mb-6">
+          <p className="text-xs text-red-400">{error}</p>
+        </div>
+      )}
 
       <div className="flex gap-3">
+        {installType ? (
+          <button
+            onClick={() => { setInstallType(null); setComfyPath(''); setUserDataPath(''); setError(null) }}
+            className="flex items-center justify-center gap-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium py-2.5 px-4 rounded-lg transition-colors border border-white/10"
+          >
+            Back
+          </button>
+        ) : null}
         <button
           onClick={onNext}
           className="flex-1 flex items-center justify-center gap-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium py-2.5 px-4 rounded-lg transition-colors border border-white/10"
         >
           Skip
         </button>
-        <button
-          onClick={handleSave}
-          disabled={!path.trim() || saving}
-          className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium py-2.5 px-4 rounded-lg transition-colors"
-        >
-          {saved ? (
-            <>
-              <CheckCircle size={16} weight="fill" />
-              Saved
-            </>
-          ) : saving ? (
-            <>
-              <CircleNotch size={16} className="animate-spin" />
-              Saving...
-            </>
-          ) : (
-            <>
-              Save & Continue
-              <ArrowRight size={16} />
-            </>
-          )}
-        </button>
+        {installType && (
+          <button
+            onClick={handleSave}
+            disabled={!canSave || saving}
+            className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium py-2.5 px-4 rounded-lg transition-colors"
+          >
+            {saved ? (
+              <>
+                <CheckCircle size={16} weight="fill" />
+                Saved
+              </>
+            ) : saving ? (
+              <>
+                <CircleNotch size={16} className="animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                Save & Continue
+                <ArrowRight size={16} />
+              </>
+            )}
+          </button>
+        )}
       </div>
     </div>
   )

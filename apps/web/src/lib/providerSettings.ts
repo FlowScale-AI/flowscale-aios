@@ -150,6 +150,16 @@ export function setComfyDesktopUserDataPath(p: string): void {
   writeSettingsFile(settings)
 }
 
+/**
+ * Returns the path where user data (models, custom_nodes) actually lives.
+ * - Desktop App installs → comfyDesktopUserDataPath (e.g. ~/ComfyUI)
+ * - Git clone / managed installs → comfyManagedPath (same dir as the installation)
+ * This is the path Modal scan and copy-assets should use for model/custom_node discovery.
+ */
+export function getComfyUserDataPath(): string | undefined {
+  return getComfyDesktopUserDataPath() || getComfyManagedPath()
+}
+
 // ── Auto-start ComfyUI on launch ─────────────────────────────────────────────
 
 export function getAutoStartComfyUI(): boolean {

@@ -26,6 +26,20 @@ function copyDirRecursive(src: string, dest: string): { copied: number } {
   return { copied }
 }
 
+/**
+ * Check if a path is writable by attempting to open a temp file for writing.
+ */
+function isWritable(dirPath: string): boolean {
+  const testFile = path.join(dirPath, '.aios-write-test')
+  try {
+    fs.writeFileSync(testFile, '', { flag: 'w' })
+    fs.unlinkSync(testFile)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function POST() {
   const managedPath = getComfyManagedPath()
   const desktopDataPath = getComfyDesktopUserDataPath()
@@ -36,11 +50,26 @@ export async function POST() {
   if (!desktopDataPath) {
     return NextResponse.json({ error: 'desktopUserDataPath not configured' }, { status: 400 })
   }
-  if (!fs.existsSync(managedPath)) {
-    return NextResponse.json({ error: `Managed ComfyUI path not found: ${managedPath}` }, { status: 400 })
-  }
   if (!fs.existsSync(desktopDataPath)) {
     return NextResponse.json({ error: `Desktop user-data path not found: ${desktopDataPath}` }, { status: 400 })
+  }
+
+  // If managedPath is inside a macOS .app bundle or is otherwise read-only,
+  // skip all writes — the Desktop App already uses its own user-data directory.
+  const managedIsReadOnly = !fs.existsSync(managedPath) || !isWritable(managedPath)
+  const managedIsAppBundle = managedPath.includes('.app/Contents')
+
+  if (managedIsReadOnly || managedIsAppBundle) {
+    return NextResponse.json({
+      success: true,
+      skippedWrites: true,
+      reason: managedIsAppBundle
+        ? 'Managed path is inside a macOS app bundle (read-only) — Desktop App uses user-data path directly'
+        : 'Managed path is not writable',
+      customNodesCopied: 0,
+      modelPathsConfigured: false,
+      configsCopied: 0,
+    })
   }
 
   const results: Record<string, unknown> = {}

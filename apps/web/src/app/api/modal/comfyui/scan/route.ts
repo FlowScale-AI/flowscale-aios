@@ -3,14 +3,14 @@ import { getRequestUser } from "@/lib/auth";
 import { getPythonCommand, getPythonSpawnOptions } from "@/lib/modal-manager";
 import { spawn } from "child_process";
 import { join } from "path";
-import { getComfyUIPath } from "@/lib/providerSettings";
+import { getComfyUserDataPath } from "@/lib/providerSettings";
 
 export async function GET(req: NextRequest) {
   const user = getRequestUser(req);
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const comfyuiPath = getComfyUIPath();
+  const comfyuiPath = getComfyUserDataPath();
   if (!comfyuiPath)
     return NextResponse.json(
       { error: "ComfyUI path not configured" },

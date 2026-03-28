@@ -113,6 +113,32 @@ function SetupWizard({ onComplete }: { onComplete: () => void }) {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [installLog])
 
+  // Auto-detect port from running ComfyUI instances when Desktop App is selected
+  useEffect(() => {
+    if (installType === 'desktop-app') {
+      fetch('/api/comfy/scan')
+        .then((r) => r.json())
+        .then((instances: Array<{ port: number }>) => {
+          if (instances.length > 0) {
+            setPort(String(instances[0].port))
+          }
+        })
+        .catch(() => {})
+    }
+  }, [installType])
+
+  // Auto-detect user data path for Desktop App
+  useEffect(() => {
+    if (installType === 'desktop-app' && !desktopUserDataPath) {
+      fetch('/api/comfy/detect-user-data')
+        .then((r) => r.json())
+        .then((data: { detected: string | null }) => {
+          if (data.detected) setDesktopUserDataPath(data.detected)
+        })
+        .catch(() => {})
+    }
+  }, [installType]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Auto-validate the Desktop App path whenever the configure step is shown
   useEffect(() => {
     if (step === 'configure' && installType === 'desktop-app') {
@@ -593,7 +619,11 @@ export default function ComfyUIIntegrationPage() {
   }
 
   const handleSetupComplete = async () => {
-    await loadManageStatus()
+    const status = await loadManageStatus()
+    // Auto-scan after setup so UI shows connected status without manual refresh
+    if (status?.status === 'running' || status?.isSetup) {
+      scan()
+    }
   }
 
   const stats = instance?.systemStats as SysInfo | null
