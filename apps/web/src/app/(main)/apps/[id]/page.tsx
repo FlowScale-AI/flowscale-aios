@@ -1703,16 +1703,6 @@ export default function ToolPage() {
             {shareCopied ? 'Copied!' : 'Share'}
           </button>
         )}
-        {isRunning && (
-          <button
-            onClick={handleStopInference}
-            disabled={stopping}
-            className="flex items-center gap-2 px-3 py-2 text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 disabled:opacity-50 text-sm font-medium rounded-md transition-colors"
-          >
-            <Stop size={14} weight="fill" />
-            {stopping ? 'Stopping…' : 'Stop'}
-          </button>
-        )}
         {/* Compute selector */}
         {!isArtist && (() => {
           const hasCloud = tool.engine === 'comfyui'
@@ -1783,6 +1773,16 @@ export default function ToolPage() {
               ]
           return <ComputeDropdown value={runOn} onChange={setRunOn} groups={computeGroups} />
         })()}
+        {isRunning && (
+          <button
+            onClick={handleStopInference}
+            disabled={stopping}
+            className="flex items-center gap-2 px-3 py-2 text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 disabled:opacity-50 text-sm font-medium rounded-md transition-colors"
+          >
+            <Stop size={14} weight="fill" />
+            {stopping ? 'Stopping…' : 'Stop'}
+          </button>
+        )}
         <button
           onClick={handleRunClick}
           disabled={
