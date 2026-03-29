@@ -42,8 +42,11 @@ export function ComfyLogsPanel({ port, instanceLabel }: { port: number; instance
         .catch(() => {})
     }
     fetchLogs()
-    // Poll every 3s for new log entries (catches generation progress)
-    const logPollInterval = setInterval(fetchLogs, 3000)
+    // Modal ports (50001-50999) use a slower poll to allow container scaledown;
+    // local instances poll every 3s for real-time generation progress.
+    const isModal = port > 50000 && port <= 50999
+    const pollMs = isModal ? 30_000 : 3000
+    const logPollInterval = setInterval(fetchLogs, pollMs)
 
     // Connect via server-side SSE proxy (avoids ComfyUI's origin check for direct WS)
     const controller = new AbortController()

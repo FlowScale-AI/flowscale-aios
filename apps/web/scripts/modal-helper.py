@@ -465,16 +465,19 @@ class ComfyUIServer:
             stderr=None,
         )
 
-        # Poll until ComfyUI is ready (up to 120s)
+        # Poll until ComfyUI is ready (up to 300s — custom node imports can be slow)
         import urllib.request
-        for _ in range(240):
-            try:
-                urllib.request.urlopen("http://127.0.0.1:8188/system_stats", timeout=2)
-                print("ComfyUI is ready.")
-                return
-            except Exception:
-                time.sleep(0.5)
-        raise RuntimeError("ComfyUI failed to start within 120 seconds")
+        health_endpoints = ["/system_stats", "/internal/logs/raw", "/"]
+        for _ in range(600):
+            for ep in health_endpoints:
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:8188{{ep}}", timeout=2)
+                    print(f"ComfyUI is ready (responded on {{ep}}).")
+                    return
+                except Exception:
+                    pass
+            time.sleep(0.5)
+        raise RuntimeError("ComfyUI failed to start within 300 seconds")
 
     @modal.asgi_app()
     def serve(self):
