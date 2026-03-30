@@ -5,7 +5,7 @@
  * for CLI interaction and PID/toml files for persistent state.
  */
 
-import { execSync, spawn, type ChildProcess } from "child_process";
+import { execSync, execFileSync, spawn, type ChildProcess } from "child_process";
 import { existsSync, unlinkSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
@@ -429,25 +429,25 @@ export function syncHfTokenToModal(token: string): {
   try {
     // Check if secret already exists
     const bin = modalBin();
-    const listResult = execSync(`${bin} secret list`, {
+    const listResult = execFileSync(bin, ['secret', 'list'], {
       timeout: 10000,
-      stdio: "pipe",
-    }).toString();
+      stdio: 'pipe',
+    }).toString()
     const secretExists = listResult.includes("huggingface-secret");
 
     if (secretExists) {
       // Delete and recreate (Modal doesn't have an update command)
-      execSync(`${bin} secret delete huggingface-secret --yes`, {
+      execFileSync(bin, ['secret', 'delete', 'huggingface-secret', '--yes'], {
         timeout: 10000,
-        stdio: "pipe",
-      });
+        stdio: 'pipe',
+      })
     }
 
     // Create the secret
-    execSync(`${bin} secret create huggingface-secret HF_TOKEN=${token}`, {
+    execFileSync(bin, ['secret', 'create', 'huggingface-secret', `HF_TOKEN=${token}`], {
       timeout: 10000,
-      stdio: "pipe",
-    });
+      stdio: 'pipe',
+    })
 
     return { success: true };
   } catch (err: unknown) {

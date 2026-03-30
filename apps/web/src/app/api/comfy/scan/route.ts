@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server'
 import { getComfyInstances } from '@/lib/providerSettings'
 import { probePort } from '@/lib/comfy-probe'
 
-export type { ComfyInstance } from '@/lib/comfy-probe'
-
 /** Well-known ports where ComfyUI commonly runs (desktop app, default, etc.) */
 const WELL_KNOWN_PORTS = [8000, 8188]
 

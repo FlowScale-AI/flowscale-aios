@@ -8,7 +8,7 @@
 
 import { spawn, execSync, type ChildProcess } from 'child_process'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, readdirSync } from 'fs'
-import { createConnection } from 'net'
+import { createConnection, createServer } from 'net'
 import path from 'path'
 import os from 'os'
 import { getComfyManagedPath, getComfyInstances, getComfyInstanceById } from './providerSettings'
@@ -311,6 +311,22 @@ export function stopInstance(instanceId: string): void {
 /** Stops then immediately restarts an instance. */
 export async function restartInstance(instanceId: string): Promise<{ port: number; pid: number }> {
   stopInstance(instanceId)
+  // Wait for the port to be released (up to 10 seconds)
+  const instances = getComfyInstances()
+  const instance = instances.find((i) => i.id === instanceId)
+  if (instance) {
+    const port = instance.port
+    for (let i = 0; i < 20; i++) {
+      const inUse = await new Promise<boolean>((resolve) => {
+        const tester = createServer()
+        tester.once('error', () => resolve(true))
+        tester.once('listening', () => tester.close(() => resolve(false)))
+        tester.listen(port, '127.0.0.1')
+      })
+      if (!inUse) break
+      await new Promise((r) => setTimeout(r, 500))
+    }
+  }
   return startInstance(instanceId)
 }
 

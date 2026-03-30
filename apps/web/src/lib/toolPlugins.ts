@@ -9,7 +9,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import crypto from 'crypto'
-import { execSync } from 'child_process'
+import { safeGitClone } from './shellSafe'
 import AdmZip from 'adm-zip'
 
 // ── Manifest types ───────────────────────────────────────────────────────────
@@ -375,10 +375,7 @@ function clonePluginFromGithub(githubUrl: string): ToolPluginManifest {
   fs.mkdirSync(tmpDir, { recursive: true })
 
   try {
-    execSync(`git clone --depth 1 ${JSON.stringify(url)} ${JSON.stringify(tmpDir)}`, {
-      stdio: 'pipe',
-      timeout: 120_000,
-    })
+    safeGitClone(url, tmpDir)
 
     const manifestPath = path.join(tmpDir, 'manifest.json')
     if (!fs.existsSync(manifestPath)) {

@@ -176,6 +176,18 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
     : undefined
   const isAutoRoute = selectedComfyPort === 'auto' || (selectedComfyPort === null && runningInstances.length > 1)
 
+  const sseRef = useRef<EventSource | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      sseRef.current?.close()
+      if (pollRef.current) clearInterval(pollRef.current)
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    }
+  }, [])
+
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
   type OutputFile = { filename: string; subfolder?: string; path?: string; kind: 'image' | 'video' | 'audio' | 'model' | 'file' }
@@ -305,7 +317,9 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
         setRunning(false)
       }
 
+      sseRef.current?.close()
       const sse = new EventSource(`/api/comfy/${result.comfyPort}/ws`)
+      sseRef.current = sse
 
       sse.onmessage = (event) => {
         try {
@@ -329,6 +343,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
 
       sse.onerror = () => { sse.close() }
 
+      if (pollRef.current) clearInterval(pollRef.current)
       const pollInterval = setInterval(async () => {
         if (done) { clearInterval(pollInterval); return }
         try {
@@ -342,8 +357,10 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
           }
         } catch { /* ignore */ }
       }, 3000)
+      pollRef.current = pollInterval
 
-      setTimeout(() => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      timeoutRef.current = setTimeout(() => {
         if (!done) {
           done = true
           sse.close()

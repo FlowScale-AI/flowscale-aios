@@ -7,7 +7,7 @@ import { isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@fl
 import { getRequestUser } from '@/lib/auth'
 import { mkdirSync, writeFileSync, mkdirSync as mkdirSyncFs, writeFileSync as writeFileSyncFs } from 'fs'
 import { mkdir, writeFile } from 'fs/promises'
-import { join } from 'path'
+import path, { join } from 'path'
 import { homedir } from 'os'
 import { inFlightControllers } from '@/lib/inferenceRegistry'
 import { getHistory } from '@/lib/comfyui-client'
@@ -126,8 +126,12 @@ async function finalizeExecution(
 
   const outputItems = outputs.map(({ kind, filename, data }) => {
     const buffer = Buffer.from(data, 'base64')
-    writeFileSync(join(outDir, filename), buffer)
-    return { kind, filename, path: `/api/executions/${executionId}/outputs/${filename}` }
+    const safeName = path.basename(filename)
+    if (!safeName || safeName === '.' || safeName === '..') {
+      throw new Error(`Invalid output filename: ${filename}`)
+    }
+    writeFileSync(join(outDir, safeName), buffer)
+    return { kind, filename: safeName, path: `/api/executions/${executionId}/outputs/${safeName}` }
   })
 
   await db.update(executions).set({

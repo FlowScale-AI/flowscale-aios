@@ -10,11 +10,12 @@
  */
 
 import { spawn } from 'child_process'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 import { VALID_GPU_TIERS, type GpuTier } from './toolPlugins'
 import { modalBin } from './modal-manager'
+import { atomicWriteJsonSync } from './atomicWrite'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -103,8 +104,7 @@ function readDeployments(): DeploymentsFile {
 }
 
 function writeDeployments(data: DeploymentsFile): void {
-  mkdirSync(AIOS_DIR, { recursive: true })
-  writeFileSync(DEPLOYMENTS_FILE, JSON.stringify(data, null, 2), 'utf-8')
+  atomicWriteJsonSync(DEPLOYMENTS_FILE, data)
 }
 
 function addDeployment(pluginId: string, record: ModalDeploymentRecord): void {
@@ -279,7 +279,10 @@ export async function undeployFromModal(
   const record = records.find((r) => r.id === deployId)
   if (!record) return { success: true } // Already not deployed
 
-  await runHelper(['undeploy', record.appName])
+  const result = await runHelper(['undeploy', record.appName])
+  if (result && !result.success) {
+    return { success: false, error: String(result.error ?? 'Modal undeploy failed') }
+  }
   removeDeployment(pluginId, deployId)
   return { success: true }
 }

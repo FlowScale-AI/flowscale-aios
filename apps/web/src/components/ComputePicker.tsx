@@ -219,24 +219,11 @@ export function ComputePicker({
                       </span>
                     </div>
 
-                    {/* VRAM bar for GPU instances */}
+                    {/* VRAM label for GPU instances */}
                     {gpu && !isDisabled && (
-                      <div className="flex items-center gap-2 mt-1">
-                        <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-emerald-500/60 rounded-full"
-                            style={{
-                              width: `${Math.min(
-                                100,
-                                (gpu.vramMB / Math.max(gpu.vramMB, 1)) * 100
-                              )}%`,
-                            }}
-                          />
-                        </div>
-                        <span className="text-[10px] text-zinc-500 shrink-0">
-                          {formatVram(gpu.vramMB)}
-                        </span>
-                      </div>
+                      <span className="text-[10px] text-zinc-500 mt-1">
+                        {formatVram(gpu.vramMB)} VRAM
+                      </span>
                     )}
 
                     {isDisabled && (

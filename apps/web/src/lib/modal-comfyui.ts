@@ -5,9 +5,10 @@
  * (50001-50999) so existing proxy and execution routes work unchanged.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { readFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import { atomicWriteJsonSync } from './atomicWrite'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,8 +42,7 @@ function readInstances(): ModalComfyInstance[] {
 }
 
 function writeInstances(instances: ModalComfyInstance[]): void {
-  mkdirSync(AIOS_DIR, { recursive: true })
-  writeFileSync(INSTANCES_FILE, JSON.stringify(instances, null, 2), 'utf-8')
+  atomicWriteJsonSync(INSTANCES_FILE, instances)
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────

@@ -486,7 +486,11 @@ function ExecutionHistoryItem({
       })()
     : []
 
-  const inputs: Record<string, unknown> = exec.inputsJson ? JSON.parse(exec.inputsJson) : {}
+  const inputs: Record<string, unknown> = (() => {
+    if (!exec.inputsJson) return {}
+    try { return JSON.parse(exec.inputsJson) as Record<string, unknown> }
+    catch { return {} }
+  })()
 
   const hasViewableOutputs = exec.status === 'completed' && outputs.length > 0
   const isClickable = hasViewableOutputs || exec.status === 'running'
@@ -899,7 +903,11 @@ export default function ToolPage() {
     refetchInterval: () => hasRunningExec.current ? 2000 : 5000,
   })
 
-  const allSchema: WorkflowIO[] = tool?.schemaJson ? JSON.parse(tool.schemaJson) : []
+  const allSchema: WorkflowIO[] = (() => {
+    if (!tool?.schemaJson) return []
+    try { return JSON.parse(tool.schemaJson) as WorkflowIO[] }
+    catch { return [] }
+  })()
   const schema: WorkflowIO[] = allSchema
     .filter((f) => f.isInput && f.enabled !== false)
     .filter((f) => !(f.paramName === 'label' && f.nodeType.startsWith('FS')))
@@ -1041,6 +1049,20 @@ export default function ToolPage() {
   const comfyRunRef = useRef<{ executionId: string; promptId: string; comfyPort: number; done: boolean; pollInterval?: ReturnType<typeof setInterval> | undefined } | null>(null)
   // Track execution IDs started by *this* session so we don't show other users' runs as ours
   const myExecIds = useRef(new Set<string>())
+  const outputPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      sseRef.current?.close()
+      sseRef.current = null
+      if (comfyRunRef.current?.pollInterval) {
+        clearInterval(comfyRunRef.current.pollInterval)
+      }
+      if (comfyRunRef.current) {
+        comfyRunRef.current.done = true
+      }
+    }
+  }, [])
 
   // ── Auto-select running execution on page load ─────────────────────────────────
   const didAutoSelect = useRef(false)
@@ -1078,6 +1100,7 @@ export default function ToolPage() {
           const hasPath = items.some((it: OutputItem) => 'path' in it && (it as { path?: string }).path?.startsWith('/'))
           if (!hasPath && prevId) {
             let attempts = 0
+            if (outputPollRef.current) clearInterval(outputPollRef.current)
             const poll = setInterval(async () => {
               attempts++
               try {
@@ -1089,11 +1112,13 @@ export default function ToolPage() {
                   if (saved.some((s: OutputItem) => 'path' in s && (s as { path?: string }).path?.startsWith('/'))) {
                     setLatestOutputs(saved)
                     clearInterval(poll)
+                    outputPollRef.current = null
                   }
                 }
               } catch { /* ignore */ }
-              if (attempts >= 10) clearInterval(poll)
+              if (attempts >= 10) { clearInterval(poll); outputPollRef.current = null }
             }, 2000)
+            outputPollRef.current = poll
           }
         } catch { /* ignore */ }
       }
@@ -1115,6 +1140,7 @@ export default function ToolPage() {
         const hasPath = items.some((it: OutputItem) => 'path' in it && (it as { path?: string }).path?.startsWith('/'))
         if (!hasPath) {
           let attempts = 0
+          if (outputPollRef.current) clearInterval(outputPollRef.current)
           const poll = setInterval(async () => {
             attempts++
             try {
@@ -1126,15 +1152,26 @@ export default function ToolPage() {
                 if (saved.some((s: OutputItem) => 'path' in s && (s as { path?: string }).path?.startsWith('/'))) {
                   setLatestOutputs(saved)
                   clearInterval(poll)
+                  outputPollRef.current = null
                 }
               }
             } catch { /* ignore */ }
-            if (attempts >= 10) clearInterval(poll)
+            if (attempts >= 10) { clearInterval(poll); outputPollRef.current = null }
           }, 2000)
+          outputPollRef.current = poll
         }
       } catch { /* ignore */ }
     }
   }, [latestExecId, executions, latestOutputs.length])
+
+  useEffect(() => {
+    return () => {
+      if (outputPollRef.current) {
+        clearInterval(outputPollRef.current)
+        outputPollRef.current = null
+      }
+    }
+  }, [])
 
   /** Resolve the port: pinned port if user selected one, Modal virtual port for cloud ComfyUI, undefined to let server auto-route. */
   const resolveComfyPort = useCallback((): number | 'modal' | undefined => {

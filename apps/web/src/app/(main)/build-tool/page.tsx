@@ -551,12 +551,18 @@ function StepConfigure({
   }, [workflowJson])
 
   // Analyze on mount — skip if editing (schema already loaded from existing tool)
-  useEffect(() => { if (!initialSchema) runAnalyze() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  const hasRunInitialAnalyze = useRef(false)
+  useEffect(() => {
+    if (!hasRunInitialAnalyze.current && !initialSchema) {
+      hasRunInitialAnalyze.current = true
+      runAnalyze()
+    }
+  }, [initialSchema, runAnalyze])
 
   // Re-analyze when a port is selected — skip in edit mode to preserve existing schema choices
   useEffect(() => {
     if (selectedPort && !toolId) runAnalyze(selectedPort)
-  }, [selectedPort]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedPort, toolId, runAnalyze])
 
   const handleDefaultChange = useCallback((nodeId: string, paramName: string, value: unknown) => {
     setSchema((prev) =>
@@ -1099,6 +1105,18 @@ function StepTest({
     return defaults
   })
 
+  const sseRef = useRef<EventSource | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      sseRef.current?.close()
+      if (pollRef.current) clearInterval(pollRef.current)
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    }
+  }, [])
+
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
   type OutputFile = { filename: string; kind: 'image' | 'video' | 'audio' | 'model' | 'file' }
@@ -1238,7 +1256,9 @@ function StepTest({
       }
 
       // Subscribe to SSE proxy for real-time progress events
+      sseRef.current?.close()
       const sse = new EventSource(`/api/comfy/${result.comfyPort}/ws`)
+      sseRef.current = sse
 
       sse.onmessage = (event) => {
         try {
@@ -1264,6 +1284,7 @@ function StepTest({
       sse.onerror = () => { sse.close() }
 
       // Fallback poll in case SSE misses the completion event
+      if (pollRef.current) clearInterval(pollRef.current)
       const pollInterval = setInterval(async () => {
         if (done) { clearInterval(pollInterval); return }
         try {
@@ -1277,9 +1298,11 @@ function StepTest({
           }
         } catch { /* ignore */ }
       }, 3000)
+      pollRef.current = pollInterval
 
       // Timeout after 5 minutes
-      setTimeout(() => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      timeoutRef.current = setTimeout(() => {
         if (!done) {
           done = true
           sse.close()

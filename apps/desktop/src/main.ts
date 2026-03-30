@@ -244,8 +244,24 @@ function createWindow(port: number): BrowserWindow {
 
   // Open external URLs (window.open / <a target="_blank">) in the system browser
   win.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-    shell.openExternal(targetUrl)
+    try {
+      const parsed = new URL(targetUrl)
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        shell.openExternal(targetUrl)
+      }
+    } catch { /* ignore malformed URLs */ }
     return { action: 'deny' }
+  })
+
+  win.webContents.on('will-navigate', (event, navigationUrl) => {
+    try {
+      const parsed = new URL(navigationUrl)
+      if (parsed.hostname !== '127.0.0.1' || parsed.protocol !== 'http:') {
+        event.preventDefault()
+      }
+    } catch {
+      event.preventDefault()
+    }
   })
 
   win.on('closed', () => { mainWindow = null })

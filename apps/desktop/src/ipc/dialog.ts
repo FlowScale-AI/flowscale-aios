@@ -4,6 +4,15 @@ import type { FSWatcher } from 'fs'
 
 const watchers = new Map<string, FSWatcher>()
 
+function isSafeExternalUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
 function debounce(fn: () => void, ms: number): () => void {
   let timer: ReturnType<typeof setTimeout>
   return () => {
@@ -42,6 +51,7 @@ export function registerDialogIpc(): void {
   })
 
   ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+    if (!isSafeExternalUrl(url)) return
     await shell.openExternal(url)
   })
 

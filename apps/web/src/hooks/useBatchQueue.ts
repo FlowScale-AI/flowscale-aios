@@ -82,7 +82,10 @@ export function useBatchQueue({
   onComfyJobStarted,
 }: UseBatchQueueOptions) {
   const [jobs, setJobs] = useState<BatchJob[]>([])
+  const jobsRef = useRef<BatchJob[]>([])
   const nextId = useRef(1)
+
+  useEffect(() => { jobsRef.current = jobs }, [jobs])
 
   // ── Counts ──────────────────────────────────────────────────────────────────
   const runningCount = jobs.filter((j) => j.status === 'running' || j.status === 'dispatching').length
@@ -97,13 +100,13 @@ export function useBatchQueue({
     const targets = getTargets()
     if (targets.length === 0) return false
     const busyTargetIds = new Set(
-      jobs
+      jobsRef.current
         .filter((j) => j.status === 'running' || j.status === 'dispatching')
         .map((j) => j.computeLabel)
         .filter(Boolean),
     )
     return targets.some((t) => !busyTargetIds.has(t.label))
-  }, [getTargets, jobs])
+  }, [getTargets])
 
   // ── Run immediately (no queuing) ──────────────────────────────────────────
   const run = useCallback(async (inputs: Record<string, unknown>, seed: number): Promise<number | null> => {
@@ -112,7 +115,7 @@ export function useBatchQueue({
 
     // Find a free target
     const busyTargetIds = new Set(
-      jobs
+      jobsRef.current
         .filter((j) => j.status === 'running' || j.status === 'dispatching')
         .map((j) => j.computeLabel)
         .filter(Boolean),
@@ -168,11 +171,11 @@ export function useBatchQueue({
     }
 
     return jobId
-  }, [getTargets, jobs, dispatchJob, onComfyJobStarted])
+  }, [getTargets, dispatchJob, onComfyJobStarted])
 
   // ── Cancel a running job ──────────────────────────────────────────────────
   const cancelRunning = useCallback(async (jobId: number) => {
-    const job = jobs.find((j) => j.id === jobId)
+    const job = jobsRef.current.find((j) => j.id === jobId)
     if (!job?.execId) return
     try {
       await fetch(`/api/executions/${job.execId}/cancel`, { method: 'POST' })
@@ -182,11 +185,11 @@ export function useBatchQueue({
           : j,
       ))
     } catch { /* ignore */ }
-  }, [jobs])
+  }, [])
 
   // ── Cancel all running ────────────────────────────────────────────────────
   const cancelAll = useCallback(async () => {
-    const running = jobs.filter((j) => j.status === 'running' && j.execId)
+    const running = jobsRef.current.filter((j) => j.status === 'running' && j.execId)
     for (const job of running) {
       try {
         await fetch(`/api/executions/${job.execId}/cancel`, { method: 'POST' })
@@ -197,7 +200,7 @@ export function useBatchQueue({
         ? { ...j, status: 'error' as const, errorMessage: 'Cancelled', completedAt: Date.now() }
         : j,
     ))
-  }, [jobs])
+  }, [])
 
   // ── Clear completed/errored jobs ───────────────────────────────────────────
   const clearFinished = useCallback(() => {

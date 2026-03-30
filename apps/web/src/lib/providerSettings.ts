@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { getCpuName } from '@/lib/gpu-detect'
+import { atomicWriteJsonSync } from './atomicWrite'
 
 export type ProviderName = 'fal' | 'replicate' | 'openrouter' | 'huggingface'
 
@@ -20,10 +21,8 @@ function readSettingsFile(): Record<string, any> {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function writeSettingsFile(settings: Record<string, any>): void {
-  fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true })
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8')
+function writeSettingsFile(settings: Record<string, unknown>): void {
+  atomicWriteJsonSync(SETTINGS_FILE, settings)
 }
 
 export function getComfyUIPath(): string | undefined {
@@ -225,8 +224,7 @@ function readKeysFile(): Partial<Record<ProviderName, string>> {
 }
 
 function writeKeysFile(keys: Partial<Record<ProviderName, string>>): void {
-  fs.mkdirSync(path.dirname(KEYS_FILE), { recursive: true })
-  fs.writeFileSync(KEYS_FILE, JSON.stringify(keys, null, 2), 'utf-8')
+  atomicWriteJsonSync(KEYS_FILE, keys)
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

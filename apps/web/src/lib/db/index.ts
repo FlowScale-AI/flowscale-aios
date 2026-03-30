@@ -211,26 +211,29 @@ export function getDb() {
   // First-run: seed admin user if no users exist.
   // Uses a transaction with INSERT OR IGNORE to be fully idempotent — safe
   // even if next build prerenders the login page across multiple workers.
-  const adminExists = sqlite.prepare("SELECT 1 FROM users WHERE username = 'admin'").get()
-  if (!adminExists) {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
-    const bytes = crypto.randomBytes(12)
-    let password = ''
-    for (let i = 0; i < 12; i++) {
-      password += chars[bytes[i] % chars.length]
+  const seedAdmin = sqlite.transaction(() => {
+    const adminExists = sqlite.prepare("SELECT 1 FROM users WHERE username = 'admin'").get()
+    if (!adminExists) {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+      const bytes = crypto.randomBytes(12)
+      let password = ''
+      for (let i = 0; i < 12; i++) {
+        password += chars[bytes[i] % chars.length]
+      }
+      const salt = crypto.randomBytes(16).toString('hex')
+      const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex')
+      const passwordHash = `${salt}:${hash}`
+      const id = crypto.randomUUID()
+      const now = Date.now()
+      sqlite
+        .prepare(
+          'INSERT OR IGNORE INTO users (id, username, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+        .run(id, 'admin', passwordHash, 'admin', 'active', now)
+      sqlite.prepare('INSERT OR REPLACE INTO setup (id, initial_password) VALUES (1, ?)').run(password)
     }
-    const salt = crypto.randomBytes(16).toString('hex')
-    const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex')
-    const passwordHash = `${salt}:${hash}`
-    const id = crypto.randomUUID()
-    const now = Date.now()
-    sqlite
-      .prepare(
-        'INSERT OR IGNORE INTO users (id, username, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      )
-      .run(id, 'admin', passwordHash, 'admin', 'active', now)
-    sqlite.prepare('INSERT OR REPLACE INTO setup (id, initial_password) VALUES (1, ?)').run(password)
-  }
+  })
+  seedAdmin()
 
   _db = drizzle(sqlite, { schema })
 
