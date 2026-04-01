@@ -64,7 +64,7 @@ importers:
         specifier: ^0.5.16
         version: 0.5.16
       axios:
-        specifier: ^1.13.6
+        specifier: 1.13.6
         version: 1.13.6
       better-sqlite3:
         specifier: ^12.6.2
