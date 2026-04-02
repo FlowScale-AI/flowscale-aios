@@ -352,6 +352,98 @@ def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-mod
         _json_out({"success": len(errors) == 0, "synced": synced, "total": total, "errors": errors})
 
 
+def cmd_download_model(url: str, model_type: str, filename: str, volume_name: str = "flowscale-comfyui-models"):
+    """Download a model from a URL directly into the Modal Volume.
+
+    Uses `modal volume put` with stdin piped from curl/wget, or a small
+    ephemeral Modal function that downloads within the cloud.
+    For simplicity we download locally to a temp file then upload.
+    """
+    import tempfile
+    import urllib.request
+    import urllib.error
+
+    # Validate model_type maps to a known subfolder
+    type_to_folder = {
+        "checkpoint": "checkpoints",
+        "lora": "loras",
+        "vae": "vae",
+        "controlnet": "controlnet",
+        "upscaler": "upscale_models",
+        "other": "other",
+    }
+    folder = type_to_folder.get(model_type, model_type)
+    remote_path = f"{folder}/{filename}"
+
+    # Ensure the Modal Volume exists before uploading
+    print(f"Ensuring volume '{volume_name}' exists...", flush=True)
+    try:
+        subprocess.run(
+            [MODAL_BIN, "volume", "create", volume_name],
+            capture_output=True, text=True, timeout=30,
+        )
+        # Ignore errors — volume may already exist, which is fine
+    except Exception:
+        pass
+
+    print(f"Downloading {url} ...", flush=True)
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=f"_{filename}")
+    try:
+        os.close(tmp_fd)
+
+        # Download with progress — use API key from env if available
+        headers = {"User-Agent": "FlowScale-AIOS/1.0"}
+        api_key = os.environ.get("FLOWSCALE_MODEL_API_KEY", "")
+        if api_key:
+            if "huggingface.co" in url or "hf.co" in url:
+                headers["Authorization"] = f"Bearer {api_key}"
+            # CivitAI key is already appended as ?token= by the frontend
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                total = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                with open(tmp_path, "wb") as f:
+                    while True:
+                        chunk = resp.read(1024 * 1024)  # 1MB chunks
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total > 0:
+                            pct = downloaded * 100 // total
+                            print(f"  {downloaded // (1024*1024)} / {total // (1024*1024)} MB ({pct}%)", flush=True)
+        except urllib.error.HTTPError as e:
+            _json_out({"success": False, "error": f"Download failed: HTTP {e.code} {e.reason}"})
+            return
+        except urllib.error.URLError as e:
+            _json_out({"success": False, "error": f"Download failed: {e.reason}"})
+            return
+
+        size_mb = os.path.getsize(tmp_path) / 1024 / 1024
+        print(f"Downloaded {size_mb:.0f} MB. Uploading to Modal Volume as {remote_path} ...", flush=True)
+
+        # Upload to Modal Volume
+        result = subprocess.run(
+            [MODAL_BIN, "volume", "put", "--force", volume_name, tmp_path, remote_path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+        )
+        if result.returncode != 0:
+            err = result.stderr.strip() or f"Exit code {result.returncode}"
+            _json_out({"success": False, "error": f"Volume upload failed: {err}"})
+            return
+
+        print("Done.", flush=True)
+        _json_out({"success": True, "remotePath": remote_path, "sizeMB": round(size_mb, 1)})
+
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 def _generate_comfyui_modal_app(custom_nodes, gpu, app_name):
     # Build the custom node clone+install commands for the image
     cn_commands = []
@@ -669,6 +761,9 @@ if __name__ == "__main__":
     elif command == "sync-models" and len(sys.argv) >= 3:
         volume = sys.argv[3] if len(sys.argv) >= 4 else "flowscale-comfyui-models"
         cmd_sync_models(sys.argv[2], volume)
+    elif command == "download-model" and len(sys.argv) >= 5:
+        volume = sys.argv[5] if len(sys.argv) >= 6 else "flowscale-comfyui-models"
+        cmd_download_model(sys.argv[2], sys.argv[3], sys.argv[4], volume)
     else:
         print(f"Unknown command or missing args: {sys.argv[1:]}", file=sys.stderr)
         sys.exit(1)

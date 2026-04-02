@@ -13,9 +13,10 @@ import { validateGpuTier } from "@/lib/modal-deploy";
 import { getPythonCommand, getPythonSpawnOptions } from "@/lib/modal-manager";
 import { spawn } from "child_process";
 import { join } from "path";
-import { writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { tmpdir } from "os";
-import { getComfyUserDataPath } from "@/lib/providerSettings";
+import { execFileSync } from "child_process";
+import { getComfyUserDataPath, getComfyUIPath } from "@/lib/providerSettings";
 
 /**
  * Extract the last JSON object/array from a multi-line string.
@@ -413,6 +414,218 @@ export async function POST(req: NextRequest) {
     removeModalComfyInstance(instanceId);
     log(`UNDEPLOY — done, returning success`);
     return NextResponse.json({ success: true });
+  }
+
+  // ── Download model from URL directly to Modal Volume ──────────────────────
+  // ── Add custom node: clone locally + trigger Modal resync ─────────────────
+  if (action === "add-custom-node") {
+    const { repoUrl, instanceId } = body as { repoUrl: string; instanceId?: string }
+
+    if (!repoUrl) {
+      return NextResponse.json(
+        { error: "repoUrl is required" },
+        { status: 400 },
+      )
+    }
+
+    // Validate URL
+    try {
+      const parsed = new URL(repoUrl)
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        return NextResponse.json(
+          { error: "Only http/https URLs are supported" },
+          { status: 400 },
+        )
+      }
+    } catch {
+      return NextResponse.json({ error: "Invalid URL" }, { status: 400 })
+    }
+
+    // Derive node name from repo URL (e.g., "ComfyUI-Impact-Pack" from the URL)
+    const cleanUrl = repoUrl.replace(/\.git\/?$/, "").replace(/\/$/, "")
+    const nodeName = cleanUrl.split("/").pop()
+    if (!nodeName) {
+      return NextResponse.json(
+        { error: "Could not derive node name from URL" },
+        { status: 400 },
+      )
+    }
+
+    log(`ADD-CUSTOM-NODE — repo="${repoUrl}", nodeName="${nodeName}", instanceId="${instanceId ?? "none"}"`)
+
+    // Step 1: Clone locally into ComfyUI custom_nodes
+    const comfyPath = getComfyUIPath()
+    if (!comfyPath) {
+      return NextResponse.json(
+        { error: "ComfyUI path not configured" },
+        { status: 400 },
+      )
+    }
+
+    const customNodesDir = join(comfyPath, "custom_nodes")
+    const nodeDir = join(customNodesDir, nodeName)
+
+    if (existsSync(nodeDir)) {
+      log(`ADD-CUSTOM-NODE — "${nodeName}" already exists locally, pulling latest`)
+      try {
+        execFileSync("git", ["pull"], { cwd: nodeDir, stdio: "pipe", timeout: 60_000 })
+      } catch (err) {
+        log(`ADD-CUSTOM-NODE — git pull failed (non-fatal):`, err)
+      }
+    } else {
+      log(`ADD-CUSTOM-NODE — cloning "${repoUrl}" into ${nodeDir}`)
+      try {
+        mkdirSync(customNodesDir, { recursive: true })
+        execFileSync("git", ["clone", "--depth", "1", cleanUrl, nodeDir], {
+          stdio: "pipe",
+          timeout: 120_000,
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Git clone failed"
+        logError(`ADD-CUSTOM-NODE — clone failed:`, err)
+        return NextResponse.json({ error: msg }, { status: 500 })
+      }
+    }
+
+    log(`ADD-CUSTOM-NODE — local clone done`)
+
+    // Step 2: If an instanceId is provided, trigger a resync so Modal picks up the new node
+    let resyncTriggered = false
+    if (instanceId) {
+      const instance = getModalComfyById(instanceId)
+      if (instance && instance.status === "deployed") {
+        log(`ADD-CUSTOM-NODE — triggering resync for instance "${instanceId}"`)
+        // Fire resync in the background (same as the resync action)
+        // We don't await this — it runs as a background deployment
+        fetch(`http://127.0.0.1:${process.env.PORT ?? 14173}/api/modal/comfyui`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "resync", instanceId }),
+        }).catch((err) => logError("ADD-CUSTOM-NODE — resync trigger failed:", err))
+        resyncTriggered = true
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      nodeName,
+      localPath: nodeDir,
+      resyncTriggered,
+    })
+  }
+
+  if (action === "download-model") {
+    const { url: modelUrl, modelType, filename, apiKey } = body as {
+      url: string
+      modelType: string
+      filename: string
+      apiKey?: string
+    }
+
+    if (!modelUrl || !modelType || !filename) {
+      return NextResponse.json(
+        { error: "url, modelType, and filename are required" },
+        { status: 400 },
+      )
+    }
+
+    // Basic URL validation
+    try {
+      const parsed = new URL(modelUrl)
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        return NextResponse.json(
+          { error: "Only http/https URLs are supported" },
+          { status: 400 },
+        )
+      }
+    } catch {
+      return NextResponse.json({ error: "Invalid URL" }, { status: 400 })
+    }
+
+    // Sanitize filename
+    const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_")
+    if (!safeName) {
+      return NextResponse.json(
+        { error: "Invalid filename" },
+        { status: 400 },
+      )
+    }
+
+    log(`DOWNLOAD-MODEL — url="${modelUrl}", type="${modelType}", filename="${safeName}"`)
+
+    const helperScript = join(process.cwd(), "scripts", "modal-helper.py")
+    const pythonCmd = getPythonCommand()
+
+    try {
+      const result = await new Promise<{ success: boolean; error?: string; remotePath?: string; sizeMB?: number }>(
+        (resolve, reject) => {
+          const spawnOpts = getPythonSpawnOptions()
+          // Pass API key via env var so it doesn't appear in process args
+          if (apiKey) {
+            spawnOpts.env = { ...spawnOpts.env ?? process.env, FLOWSCALE_MODEL_API_KEY: apiKey }
+          }
+          const proc = spawn(
+            pythonCmd,
+            [helperScript, "download-model", modelUrl, modelType, safeName],
+            {
+              ...spawnOpts,
+              stdio: ["ignore", "pipe", "pipe"],
+              timeout: 1200_000, // 20 min for large models
+            },
+          )
+
+          let stdout = ""
+          let stderr = ""
+          proc.stdout?.on("data", (d: Buffer) => {
+            const s = d.toString()
+            stdout += s
+            log(`DOWNLOAD-MODEL stdout: ${s.trim()}`)
+          })
+          proc.stderr?.on("data", (d: Buffer) => {
+            stderr += d.toString()
+          })
+          proc.on("close", (code) => {
+            log(`DOWNLOAD-MODEL — exited code=${code}`)
+            try {
+              const json = JSON.parse(extractJson(stdout))
+              resolve(json)
+            } catch {
+              reject(
+                new Error(
+                  stderr.trim() ||
+                    stdout.trim() ||
+                    `Process exited with code ${code}`,
+                ),
+              )
+            }
+          })
+          proc.on("error", reject)
+        },
+      )
+
+      if (!result.success) {
+        return NextResponse.json(
+          { error: result.error ?? "Download failed" },
+          { status: 500 },
+        )
+      }
+
+      log(`DOWNLOAD-MODEL — success: ${result.remotePath} (${result.sizeMB} MB)`)
+      return NextResponse.json({
+        success: true,
+        remotePath: result.remotePath,
+        sizeMB: result.sizeMB,
+      })
+    } catch (err) {
+      logError("DOWNLOAD-MODEL — error:", err)
+      return NextResponse.json(
+        {
+          error:
+            err instanceof Error ? err.message : "Model download failed",
+        },
+        { status: 500 },
+      )
+    }
   }
 
   log(`POST — unknown action="${action}"`);
