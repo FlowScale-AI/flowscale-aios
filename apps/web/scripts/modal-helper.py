@@ -333,6 +333,7 @@ def cmd_sync_models(comfyui_path: str, volume_name: str = "flowscale-comfyui-mod
             result = subprocess.run(
                 [MODAL_BIN, "volume", "put", "--force", volume_name, full_path, rel_path],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             )
             if result.returncode == 0:
                 synced += 1
@@ -380,7 +381,8 @@ def cmd_download_model(url: str, model_type: str, filename: str, volume_name: st
     try:
         subprocess.run(
             [MODAL_BIN, "volume", "create", volume_name],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30, env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         # Ignore errors — volume may already exist, which is fine
     except Exception:
@@ -428,6 +430,7 @@ def cmd_download_model(url: str, model_type: str, filename: str, volume_name: st
         result = subprocess.run(
             [MODAL_BIN, "volume", "put", "--force", volume_name, tmp_path, remote_path],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         if result.returncode != 0:
             err = result.stderr.strip() or f"Exit code {result.returncode}"
