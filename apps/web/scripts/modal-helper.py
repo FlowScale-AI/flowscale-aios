@@ -251,6 +251,53 @@ def cmd_logs(plugin_dir: str, app_name: str = ""):
     _json_out({"logs": combined, "deployLogs": deploy_logs, "runtimeLogs": runtime_logs})
 
 
+def _fetch_comfyui_manager_nodelist():
+    """Fetch ComfyUI-Manager's custom-node-list.json and return a dict mapping
+    repo-name (lowercase) → git URL.  Returns {} on any failure."""
+    import urllib.request
+    url = "https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager/main/custom-node-list.json"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        lookup = {}
+        for entry in data.get("custom_nodes", data) if isinstance(data, dict) else data:
+            ref = entry.get("reference", "")
+            if ref and "github.com" in ref:
+                # Extract repo name from URL (last path segment)
+                repo_name = ref.rstrip("/").rsplit("/", 1)[-1].lower()
+                lookup[repo_name] = ref
+        print(f"  Fetched ComfyUI-Manager node list: {len(lookup)} entries", file=sys.stderr)
+        return lookup
+    except Exception as e:
+        print(f"  Could not fetch ComfyUI-Manager node list: {e}", file=sys.stderr)
+        return {}
+
+
+def _resolve_repo_from_pyproject(node_path):
+    """Try to extract a git repo URL from pyproject.toml in the node directory."""
+    toml_path = os.path.join(node_path, "pyproject.toml")
+    if not os.path.isfile(toml_path):
+        return None
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            try:
+                import tomli as tomllib  # type: ignore[no-redef]
+            except ImportError:
+                return None
+        with open(toml_path, "rb") as f:
+            data = tomllib.load(f)
+        urls = data.get("project", {}).get("urls", {})
+        for key in ("Repository", "repository", "Source", "source", "Homepage", "homepage"):
+            url = urls.get(key, "")
+            if url and "github.com" in url:
+                return url.rstrip("/")
+    except Exception:
+        pass
+    return None
+
+
 def cmd_scan_comfyui(comfyui_path: str):
     """Scan local ComfyUI installation for custom nodes and models."""
     # Get ComfyUI version via git rev-parse HEAD
@@ -261,22 +308,46 @@ def cmd_scan_comfyui(comfyui_path: str):
     except Exception:
         pass
 
-    # Scan custom_nodes/ for git repos
+    # Scan custom_nodes/ for git repos and non-git packages
     custom_nodes = []
+    non_git_dirs = []
     cn_dir = os.path.join(comfyui_path, "custom_nodes")
     if os.path.isdir(cn_dir):
         for name in os.listdir(cn_dir):
             node_path = os.path.join(cn_dir, name)
             if not os.path.isdir(node_path) or name.startswith("."):
                 continue
-            if not os.path.exists(os.path.join(node_path, ".git")):
-                continue
-            try:
-                repo = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, timeout=5, cwd=node_path).stdout.strip()
-                commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5, cwd=node_path).stdout.strip()
-                custom_nodes.append({"name": name, "repo": repo, "commit": commit})
-            except Exception:
-                pass
+
+            # Path 1: git-based node (existing logic, unchanged)
+            if os.path.exists(os.path.join(node_path, ".git")):
+                try:
+                    repo = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, timeout=5, cwd=node_path).stdout.strip()
+                    commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5, cwd=node_path).stdout.strip()
+                    custom_nodes.append({"name": name, "repo": repo, "commit": commit})
+                except Exception:
+                    pass
+            else:
+                # Collect non-git dirs for fallback resolution
+                non_git_dirs.append((name, node_path))
+
+    # Path 2: resolve non-git custom nodes via pyproject.toml or ComfyUI-Manager registry
+    if non_git_dirs:
+        manager_lookup = None  # lazy-fetched only if needed
+        for name, node_path in non_git_dirs:
+            # Try pyproject.toml first (local, no network)
+            repo_url = _resolve_repo_from_pyproject(node_path)
+
+            # Fallback: ComfyUI-Manager registry lookup by folder name
+            if not repo_url:
+                if manager_lookup is None:
+                    manager_lookup = _fetch_comfyui_manager_nodelist()
+                repo_url = manager_lookup.get(name.lower())
+
+            if repo_url:
+                print(f"  Resolved non-git node '{name}' -> {repo_url}", file=sys.stderr)
+                custom_nodes.append({"name": name, "repo": repo_url, "commit": "HEAD"})
+            else:
+                print(f"  Skipped non-git node '{name}' (could not resolve repo URL)", file=sys.stderr)
 
     # Scan models/ for model files
     models = []
@@ -448,20 +519,38 @@ def cmd_download_model(url: str, model_type: str, filename: str, volume_name: st
 
 
 def _generate_comfyui_modal_app(custom_nodes, gpu, app_name):
-    # Build the custom node clone+install commands for the image
-    cn_commands = []
+    # Build custom node commands: clone+checkout in one layer, all pip installs in another.
+    # Consolidating pip installs lets pip resolve version conflicts globally instead of
+    # each node overwriting the previous one's dependencies (e.g. comfy-env versions).
+    clone_commands = []
+    node_names = []
     for cn in custom_nodes:
         repo = cn["repo"]
         name = cn["name"]
         commit = cn["commit"]
-        cn_commands.append(
-            f'    .run_commands(\n'
-            f'        "git clone {repo} /comfyui/custom_nodes/{name}",\n'
-            f'        "cd /comfyui/custom_nodes/{name} && (git checkout {commit} 2>/dev/null || echo \'Commit {commit} not found, using default branch\')",\n'
-            f'        "if [ -f /comfyui/custom_nodes/{name}/requirements.txt ]; then pip install -r /comfyui/custom_nodes/{name}/requirements.txt; fi",\n'
-            f'    )\n'
+        clone_commands.append(
+            f'        "git clone {repo} /comfyui/custom_nodes/{name}",'
         )
-    cn_block = "".join(cn_commands) if cn_commands else ""
+        clone_commands.append(
+            f'        "cd /comfyui/custom_nodes/{name} && (git checkout {commit} 2>/dev/null || echo \'Commit {commit} not found, using default branch\')",'
+        )
+        node_names.append(name)
+
+    cn_block = ""
+    if clone_commands:
+        # Layer 1: clone all custom nodes and checkout commits
+        cn_block = f'    .run_commands(\n' + "\n".join(clone_commands) + f'\n    )\n'
+        # Layer 2: install deps for each custom node sequentially.
+        # Some nodes pin conflicting versions of the same package (e.g. comfy-env==0.2.17
+        # vs comfy-env==0.1.92). Installing all at once causes pip ResolutionImpossible.
+        # Instead, install each node's requirements individually (mirroring how ComfyUI
+        # itself handles this locally) and ignore failures — the last compatible version wins.
+        install_commands = []
+        for n in node_names:
+            install_commands.append(
+                f'        "if [ -f /comfyui/custom_nodes/{n}/requirements.txt ]; then pip install -r /comfyui/custom_nodes/{n}/requirements.txt || true; fi",'
+            )
+        cn_block += f'    .run_commands(\n' + "\n".join(install_commands) + f'\n    )\n'
 
     # extra_model_paths.yaml written via Python in image build (not shell echo)
 
@@ -503,10 +592,21 @@ def _write_extra_model_paths():
     yaml_content = """flowscale_modal:
   base_path: /models
   checkpoints: checkpoints/
-  loras: loras/
-  vae: vae/
+  clip: text_encoders/
+  clip_vision: clip_vision/
   controlnet: controlnet/
+  diffusers: diffusers/
+  diffusion_models: diffusion_models/
+  embeddings: embeddings/
+  gligen: gligen/
+  hypernetworks: hypernetworks/
+  loras: loras/
+  style_models: style_models/
+  text_encoders: text_encoders/
+  unet: diffusion_models/
   upscale_models: upscale_models/
+  vae: vae/
+  vae_approx: vae_approx/
 """
     pathlib.Path("/comfyui/extra_model_paths.yaml").write_text(yaml_content)
 
