@@ -770,6 +770,7 @@ function BottomTabs({
   comfyInstanceLabel,
   isModalSelected,
   pluginId,
+  hasActiveJobs,
 }: {
   tool: Tool
   executions: Execution[]
@@ -782,6 +783,7 @@ function BottomTabs({
   comfyInstanceLabel?: string
   isModalSelected?: boolean
   pluginId?: string | null
+  hasActiveJobs?: boolean
 }) {
   const inferenceStatus = useInferenceStatusOnly()
   const availableTabs = (['logs', 'history'] as const)
@@ -858,7 +860,7 @@ function BottomTabs({
         )}
         {tab === 'logs' && tool.engine === 'api' && !isModalSelected && <ServerLogsPanel />}
         {tab === 'logs' && tool.engine !== 'api' && effectiveComfyPort && (
-          <ComfyLogsPanel port={effectiveComfyPort} instanceLabel={comfyInstanceLabel} />
+          <ComfyLogsPanel port={effectiveComfyPort} instanceLabel={comfyInstanceLabel} isRunning={hasActiveJobs} />
         )}
         {tab === 'logs' && tool.engine !== 'api' && !effectiveComfyPort && (
           <p className="text-xs text-zinc-600 pt-2">No ComfyUI instance configured.</p>
@@ -1047,6 +1049,8 @@ export default function ToolPage() {
   const sseRef = useRef<EventSource | null>(null)
   // Track the execution we kicked off (for ComfyUI SSE/polling only)
   const comfyRunRef = useRef<{ executionId: string; promptId: string; comfyPort: number; done: boolean; pollInterval?: ReturnType<typeof setInterval> | undefined } | null>(null)
+  // Track batch ComfyUI runs by execId so we can stop their polls when the DB detects completion
+  const batchComfyRunsRef = useRef<Map<string, { done: boolean; pollInterval?: ReturnType<typeof setInterval>; sse?: EventSource }>>(new Map())
   // Track execution IDs started by *this* session so we don't show other users' runs as ours
   const myExecIds = useRef(new Set<string>())
   const outputPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -1061,6 +1065,13 @@ export default function ToolPage() {
       if (comfyRunRef.current) {
         comfyRunRef.current.done = true
       }
+      // Clean up all batch ComfyUI polls on unmount
+      for (const run of batchComfyRunsRef.current.values()) {
+        run.done = true
+        if (run.pollInterval) clearInterval(run.pollInterval)
+        run.sse?.close()
+      }
+      batchComfyRunsRef.current.clear()
     }
   }, [])
 
@@ -1088,8 +1099,14 @@ export default function ToolPage() {
     const prevId = prevRunningIdRef.current
     prevRunningIdRef.current = curId
 
-    // Was running, now done → check if it completed with outputs
+    // Was running, now done → stop ComfyUI fallback poll and surface outputs
     if (prevId && !curId) {
+      // Defensively stop the ComfyUI history poll — execution is done per the DB
+      if (comfyRunRef.current && comfyRunRef.current.executionId === prevId && !comfyRunRef.current.done) {
+        comfyRunRef.current.done = true
+        if (comfyRunRef.current.pollInterval) { clearInterval(comfyRunRef.current.pollInterval); comfyRunRef.current.pollInterval = undefined }
+        sseRef.current?.close(); sseRef.current = null
+      }
       const finished = executions.find((e) => e.id === prevId)
       if (finished?.status === 'completed' && finished.outputsJson) {
         try {
@@ -1306,20 +1323,21 @@ export default function ToolPage() {
       }
       sse.onerror = () => { sse.close() }
 
-      // Fallback poll
+      // Fallback poll — use longer interval for Modal to avoid keeping container alive
+      const isModal = run.comfyPort > 50000 && run.comfyPort <= 50999
       run.pollInterval = setInterval(async () => {
-        if (run.done) { clearInterval(run.pollInterval); return }
+        if (run.done) { clearInterval(run.pollInterval); run.pollInterval = undefined; return }
         try {
           const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
           if (!histRes.ok) return
           const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
           const s = hist[run.promptId]?.status
-          if (s?.completed || s?.status_str === 'error') finish()
+          if (s?.completed || s?.status_str === 'success' || s?.status_str === 'error') finish()
         } catch { /* ignore */ }
-      }, 3000)
+      }, isModal ? 10_000 : 3000)
 
       setTimeout(() => {
-        if (!run.done) { run.done = true; sseRef.current?.close(); sseRef.current = null; if (run.pollInterval) clearInterval(run.pollInterval) }
+        if (!run.done) { run.done = true; sseRef.current?.close(); sseRef.current = null; if (run.pollInterval) clearInterval(run.pollInterval); run.pollInterval = undefined }
       }, 300_000)
     },
   })
@@ -1501,7 +1519,10 @@ export default function ToolPage() {
         comfyPort: result.comfyPort,
         done: false,
         pollInterval: undefined as ReturnType<typeof setInterval> | undefined,
+        sse: undefined as EventSource | undefined,
       }
+      // Register in ref map so the poll can be stopped externally (e.g. when DB detects completion)
+      batchComfyRunsRef.current.set(result.executionId, run)
 
       const finish = async () => {
         if (run.done) return
@@ -1540,7 +1561,9 @@ export default function ToolPage() {
 
           // Lock now — history fetched successfully
           run.done = true
-          if (run.pollInterval) clearInterval(run.pollInterval)
+          if (run.pollInterval) { clearInterval(run.pollInterval); run.pollInterval = undefined }
+          run.sse?.close()
+          batchComfyRunsRef.current.delete(run.executionId)
 
           // PATCH execution to completed — server saves files to disk and returns updated paths
           const isError = entry?.status?.status_str === 'error'
@@ -1571,6 +1594,7 @@ export default function ToolPage() {
 
       // SSE for completion detection
       const sse = new EventSource(`/api/comfy/${run.comfyPort}/ws`)
+      run.sse = sse
       sse.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data) as { type: string; data?: Record<string, unknown> }
@@ -1581,21 +1605,22 @@ export default function ToolPage() {
       }
       sse.onerror = () => { sse.close() }
 
-      // Fallback polling
+      // Fallback polling — use longer interval for Modal to avoid keeping container alive
+      const isModal = run.comfyPort > 50000 && run.comfyPort <= 50999
       run.pollInterval = setInterval(async () => {
-        if (run.done) { clearInterval(run.pollInterval); return }
+        if (run.done) { clearInterval(run.pollInterval); run.pollInterval = undefined; return }
         try {
           const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
           if (!histRes.ok) return
           const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
           const s = hist[run.promptId]?.status
-          if (s?.completed || s?.status_str === 'error') finish()
+          if (s?.completed || s?.status_str === 'success' || s?.status_str === 'error') finish()
         } catch { /* ignore */ }
-      }, 3000)
+      }, isModal ? 10_000 : 3000)
 
       // Timeout after 5 minutes
       setTimeout(() => {
-        if (!run.done) { run.done = true; sse.close(); if (run.pollInterval) clearInterval(run.pollInterval) }
+        if (!run.done) { run.done = true; sse.close(); if (run.pollInterval) clearInterval(run.pollInterval); run.pollInterval = undefined; batchComfyRunsRef.current.delete(run.executionId) }
       }, 300_000)
     }, []),
   })
@@ -1603,6 +1628,22 @@ export default function ToolPage() {
   // Keep ref in sync with batch functions
   batchRef.current.markCompleted = batch.markCompleted
   batchRef.current.markErrored = batch.markErrored
+
+  // Stop batch ComfyUI history polls when the DB detects completion (defensive cleanup)
+  useEffect(() => {
+    for (const job of batch.jobs) {
+      if (job.status === 'completed' || job.status === 'error') {
+        const execId = job.execId
+        if (execId && batchComfyRunsRef.current.has(execId)) {
+          const run = batchComfyRunsRef.current.get(execId)!
+          run.done = true
+          if (run.pollInterval) { clearInterval(run.pollInterval); run.pollInterval = undefined }
+          run.sse?.close()
+          batchComfyRunsRef.current.delete(execId)
+        }
+      }
+    }
+  }, [batch.jobs])
 
   const [viewingBatchJobId, setViewingBatchJobId] = useState<number | null>(null)
 
@@ -1959,6 +2000,14 @@ export default function ToolPage() {
                       completedCount={batch.completedCount}
                       errorCount={batch.errorCount}
                     />
+                    {latestOutputs.length > 0 && viewingBatchJobId !== null && (
+                      <div className="mt-4 pt-4 border-t border-white/5">
+                        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
+                          Output
+                        </h2>
+                        <OutputGrid outputs={latestOutputs} comfyPort={tool.comfyPort} />
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
@@ -2021,6 +2070,7 @@ export default function ToolPage() {
                 comfyInstanceLabel={comfyInstanceLabel}
                 isModalSelected={isModalSelected}
                 pluginId={pluginId}
+                hasActiveJobs={isRunning || batch.hasActiveJobs}
                 onCancelExecution={async (execId) => {
                   await fetch(`/api/executions/${execId}`, {
                     method: 'PATCH',
