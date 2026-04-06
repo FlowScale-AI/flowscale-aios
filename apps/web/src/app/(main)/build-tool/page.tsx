@@ -1284,20 +1284,23 @@ function StepTest({
       sse.onerror = () => { sse.close() }
 
       // Fallback poll in case SSE misses the completion event
+      // Use longer interval for Modal cloud instances to avoid keeping container alive
+      const isModalPort = result.comfyPort > 50000 && result.comfyPort <= 50999
       if (pollRef.current) clearInterval(pollRef.current)
       const pollInterval = setInterval(async () => {
         if (done) { clearInterval(pollInterval); return }
         try {
           const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
           if (!histRes.ok) return
-          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean } }>
-          if (hist[result.promptId]?.status?.completed) {
+          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
+          const s = hist[result.promptId]?.status
+          if (s?.completed || s?.status_str === 'success' || s?.status_str === 'error') {
             clearInterval(pollInterval)
             sse.close()
             finish()
           }
         } catch { /* ignore */ }
-      }, 3000)
+      }, isModalPort ? 10_000 : 3000)
       pollRef.current = pollInterval
 
       // Timeout after 5 minutes

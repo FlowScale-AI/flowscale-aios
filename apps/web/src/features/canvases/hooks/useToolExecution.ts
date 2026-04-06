@@ -136,9 +136,11 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
         logs: [...prev.logs, `Prompt queued (${promptId}). Waiting for output…`],
       }));
 
-      // Poll history every 2 s — identical to apps/[id]/page.tsx
+      // Poll history — use longer interval for Modal cloud instances
+      const isModalPort = comfyPort > 50000 && comfyPort <= 50999;
+      const pollMs = isModalPort ? 10_000 : 2000;
       let attempts = 0;
-      const MAX_ATTEMPTS = 150; // 5 minutes
+      const MAX_ATTEMPTS = isModalPort ? 30 : 150; // ~5 minutes either way
 
       pollTimerRef.current = setInterval(async () => {
         if (abortRef.current) { clearPoll(); return; }
@@ -170,7 +172,8 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
           }>;
 
           const entry = hist[promptId];
-          if (!entry?.status?.completed) return;
+          const st = entry?.status;
+          if (!st?.completed && st?.status_str !== 'success' && st?.status_str !== 'error') return;
 
           clearPoll();
           wsRef.current?.close();
@@ -232,7 +235,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
             }
           }
 
-          const isError = entry.status.status_str === "error";
+          const isError = entry.status?.status_str === "error";
 
           setExecutionState({
             status: isError ? "error" : "completed",
@@ -282,7 +285,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
         } catch {
           // Network hiccup — keep polling
         }
-      }, 2000);
+      }, pollMs);
     },
     [],
   );

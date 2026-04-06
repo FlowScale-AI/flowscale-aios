@@ -550,15 +550,41 @@ function ExecutionHistoryItem({
 
       {outputs.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {outputs.filter((o): o is Exclude<OutputItem, { kind: 'text' }> => o.kind !== 'text').map((out) => (
-            <span
-              key={out.filename}
-              className="flex items-center gap-1 px-2 py-1 bg-zinc-800 rounded text-xs text-zinc-400"
-            >
-              <ImageSquare size={11} />
-              {out.filename}
-            </span>
-          ))}
+          {outputs.filter((o): o is Exclude<OutputItem, { kind: 'text' }> => o.kind !== 'text').map((out) => {
+            const url = resolveOutputUrl(out)
+            const hasLocalPath = out.path?.startsWith('/')
+            if (hasLocalPath && out.kind === 'image') {
+              return (
+                <img
+                  key={out.filename}
+                  src={url}
+                  alt={out.filename}
+                  className="h-16 rounded border border-white/10 object-cover"
+                  loading="lazy"
+                />
+              )
+            }
+            if (hasLocalPath && out.kind === 'video') {
+              return (
+                <video
+                  key={out.filename}
+                  src={url}
+                  className="h-16 rounded border border-white/10 object-cover"
+                  muted
+                  preload="metadata"
+                />
+              )
+            }
+            return (
+              <span
+                key={out.filename}
+                className="flex items-center gap-1 px-2 py-1 bg-zinc-800 rounded text-xs text-zinc-400"
+              >
+                <ImageSquare size={11} />
+                {out.filename}
+              </span>
+            )
+          })}
         </div>
       )}
 
@@ -770,6 +796,7 @@ function BottomTabs({
   comfyInstanceLabel,
   isModalSelected,
   pluginId,
+  hasActiveJobs,
 }: {
   tool: Tool
   executions: Execution[]
@@ -782,6 +809,7 @@ function BottomTabs({
   comfyInstanceLabel?: string
   isModalSelected?: boolean
   pluginId?: string | null
+  hasActiveJobs?: boolean
 }) {
   const inferenceStatus = useInferenceStatusOnly()
   const availableTabs = (['logs', 'history'] as const)
@@ -858,7 +886,7 @@ function BottomTabs({
         )}
         {tab === 'logs' && tool.engine === 'api' && !isModalSelected && <ServerLogsPanel />}
         {tab === 'logs' && tool.engine !== 'api' && effectiveComfyPort && (
-          <ComfyLogsPanel port={effectiveComfyPort} instanceLabel={comfyInstanceLabel} />
+          <ComfyLogsPanel port={effectiveComfyPort} instanceLabel={comfyInstanceLabel} isRunning={hasActiveJobs} />
         )}
         {tab === 'logs' && tool.engine !== 'api' && !effectiveComfyPort && (
           <p className="text-xs text-zinc-600 pt-2">No ComfyUI instance configured.</p>
@@ -1047,6 +1075,8 @@ export default function ToolPage() {
   const sseRef = useRef<EventSource | null>(null)
   // Track the execution we kicked off (for ComfyUI SSE/polling only)
   const comfyRunRef = useRef<{ executionId: string; promptId: string; comfyPort: number; done: boolean; pollInterval?: ReturnType<typeof setInterval> | undefined } | null>(null)
+  // Track batch ComfyUI runs by execId so we can stop their polls when the DB detects completion
+  const batchComfyRunsRef = useRef<Map<string, { done: boolean; pollInterval?: ReturnType<typeof setInterval>; sse?: EventSource }>>(new Map())
   // Track execution IDs started by *this* session so we don't show other users' runs as ours
   const myExecIds = useRef(new Set<string>())
   const outputPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -1061,17 +1091,35 @@ export default function ToolPage() {
       if (comfyRunRef.current) {
         comfyRunRef.current.done = true
       }
+      // Clean up all batch ComfyUI polls on unmount
+      for (const run of batchComfyRunsRef.current.values()) {
+        run.done = true
+        if (run.pollInterval) clearInterval(run.pollInterval)
+        run.sse?.close()
+      }
+      batchComfyRunsRef.current.clear()
     }
   }, [])
 
-  // ── Auto-select running execution on page load ─────────────────────────────────
+  // ── Auto-select execution on page load ──────────────────────────────────────
   const didAutoSelect = useRef(false)
   useEffect(() => {
     if (didAutoSelect.current || execLoading || latestExecId) return
+    // Prefer a running execution, otherwise pick the latest completed one
     const running = executions.find((e) => e.status === 'running')
     if (running) {
       setLatestExecId(running.id)
       setLatestOutputs([])
+      didAutoSelect.current = true
+      return
+    }
+    const completed = executions.find((e) => e.status === 'completed' && e.outputsJson)
+    if (completed) {
+      setLatestExecId(completed.id)
+      try {
+        const items = JSON.parse(completed.outputsJson!) as OutputItem[]
+        setLatestOutputs(items)
+      } catch { /* ignore */ }
       didAutoSelect.current = true
     }
   }, [executions, execLoading, latestExecId])
@@ -1088,8 +1136,14 @@ export default function ToolPage() {
     const prevId = prevRunningIdRef.current
     prevRunningIdRef.current = curId
 
-    // Was running, now done → check if it completed with outputs
+    // Was running, now done → stop ComfyUI fallback poll and surface outputs
     if (prevId && !curId) {
+      // Defensively stop the ComfyUI history poll — execution is done per the DB
+      if (comfyRunRef.current && comfyRunRef.current.executionId === prevId && !comfyRunRef.current.done) {
+        comfyRunRef.current.done = true
+        if (comfyRunRef.current.pollInterval) { clearInterval(comfyRunRef.current.pollInterval); comfyRunRef.current.pollInterval = undefined }
+        sseRef.current?.close(); sseRef.current = null
+      }
       const finished = executions.find((e) => e.id === prevId)
       if (finished?.status === 'completed' && finished.outputsJson) {
         try {
@@ -1306,20 +1360,21 @@ export default function ToolPage() {
       }
       sse.onerror = () => { sse.close() }
 
-      // Fallback poll
+      // Fallback poll — use longer interval for Modal to avoid keeping container alive
+      const isModal = run.comfyPort > 50000 && run.comfyPort <= 50999
       run.pollInterval = setInterval(async () => {
-        if (run.done) { clearInterval(run.pollInterval); return }
+        if (run.done) { clearInterval(run.pollInterval); run.pollInterval = undefined; return }
         try {
           const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
           if (!histRes.ok) return
           const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
           const s = hist[run.promptId]?.status
-          if (s?.completed || s?.status_str === 'error') finish()
+          if (s?.completed || s?.status_str === 'success' || s?.status_str === 'error') finish()
         } catch { /* ignore */ }
-      }, 3000)
+      }, isModal ? 10_000 : 3000)
 
       setTimeout(() => {
-        if (!run.done) { run.done = true; sseRef.current?.close(); sseRef.current = null; if (run.pollInterval) clearInterval(run.pollInterval) }
+        if (!run.done) { run.done = true; sseRef.current?.close(); sseRef.current = null; if (run.pollInterval) clearInterval(run.pollInterval); run.pollInterval = undefined }
       }, 300_000)
     },
   })
@@ -1501,7 +1556,10 @@ export default function ToolPage() {
         comfyPort: result.comfyPort,
         done: false,
         pollInterval: undefined as ReturnType<typeof setInterval> | undefined,
+        sse: undefined as EventSource | undefined,
       }
+      // Register in ref map so the poll can be stopped externally (e.g. when DB detects completion)
+      batchComfyRunsRef.current.set(result.executionId, run)
 
       const finish = async () => {
         if (run.done) return
@@ -1540,7 +1598,9 @@ export default function ToolPage() {
 
           // Lock now — history fetched successfully
           run.done = true
-          if (run.pollInterval) clearInterval(run.pollInterval)
+          if (run.pollInterval) { clearInterval(run.pollInterval); run.pollInterval = undefined }
+          run.sse?.close()
+          batchComfyRunsRef.current.delete(run.executionId)
 
           // PATCH execution to completed — server saves files to disk and returns updated paths
           const isError = entry?.status?.status_str === 'error'
@@ -1571,6 +1631,7 @@ export default function ToolPage() {
 
       // SSE for completion detection
       const sse = new EventSource(`/api/comfy/${run.comfyPort}/ws`)
+      run.sse = sse
       sse.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data) as { type: string; data?: Record<string, unknown> }
@@ -1581,21 +1642,22 @@ export default function ToolPage() {
       }
       sse.onerror = () => { sse.close() }
 
-      // Fallback polling
+      // Fallback polling — use longer interval for Modal to avoid keeping container alive
+      const isModal = run.comfyPort > 50000 && run.comfyPort <= 50999
       run.pollInterval = setInterval(async () => {
-        if (run.done) { clearInterval(run.pollInterval); return }
+        if (run.done) { clearInterval(run.pollInterval); run.pollInterval = undefined; return }
         try {
           const histRes = await fetch(`/api/comfy/${run.comfyPort}/history/${run.promptId}`)
           if (!histRes.ok) return
           const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
           const s = hist[run.promptId]?.status
-          if (s?.completed || s?.status_str === 'error') finish()
+          if (s?.completed || s?.status_str === 'success' || s?.status_str === 'error') finish()
         } catch { /* ignore */ }
-      }, 3000)
+      }, isModal ? 10_000 : 3000)
 
       // Timeout after 5 minutes
       setTimeout(() => {
-        if (!run.done) { run.done = true; sse.close(); if (run.pollInterval) clearInterval(run.pollInterval) }
+        if (!run.done) { run.done = true; sse.close(); if (run.pollInterval) clearInterval(run.pollInterval); run.pollInterval = undefined; batchComfyRunsRef.current.delete(run.executionId) }
       }, 300_000)
     }, []),
   })
@@ -1604,19 +1666,57 @@ export default function ToolPage() {
   batchRef.current.markCompleted = batch.markCompleted
   batchRef.current.markErrored = batch.markErrored
 
+  // Stop batch ComfyUI history polls when the DB detects completion (defensive cleanup)
+  useEffect(() => {
+    for (const job of batch.jobs) {
+      if (job.status === 'completed' || job.status === 'error') {
+        const execId = job.execId
+        if (execId && batchComfyRunsRef.current.has(execId)) {
+          const run = batchComfyRunsRef.current.get(execId)!
+          run.done = true
+          if (run.pollInterval) { clearInterval(run.pollInterval); run.pollInterval = undefined }
+          run.sse?.close()
+          batchComfyRunsRef.current.delete(execId)
+        }
+      }
+    }
+  }, [batch.jobs])
+
   const [viewingBatchJobId, setViewingBatchJobId] = useState<number | null>(null)
+
+  // Resolve outputs for a batch job: prefer job.outputs, fall back to DB execution data
+  const resolveJobOutputs = useCallback((job: BatchJobView): OutputItem[] => {
+    if (job.outputs.length > 0) return job.outputs
+    if (!job.execId) return []
+    const exec = executions.find((e) => e.id === job.execId)
+    if (!exec?.outputsJson) return []
+    try {
+      const parsed = JSON.parse(exec.outputsJson) as { kind?: string; filename?: string; path?: string; text?: string }[]
+      return parsed
+        .map((o) => {
+          if (o.text) return { kind: 'text' as const, text: o.text }
+          if (!o.filename) return null
+          const kind = (o.kind || inferKind(o.filename)) as 'image' | 'video' | 'audio' | 'model' | 'file'
+          return { kind, filename: o.filename, path: o.path ?? '' }
+        })
+        .filter((o): o is OutputItem => o !== null)
+    } catch { return [] }
+  }, [executions])
 
   // When a batch job is viewed, load its outputs into the output area
   const handleViewBatchJob = useCallback((job: BatchJobView) => {
     setViewingBatchJobId(job.id)
-    if (job.status === 'completed' && job.outputs.length > 0) {
-      setLatestOutputs(job.outputs)
-      setLatestExecId(job.execId ?? null)
+    if (job.status === 'completed') {
+      const outputs = resolveJobOutputs(job)
+      if (outputs.length > 0) {
+        setLatestOutputs(outputs)
+        setLatestExecId(job.execId ?? null)
+      }
     } else if (job.status === 'running') {
       setLatestOutputs([])
       setLatestExecId(job.execId ?? null)
     }
-  }, [])
+  }, [resolveJobOutputs])
 
   const handleCancelBatchJob = useCallback((job: BatchJobView) => {
     if (job.status === 'running' || job.status === 'dispatching') {
@@ -1629,14 +1729,31 @@ export default function ToolPage() {
 
   // When a single batch job completes, show its outputs in single-output view
   useEffect(() => {
-    if (batch.totalCount === 1 && batch.completedCount === 1) {
+    if (batch.totalCount === 1 && batch.completedCount === 1 && latestOutputs.length === 0) {
       const job = batch.jobs[0]
-      if (job.outputs.length > 0 && latestOutputs.length === 0) {
-        setLatestOutputs(job.outputs)
+      const outputs = resolveJobOutputs(job)
+      if (outputs.length > 0) {
+        setLatestOutputs(outputs)
         setLatestExecId(job.execId ?? null)
       }
     }
-  }, [batch.totalCount, batch.completedCount, batch.jobs, latestOutputs.length])
+  }, [batch.totalCount, batch.completedCount, batch.jobs, latestOutputs.length, resolveJobOutputs])
+
+  // Auto-view the latest completed batch job when no job is actively being viewed and no outputs shown
+  useEffect(() => {
+    if (!batch.isBatchMode || viewingBatchJobId !== null || latestOutputs.length > 0) return
+    // Find the most recently completed job with outputs
+    for (const job of [...batch.jobs].reverse()) {
+      if (job.status !== 'completed') continue
+      const outputs = resolveJobOutputs(job)
+      if (outputs.length > 0) {
+        setViewingBatchJobId(job.id)
+        setLatestOutputs(outputs)
+        setLatestExecId(job.execId ?? null)
+        return
+      }
+    }
+  }, [batch.isBatchMode, batch.jobs, viewingBatchJobId, latestOutputs.length, resolveJobOutputs, executions])
 
   // Handle Run click — dispatches immediately to available compute
   const handleRunClick = useCallback(() => {
@@ -1942,26 +2059,57 @@ export default function ToolPage() {
           <Panel defaultSize={60} minSize={30}>
             <div className="h-full flex flex-col">
               {/* Output viewer */}
-              <div className="flex-1 overflow-y-auto px-6 py-5 border-b border-white/5">
+              <div className="flex-1 overflow-hidden flex flex-col border-b border-white/5">
                 {batch.isBatchMode ? (
                   <>
-                    <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
-                      Batch Jobs
-                    </h2>
-                    <BatchJobRack
-                      jobs={batch.jobs}
-                      viewingJobId={viewingBatchJobId}
-                      onViewJob={handleViewBatchJob}
-                      onCancelJob={handleCancelBatchJob}
-                      onCancelAll={batch.cancelAll}
-                      onClearFinished={batch.clearFinished}
-                      runningCount={batch.runningCount}
-                      completedCount={batch.completedCount}
-                      errorCount={batch.errorCount}
-                    />
+                    {/* Batch rack — compact, max ~40% height, scrollable */}
+                    <div className="shrink-0 max-h-[40%] overflow-y-auto px-6 pt-5 pb-3 border-b border-white/5">
+                      <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+                        Batch Jobs
+                      </h2>
+                      <BatchJobRack
+                        jobs={batch.jobs}
+                        viewingJobId={viewingBatchJobId}
+                        onViewJob={handleViewBatchJob}
+                        onCancelJob={handleCancelBatchJob}
+                        onCancelAll={batch.cancelAll}
+                        onClearFinished={batch.clearFinished}
+                        runningCount={batch.runningCount}
+                        completedCount={batch.completedCount}
+                        errorCount={batch.errorCount}
+                      />
+                    </div>
+                    {/* Output — takes remaining space */}
+                    <div className="flex-1 overflow-y-auto px-6 py-4">
+                      {(() => {
+                        let displayOutputs = latestOutputs
+                        if (displayOutputs.length === 0) {
+                          const targetJob = viewingBatchJobId !== null
+                            ? batch.jobs.find((j) => j.id === viewingBatchJobId)
+                            : [...batch.jobs].reverse().find((j) => j.status === 'completed')
+                          if (targetJob) {
+                            displayOutputs = resolveJobOutputs(targetJob)
+                          }
+                        }
+                        if (displayOutputs.length > 0) return (
+                          <>
+                            <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
+                              Output
+                            </h2>
+                            <OutputGrid outputs={displayOutputs} comfyPort={tool.comfyPort} />
+                          </>
+                        )
+                        return (
+                          <div className="flex flex-col items-center justify-center py-8 text-center">
+                            <ImageSquare size={32} weight="duotone" className="text-zinc-700 mb-3" />
+                            <p className="text-sm text-zinc-600">Click a job to see its output</p>
+                          </div>
+                        )
+                      })()}
+                    </div>
                   </>
                 ) : (
-                  <>
+                  <div className="flex-1 overflow-y-auto px-6 py-5">
                     <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
                       Output
                     </h2>
@@ -1974,12 +2122,10 @@ export default function ToolPage() {
 
                       if (showLoading) {
                         const handleCancelRunning = () => {
-                          // Cancel the batch job if it's a single running batch
                           if (batchHasRunning && batch.jobs.length > 0) {
                             const runningJob = batch.jobs.find((j) => j.status === 'running' || j.status === 'dispatching')
                             if (runningJob) batch.cancelRunning(runningJob.id)
                           }
-                          // Also cancel via execution ID if available
                           if (latestExecId) {
                             fetch(`/api/executions/${latestExecId}/cancel`, { method: 'POST' })
                           }
@@ -2002,7 +2148,7 @@ export default function ToolPage() {
                         </div>
                       )
                     })()}
-                  </>
+                  </div>
                 )}
               </div>
 
@@ -2015,12 +2161,14 @@ export default function ToolPage() {
                 onViewOutputs={(execId, outputs) => {
                   setLatestOutputs(outputs)
                   setLatestExecId(execId)
+                  setViewingBatchJobId(null)
                 }}
                 activeExecId={latestExecId}
                 effectiveComfyPort={effectiveComfyPort}
                 comfyInstanceLabel={comfyInstanceLabel}
                 isModalSelected={isModalSelected}
                 pluginId={pluginId}
+                hasActiveJobs={isRunning || batch.hasActiveJobs}
                 onCancelExecution={async (execId) => {
                   await fetch(`/api/executions/${execId}`, {
                     method: 'PATCH',

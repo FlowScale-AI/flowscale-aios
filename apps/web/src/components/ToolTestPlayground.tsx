@@ -344,19 +344,21 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
       sse.onerror = () => { sse.close() }
 
       if (pollRef.current) clearInterval(pollRef.current)
+      const isModalPort = result.comfyPort > 50000 && result.comfyPort <= 50999
       const pollInterval = setInterval(async () => {
         if (done) { clearInterval(pollInterval); return }
         try {
           const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
           if (!histRes.ok) return
-          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean } }>
-          if (hist[result.promptId]?.status?.completed) {
+          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
+          const s = hist[result.promptId]?.status
+          if (s?.completed || s?.status_str === 'success' || s?.status_str === 'error') {
             clearInterval(pollInterval)
             sse.close()
             finish()
           }
         } catch { /* ignore */ }
-      }, 3000)
+      }, isModalPort ? 10_000 : 3000)
       pollRef.current = pollInterval
 
       if (timeoutRef.current) clearTimeout(timeoutRef.current)

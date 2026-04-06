@@ -5,7 +5,7 @@ import { Trash } from 'phosphor-react'
 
 type LogEntry = { id: number; ts: string; msg: string }
 
-export function ComfyLogsPanel({ port, instanceLabel }: { port: number; instanceLabel?: string }) {
+export function ComfyLogsPanel({ port, instanceLabel, isRunning }: { port: number; instanceLabel?: string; isRunning?: boolean }) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [connected, setConnected] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -23,6 +23,13 @@ export function ComfyLogsPanel({ port, instanceLabel }: { port: number; instance
   }, [port])
 
   useEffect(() => {
+    const isModal = port > 50000 && port <= 50999
+    // For Modal: only poll while a job is running to avoid keeping the container alive.
+    // Keep existing logs visible but stop sending requests.
+    // Only skip when isRunning is explicitly false (not undefined — callers that don't pass
+    // isRunning should get default polling behavior).
+    if (isModal && isRunning === false) return
+
     let cancelled = false
 
     // Fetch historical logs and poll for updates
@@ -42,10 +49,9 @@ export function ComfyLogsPanel({ port, instanceLabel }: { port: number; instance
         .catch(() => {})
     }
     fetchLogs()
-    // Modal ports (50001-50999) use a slower poll to allow container scaledown;
-    // local instances poll every 3s for real-time generation progress.
-    const isModal = port > 50000 && port <= 50999
-    const pollMs = isModal ? 30_000 : 3000
+    // Local instances poll every 3s for real-time generation progress;
+    // Modal polls every 15s only while running (container is already warm).
+    const pollMs = isModal ? 15_000 : 3000
     const logPollInterval = setInterval(fetchLogs, pollMs)
 
     // Connect via server-side SSE proxy (avoids ComfyUI's origin check for direct WS)
@@ -92,7 +98,7 @@ export function ComfyLogsPanel({ port, instanceLabel }: { port: number; instance
       controller.abort()
       clearInterval(logPollInterval)
     }
-  }, [port])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [port, isRunning])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
