@@ -550,15 +550,41 @@ function ExecutionHistoryItem({
 
       {outputs.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {outputs.filter((o): o is Exclude<OutputItem, { kind: 'text' }> => o.kind !== 'text').map((out) => (
-            <span
-              key={out.filename}
-              className="flex items-center gap-1 px-2 py-1 bg-zinc-800 rounded text-xs text-zinc-400"
-            >
-              <ImageSquare size={11} />
-              {out.filename}
-            </span>
-          ))}
+          {outputs.filter((o): o is Exclude<OutputItem, { kind: 'text' }> => o.kind !== 'text').map((out) => {
+            const url = resolveOutputUrl(out)
+            const hasLocalPath = out.path?.startsWith('/')
+            if (hasLocalPath && out.kind === 'image') {
+              return (
+                <img
+                  key={out.filename}
+                  src={url}
+                  alt={out.filename}
+                  className="h-16 rounded border border-white/10 object-cover"
+                  loading="lazy"
+                />
+              )
+            }
+            if (hasLocalPath && out.kind === 'video') {
+              return (
+                <video
+                  key={out.filename}
+                  src={url}
+                  className="h-16 rounded border border-white/10 object-cover"
+                  muted
+                  preload="metadata"
+                />
+              )
+            }
+            return (
+              <span
+                key={out.filename}
+                className="flex items-center gap-1 px-2 py-1 bg-zinc-800 rounded text-xs text-zinc-400"
+              >
+                <ImageSquare size={11} />
+                {out.filename}
+              </span>
+            )
+          })}
         </div>
       )}
 
@@ -1075,14 +1101,25 @@ export default function ToolPage() {
     }
   }, [])
 
-  // ── Auto-select running execution on page load ─────────────────────────────────
+  // ── Auto-select execution on page load ──────────────────────────────────────
   const didAutoSelect = useRef(false)
   useEffect(() => {
     if (didAutoSelect.current || execLoading || latestExecId) return
+    // Prefer a running execution, otherwise pick the latest completed one
     const running = executions.find((e) => e.status === 'running')
     if (running) {
       setLatestExecId(running.id)
       setLatestOutputs([])
+      didAutoSelect.current = true
+      return
+    }
+    const completed = executions.find((e) => e.status === 'completed' && e.outputsJson)
+    if (completed) {
+      setLatestExecId(completed.id)
+      try {
+        const items = JSON.parse(completed.outputsJson!) as OutputItem[]
+        setLatestOutputs(items)
+      } catch { /* ignore */ }
       didAutoSelect.current = true
     }
   }, [executions, execLoading, latestExecId])
@@ -1647,17 +1684,39 @@ export default function ToolPage() {
 
   const [viewingBatchJobId, setViewingBatchJobId] = useState<number | null>(null)
 
+  // Resolve outputs for a batch job: prefer job.outputs, fall back to DB execution data
+  const resolveJobOutputs = useCallback((job: BatchJobView): OutputItem[] => {
+    if (job.outputs.length > 0) return job.outputs
+    if (!job.execId) return []
+    const exec = executions.find((e) => e.id === job.execId)
+    if (!exec?.outputsJson) return []
+    try {
+      const parsed = JSON.parse(exec.outputsJson) as { kind?: string; filename?: string; path?: string; text?: string }[]
+      return parsed
+        .map((o) => {
+          if (o.text) return { kind: 'text' as const, text: o.text }
+          if (!o.filename) return null
+          const kind = (o.kind || inferKind(o.filename)) as 'image' | 'video' | 'audio' | 'model' | 'file'
+          return { kind, filename: o.filename, path: o.path ?? '' }
+        })
+        .filter((o): o is OutputItem => o !== null)
+    } catch { return [] }
+  }, [executions])
+
   // When a batch job is viewed, load its outputs into the output area
   const handleViewBatchJob = useCallback((job: BatchJobView) => {
     setViewingBatchJobId(job.id)
-    if (job.status === 'completed' && job.outputs.length > 0) {
-      setLatestOutputs(job.outputs)
-      setLatestExecId(job.execId ?? null)
+    if (job.status === 'completed') {
+      const outputs = resolveJobOutputs(job)
+      if (outputs.length > 0) {
+        setLatestOutputs(outputs)
+        setLatestExecId(job.execId ?? null)
+      }
     } else if (job.status === 'running') {
       setLatestOutputs([])
       setLatestExecId(job.execId ?? null)
     }
-  }, [])
+  }, [resolveJobOutputs])
 
   const handleCancelBatchJob = useCallback((job: BatchJobView) => {
     if (job.status === 'running' || job.status === 'dispatching') {
@@ -1670,14 +1729,31 @@ export default function ToolPage() {
 
   // When a single batch job completes, show its outputs in single-output view
   useEffect(() => {
-    if (batch.totalCount === 1 && batch.completedCount === 1) {
+    if (batch.totalCount === 1 && batch.completedCount === 1 && latestOutputs.length === 0) {
       const job = batch.jobs[0]
-      if (job.outputs.length > 0 && latestOutputs.length === 0) {
-        setLatestOutputs(job.outputs)
+      const outputs = resolveJobOutputs(job)
+      if (outputs.length > 0) {
+        setLatestOutputs(outputs)
         setLatestExecId(job.execId ?? null)
       }
     }
-  }, [batch.totalCount, batch.completedCount, batch.jobs, latestOutputs.length])
+  }, [batch.totalCount, batch.completedCount, batch.jobs, latestOutputs.length, resolveJobOutputs])
+
+  // Auto-view the latest completed batch job when no job is actively being viewed and no outputs shown
+  useEffect(() => {
+    if (!batch.isBatchMode || viewingBatchJobId !== null || latestOutputs.length > 0) return
+    // Find the most recently completed job with outputs
+    for (const job of [...batch.jobs].reverse()) {
+      if (job.status !== 'completed') continue
+      const outputs = resolveJobOutputs(job)
+      if (outputs.length > 0) {
+        setViewingBatchJobId(job.id)
+        setLatestOutputs(outputs)
+        setLatestExecId(job.execId ?? null)
+        return
+      }
+    }
+  }, [batch.isBatchMode, batch.jobs, viewingBatchJobId, latestOutputs.length, resolveJobOutputs, executions])
 
   // Handle Run click — dispatches immediately to available compute
   const handleRunClick = useCallback(() => {
@@ -1983,34 +2059,57 @@ export default function ToolPage() {
           <Panel defaultSize={60} minSize={30}>
             <div className="h-full flex flex-col">
               {/* Output viewer */}
-              <div className="flex-1 overflow-y-auto px-6 py-5 border-b border-white/5">
+              <div className="flex-1 overflow-hidden flex flex-col border-b border-white/5">
                 {batch.isBatchMode ? (
                   <>
-                    <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
-                      Batch Jobs
-                    </h2>
-                    <BatchJobRack
-                      jobs={batch.jobs}
-                      viewingJobId={viewingBatchJobId}
-                      onViewJob={handleViewBatchJob}
-                      onCancelJob={handleCancelBatchJob}
-                      onCancelAll={batch.cancelAll}
-                      onClearFinished={batch.clearFinished}
-                      runningCount={batch.runningCount}
-                      completedCount={batch.completedCount}
-                      errorCount={batch.errorCount}
-                    />
-                    {latestOutputs.length > 0 && viewingBatchJobId !== null && (
-                      <div className="mt-4 pt-4 border-t border-white/5">
-                        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
-                          Output
-                        </h2>
-                        <OutputGrid outputs={latestOutputs} comfyPort={tool.comfyPort} />
-                      </div>
-                    )}
+                    {/* Batch rack — compact, max ~40% height, scrollable */}
+                    <div className="shrink-0 max-h-[40%] overflow-y-auto px-6 pt-5 pb-3 border-b border-white/5">
+                      <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+                        Batch Jobs
+                      </h2>
+                      <BatchJobRack
+                        jobs={batch.jobs}
+                        viewingJobId={viewingBatchJobId}
+                        onViewJob={handleViewBatchJob}
+                        onCancelJob={handleCancelBatchJob}
+                        onCancelAll={batch.cancelAll}
+                        onClearFinished={batch.clearFinished}
+                        runningCount={batch.runningCount}
+                        completedCount={batch.completedCount}
+                        errorCount={batch.errorCount}
+                      />
+                    </div>
+                    {/* Output — takes remaining space */}
+                    <div className="flex-1 overflow-y-auto px-6 py-4">
+                      {(() => {
+                        let displayOutputs = latestOutputs
+                        if (displayOutputs.length === 0) {
+                          const targetJob = viewingBatchJobId !== null
+                            ? batch.jobs.find((j) => j.id === viewingBatchJobId)
+                            : [...batch.jobs].reverse().find((j) => j.status === 'completed')
+                          if (targetJob) {
+                            displayOutputs = resolveJobOutputs(targetJob)
+                          }
+                        }
+                        if (displayOutputs.length > 0) return (
+                          <>
+                            <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
+                              Output
+                            </h2>
+                            <OutputGrid outputs={displayOutputs} comfyPort={tool.comfyPort} />
+                          </>
+                        )
+                        return (
+                          <div className="flex flex-col items-center justify-center py-8 text-center">
+                            <ImageSquare size={32} weight="duotone" className="text-zinc-700 mb-3" />
+                            <p className="text-sm text-zinc-600">Click a job to see its output</p>
+                          </div>
+                        )
+                      })()}
+                    </div>
                   </>
                 ) : (
-                  <>
+                  <div className="flex-1 overflow-y-auto px-6 py-5">
                     <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">
                       Output
                     </h2>
@@ -2023,12 +2122,10 @@ export default function ToolPage() {
 
                       if (showLoading) {
                         const handleCancelRunning = () => {
-                          // Cancel the batch job if it's a single running batch
                           if (batchHasRunning && batch.jobs.length > 0) {
                             const runningJob = batch.jobs.find((j) => j.status === 'running' || j.status === 'dispatching')
                             if (runningJob) batch.cancelRunning(runningJob.id)
                           }
-                          // Also cancel via execution ID if available
                           if (latestExecId) {
                             fetch(`/api/executions/${latestExecId}/cancel`, { method: 'POST' })
                           }
@@ -2051,7 +2148,7 @@ export default function ToolPage() {
                         </div>
                       )
                     })()}
-                  </>
+                  </div>
                 )}
               </div>
 
@@ -2064,6 +2161,7 @@ export default function ToolPage() {
                 onViewOutputs={(execId, outputs) => {
                   setLatestOutputs(outputs)
                   setLatestExecId(execId)
+                  setViewingBatchJobId(null)
                 }}
                 activeExecId={latestExecId}
                 effectiveComfyPort={effectiveComfyPort}
