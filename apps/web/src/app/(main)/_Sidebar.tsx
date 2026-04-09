@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import {
   House,
   Wrench,
+  Monitor,
   ClockCounterClockwise,
   ImageSquare,
   GearSix,
@@ -133,6 +134,13 @@ export default function Sidebar({
           icon={Wrench}
           label="Tools"
           active={pathname === "/tools" || pathname.startsWith("/tools/") || pathname === "/build-tool"}
+        />
+
+        <NavItem
+          href="/compute"
+          icon={Monitor}
+          label="Compute"
+          active={pathname === "/compute" || pathname.startsWith("/compute/")}
         />
 
         <NavItem
