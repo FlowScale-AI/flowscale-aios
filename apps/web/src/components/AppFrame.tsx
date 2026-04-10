@@ -25,7 +25,7 @@ export default function AppFrame({ appId, manifest, userId, className, bundlePat
   } | null>(null)
 
   const sendToFrame = useCallback((msg: unknown) => {
-    iframeRef.current?.contentWindow?.postMessage(msg, '*')
+    iframeRef.current?.contentWindow?.postMessage(msg, window.location.origin)
   }, [])
 
   useEffect(() => {

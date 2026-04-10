@@ -33,10 +33,14 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
       clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
   };
 
   const executeWorkflow = useCallback(
-    async (workflowId: string, inputs: Record<string, any>) => {
+    async (workflowId: string, inputs: Record<string, any>, comfyPortOverride?: number | "modal") => {
       abortRef.current = false;
       clearPoll();
 
@@ -80,7 +84,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
         const res = await fetch(`/api/tools/${toolId}/executions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inputs: apiInputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
+          body: JSON.stringify({ inputs: apiInputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, ...(comfyPortOverride ? { comfyPort: comfyPortOverride } : {}) }),
         });
 
         if (!res.ok) {
@@ -132,9 +136,11 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
         logs: [...prev.logs, `Prompt queued (${promptId}). Waiting for output…`],
       }));
 
-      // Poll history every 2 s — identical to apps/[id]/page.tsx
+      // Poll history — use longer interval for Modal cloud instances
+      const isModalPort = comfyPort > 50000 && comfyPort <= 50999;
+      const pollMs = isModalPort ? 10_000 : 2000;
       let attempts = 0;
-      const MAX_ATTEMPTS = 150; // 5 minutes
+      const MAX_ATTEMPTS = isModalPort ? 30 : 150; // ~5 minutes either way
 
       pollTimerRef.current = setInterval(async () => {
         if (abortRef.current) { clearPoll(); return; }
@@ -166,7 +172,8 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
           }>;
 
           const entry = hist[promptId];
-          if (!entry?.status?.completed) return;
+          const st = entry?.status;
+          if (!st?.completed && st?.status_str !== 'success' && st?.status_str !== 'error') return;
 
           clearPoll();
           wsRef.current?.close();
@@ -228,7 +235,7 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
             }
           }
 
-          const isError = entry.status.status_str === "error";
+          const isError = entry.status?.status_str === "error";
 
           setExecutionState({
             status: isError ? "error" : "completed",
@@ -239,7 +246,8 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
             error: isError ? "ComfyUI reported an error" : undefined,
           });
 
-          // Persist to SQLite via API
+          // Persist to SQLite via API — the PATCH triggers saveOutputsToDisk
+          // which rewrites outputsJson with persistent /api/outputs/... paths.
           fetch(`/api/executions/${executionId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -253,12 +261,31 @@ export const useToolExecution = (_props: UseToolExecutionProps) => {
               ),
               completedAt: Date.now(),
             }),
-          }).catch(console.error);
+          })
+            .then((res) => res.json())
+            .then((saved) => {
+              // Update results with persistent /api/outputs/ URLs from disk save
+              try {
+                const outputs: { filename?: string; path?: string }[] = JSON.parse(saved.outputsJson || "[]");
+                const updatedMap = { ...resultsMap };
+                for (const out of outputs) {
+                  if (out.path?.startsWith("/api/outputs/") && out.filename && updatedMap[out.filename]) {
+                    updatedMap[out.filename] = {
+                      ...updatedMap[out.filename],
+                      data: out.path,
+                      download_url: out.path,
+                    };
+                  }
+                }
+                setExecutionState((prev) => ({ ...prev, results: updatedMap }));
+              } catch {}
+            })
+            .catch(console.error);
 
         } catch {
           // Network hiccup — keep polling
         }
-      }, 2000);
+      }, pollMs);
     },
     [],
   );

@@ -5,6 +5,7 @@ import { homedir } from 'os'
 import { mkdirSync, appendFileSync } from 'fs'
 import crypto from 'crypto'
 import * as schema from './schema'
+import { autoRegisterCustomPlugins } from '../toolPlugins'
 
 const DB_DIR = join(homedir(), '.flowscale')
 const DB_PATH = join(DB_DIR, 'aios.db')
@@ -182,35 +183,62 @@ export function getDb() {
     sqlite.exec('ALTER TABLE canvases ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0')
   }
 
+  if (!toolColumns.some((col) => col.name === 'source')) {
+    sqlite.exec("ALTER TABLE tools ADD COLUMN source TEXT NOT NULL DEFAULT 'comfyui'")
+  }
+
+  if (!toolColumns.some((col) => col.name === 'source_url')) {
+    sqlite.exec('ALTER TABLE tools ADD COLUMN source_url TEXT')
+  }
+
+  if (!toolColumns.some((col) => col.name === 'tool_type')) {
+    try { sqlite.exec("ALTER TABLE tools ADD COLUMN tool_type TEXT DEFAULT 'custom'") } catch { /* column may already exist */ }
+  }
+
+  if (!toolColumns.some((col) => col.name === 'last_used_at')) {
+    try { sqlite.exec('ALTER TABLE tools ADD COLUMN last_used_at INTEGER') } catch { /* column may already exist */ }
+  }
+
   const execColumns = sqlite.prepare('PRAGMA table_info(executions)').all() as { name: string }[]
   if (!execColumns.some((col) => col.name === 'user_id')) {
     sqlite.exec('ALTER TABLE executions ADD COLUMN user_id TEXT')
   }
 
+  if (!execColumns.some((col) => col.name === 'comfy_port')) {
+    try { sqlite.exec('ALTER TABLE executions ADD COLUMN comfy_port INTEGER') } catch { /* column may already exist */ }
+  }
+
   // First-run: seed admin user if no users exist.
   // Uses a transaction with INSERT OR IGNORE to be fully idempotent — safe
   // even if next build prerenders the login page across multiple workers.
-  const adminExists = sqlite.prepare("SELECT 1 FROM users WHERE username = 'admin'").get()
-  if (!adminExists) {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
-    const bytes = crypto.randomBytes(12)
-    let password = ''
-    for (let i = 0; i < 12; i++) {
-      password += chars[bytes[i] % chars.length]
+  const seedAdmin = sqlite.transaction(() => {
+    const adminExists = sqlite.prepare("SELECT 1 FROM users WHERE username = 'admin'").get()
+    if (!adminExists) {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+      const bytes = crypto.randomBytes(12)
+      let password = ''
+      for (let i = 0; i < 12; i++) {
+        password += chars[bytes[i] % chars.length]
+      }
+      const salt = crypto.randomBytes(16).toString('hex')
+      const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex')
+      const passwordHash = `${salt}:${hash}`
+      const id = crypto.randomUUID()
+      const now = Date.now()
+      sqlite
+        .prepare(
+          'INSERT OR IGNORE INTO users (id, username, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+        .run(id, 'admin', passwordHash, 'admin', 'active', now)
+      sqlite.prepare('INSERT OR REPLACE INTO setup (id, initial_password) VALUES (1, ?)').run(password)
     }
-    const salt = crypto.randomBytes(16).toString('hex')
-    const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex')
-    const passwordHash = `${salt}:${hash}`
-    const id = crypto.randomUUID()
-    const now = Date.now()
-    sqlite
-      .prepare(
-        'INSERT OR IGNORE INTO users (id, username, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      )
-      .run(id, 'admin', passwordHash, 'admin', 'active', now)
-    sqlite.prepare('INSERT OR REPLACE INTO setup (id, initial_password) VALUES (1, ?)').run(password)
-  }
+  })
+  seedAdmin()
 
   _db = drizzle(sqlite, { schema })
+
+  // Auto-register custom plugins (non-registry) found on disk
+  autoRegisterCustomPlugins(_db).catch(() => { /* non-fatal */ })
+
   return _db
 }

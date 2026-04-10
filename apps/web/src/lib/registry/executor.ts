@@ -2,6 +2,7 @@ import type { ComfyUIWorkflow, WorkflowIO } from '@flowscale/workflow'
 import type { RegistryTool } from './types'
 import { queuePrompt, getHistory, getOutputUrl } from '@/lib/comfyui-client'
 import { v4 as uuidv4 } from 'uuid'
+import { resolveComfyBaseUrl } from '@/lib/modal-comfyui'
 
 export interface RegistryExecuteOptions {
   /** ComfyUI port to run against */
@@ -34,7 +35,7 @@ export async function executeRegistryTool(
   const workflow = injectInputs(tool.workflowJson, tool.schema, inputs)
 
   const clientId = uuidv4()
-  const baseUrl = `http://127.0.0.1:${comfyPort}`
+  const baseUrl = resolveComfyBaseUrl(comfyPort)
   const promptId = await queuePrompt(workflow, clientId, baseUrl)
 
   // Poll history until complete

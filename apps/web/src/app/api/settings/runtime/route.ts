@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { ComfyInstance } from '../../comfy/scan/route'
+import type { ComfyInstance } from '@/lib/comfy-probe'
 import { createConnection } from 'net'
 
 const COMFY_SCAN_START_PORT = 6188

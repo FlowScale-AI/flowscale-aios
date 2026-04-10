@@ -1,7 +1,8 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { resolvePython, areDepsInstalled, spawnInstall, spawnServer, isServerRunning } from '@/lib/localInference'
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const pluginId = req.nextUrl.searchParams.get('pluginId') ?? undefined
   const encoder = new TextEncoder()
 
   function msg(data: Record<string, unknown>) {
@@ -26,12 +27,12 @@ export async function POST() {
       }
 
       // 2. pip install (skip if already installed)
-      if (areDepsInstalled(python)) {
+      if (areDepsInstalled(python, pluginId)) {
         send({ log: 'Dependencies already installed, skipping.' })
       } else {
         send({ log: 'Installing Python dependencies…' })
         await new Promise<void>((resolve, reject) => {
-          const proc = spawnInstall(python)
+          const proc = spawnInstall(python, pluginId)
           proc.stdout?.on('data', (chunk: Buffer) => send({ log: chunk.toString() }))
           proc.stderr?.on('data', (chunk: Buffer) => send({ log: chunk.toString() }))
           proc.on('close', (code) => {
@@ -48,7 +49,7 @@ export async function POST() {
       }
 
       // 3. Start server (non-blocking — client polls for readiness)
-      if (await isServerRunning()) {
+      if (await isServerRunning(pluginId)) {
         send({ log: 'Server already running.', done: true })
         controller.close()
         return
@@ -56,7 +57,7 @@ export async function POST() {
 
       send({ log: 'Starting inference server… (downloading model on first run — this may take several minutes)' })
       try {
-        spawnServer(python)
+        spawnServer(python, pluginId)
         send({ log: 'Server process started. Waiting for model to load…', starting: true })
       } catch (err) {
         send({ error: err instanceof Error ? err.message : String(err) })

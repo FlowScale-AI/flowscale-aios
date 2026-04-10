@@ -8,10 +8,10 @@ import type { NextRequest } from 'next/server'
 export type Role = 'admin' | 'pipeline_td' | 'dev' | 'artist'
 
 export const ROLE_NAV: Record<Role, string[]> = {
-  admin: ['/home', '/tools', '/providers', '/explore', '/canvas', '/settings', '/users', '/models', '/outputs', '/integrations', '/apps', '/build-tool'],
-  pipeline_td: ['/home', '/tools', '/providers', '/explore', '/canvas', '/settings', '/users', '/models', '/outputs', '/integrations', '/apps', '/build-tool'],
-  dev: ['/home', '/tools', '/providers', '/explore', '/canvas', '/settings', '/models', '/outputs', '/integrations', '/apps', '/build-tool'],
-  artist: ['/home', '/canvas', '/explore', '/outputs', '/apps'],
+  admin: ['/home', '/tools', '/jobs', '/settings', '/users', '/build-tool', '/canvas', '/models', '/outputs', '/apps', '/explore', '/integrations', '/providers'],
+  pipeline_td: ['/home', '/tools', '/jobs', '/settings', '/users', '/build-tool', '/canvas', '/models', '/outputs', '/apps', '/explore', '/integrations', '/providers'],
+  dev: ['/home', '/tools', '/jobs', '/settings', '/build-tool', '/canvas', '/models', '/outputs', '/apps', '/explore', '/integrations', '/providers'],
+  artist: ['/home', '/tools', '/jobs'],
 }
 
 export function hasManagerRole(role: string): boolean {

@@ -5,7 +5,7 @@ import { Trash } from 'phosphor-react'
 
 type LogEntry = { id: number; ts: string; msg: string }
 
-export function ComfyLogsPanel({ port }: { port: number }) {
+export function ComfyLogsPanel({ port, instanceLabel, isRunning }: { port: number; instanceLabel?: string; isRunning?: boolean }) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [connected, setConnected] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -16,14 +16,43 @@ export function ComfyLogsPanel({ port }: { port: number }) {
     setLogs((prev) => [...prev.slice(-(2000 - next.length)), ...next])
   }
 
+  // Clear logs when switching instances
   useEffect(() => {
+    setLogs([])
+    counterRef.current = 0
+  }, [port])
+
+  useEffect(() => {
+    const isModal = port > 50000 && port <= 50999
+    // For Modal: only poll while a job is running to avoid keeping the container alive.
+    // Keep existing logs visible but stop sending requests.
+    // Only skip when isRunning is explicitly false (not undefined — callers that don't pass
+    // isRunning should get default polling behavior).
+    if (isModal && isRunning === false) return
+
     let cancelled = false
 
-    // Fetch historical logs
-    fetch(`/api/comfy/${port}/internal/logs/raw`)
-      .then((r) => r.json())
-      .then((d: { entries: { t: string; m: string }[] }) => appendEntries(d.entries))
-      .catch(() => {})
+    // Fetch historical logs and poll for updates
+    let lastEntryCount = 0
+    const fetchLogs = () => {
+      fetch(`/api/comfy/${port}/internal/logs/raw`)
+        .then((r) => r.json())
+        .then((d: { entries: { t: string; m: string }[] }) => {
+          if (cancelled) return
+          // Only append entries we haven't seen yet
+          if (d.entries.length > lastEntryCount) {
+            const newEntries = d.entries.slice(lastEntryCount)
+            lastEntryCount = d.entries.length
+            appendEntries(newEntries)
+          }
+        })
+        .catch(() => {})
+    }
+    fetchLogs()
+    // Local instances poll every 3s for real-time generation progress;
+    // Modal polls every 15s only while running (container is already warm).
+    const pollMs = isModal ? 15_000 : 3000
+    const logPollInterval = setInterval(fetchLogs, pollMs)
 
     // Connect via server-side SSE proxy (avoids ComfyUI's origin check for direct WS)
     const controller = new AbortController()
@@ -67,8 +96,9 @@ export function ComfyLogsPanel({ port }: { port: number }) {
     return () => {
       cancelled = true
       controller.abort()
+      clearInterval(logPollInterval)
     }
-  }, [port])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [port, isRunning])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -80,6 +110,9 @@ export function ComfyLogsPanel({ port }: { port: number }) {
         <div className="flex items-center gap-2">
           <div className={`size-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
           <span className="text-xs text-zinc-500">{connected ? 'Live' : 'Historical'}</span>
+          {instanceLabel && (
+            <span className="text-xs text-zinc-600 border-l border-zinc-800 pl-2">{instanceLabel}</span>
+          )}
         </div>
         <button
           onClick={() => setLogs([])}

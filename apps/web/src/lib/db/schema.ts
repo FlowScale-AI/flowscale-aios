@@ -11,9 +11,13 @@ export const tools = sqliteTable('tools', {
   schemaJson: text('schema_json').notNull(), // WorkflowIO[] serialized
   layout: text('layout').notNull().default('left-right'),
   status: text('status').notNull().default('dev'), // 'dev' | 'production'
+  source: text('source').notNull().default('comfyui'), // 'comfyui' | 'registry' | 'custom'
   outputDir: text('output_dir'),
   comfyPort: integer('comfy_port'), // port of detected ComfyUI chosen at deploy/test time
   modelVersion: text('model_version'),
+  sourceUrl: text('source_url'), // original local path or GitHub URL for imported plugins
+  toolType: text('tool_type').default('custom'), // 'training' | 'image-gen' | 'video-gen' | 'upscale' | 'edit' | 'custom'
+  lastUsedAt: integer('last_used_at'), // timestamp of last execution
   version: integer('version').notNull().default(1),
   createdAt: integer('created_at').notNull().default(sql`(unixepoch() * 1000)`),
   deployedAt: integer('deployed_at'),
@@ -28,9 +32,10 @@ export const executions = sqliteTable('executions', {
   seed: integer('seed'),
   promptId: text('prompt_id'),
   workflowHash: text('workflow_hash').notNull(),
-  status: text('status').notNull().default('running'), // 'running' | 'completed' | 'error'
+  status: text('status').notNull().default('running'), // 'queued' | 'running' | 'completed' | 'error'
   errorMessage: text('error_message'),
   metadataJson: text('metadata_json'), // timing, model_version, etc.
+  comfyPort: integer('comfy_port'),
   createdAt: integer('created_at').notNull().default(sql`(unixepoch() * 1000)`),
   completedAt: integer('completed_at'),
 })

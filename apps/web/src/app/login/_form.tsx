@@ -2,12 +2,13 @@
 
 import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import { Copy, CheckCircle } from 'phosphor-react'
 
 export default function LoginForm({ initialPassword }: { initialPassword?: string }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [username, setUsername] = useState(initialPassword ? 'admin' : '')
   const [password, setPassword] = useState(initialPassword ?? '')
   const [copied, setCopied] = useState(false)
@@ -39,7 +40,8 @@ export default function LoginForm({ initialPassword }: { initialPassword?: strin
         return
       }
 
-      router.push('/apps')
+      const next = searchParams.get('next')
+      router.push(next || '/home')
     } catch {
       setError('Something went wrong. Please try again.')
     } finally {

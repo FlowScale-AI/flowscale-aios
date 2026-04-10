@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import WebSocket from 'ws'
+import { isModalComfyPort, resolveComfyBaseUrl } from '@/lib/modal-comfyui'
 
 type Params = { port: string }
 
@@ -16,11 +17,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
         } catch {}
       }
 
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?clientId=${clientId}`)
+      const portNum = Number(port)
+      const baseUrl = resolveComfyBaseUrl(portNum)
+      const wsProtocol = baseUrl.startsWith('https') ? 'wss' : 'ws'
+      const wsHost = new URL(baseUrl).host
+      const ws = new WebSocket(`${wsProtocol}://${wsHost}/ws?clientId=${clientId}`)
 
       ws.on('open', () => {
-        // Subscribe to logs for this clientId
-        fetch(`http://127.0.0.1:${port}/internal/logs/subscribe`, {
+        // Subscribe to logs for this clientId (works on both local and Modal ComfyUI)
+        fetch(`${baseUrl}/internal/logs/subscribe`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ clientId, enabled: true }),
@@ -48,11 +53,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<Params
 
       // Clean up when the client disconnects
       req.signal.addEventListener('abort', () => {
-        fetch(`http://127.0.0.1:${port}/internal/logs/subscribe`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ clientId, enabled: false }),
-        }).catch(() => {})
+        if (!isModalComfyPort(portNum)) {
+          fetch(`${baseUrl}/internal/logs/subscribe`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clientId, enabled: false }),
+          }).catch(() => {})
+        }
         ws.close()
         try { controller.close() } catch {}
       })

@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowsClockwise, CircleNotch, HardDrive, MagnifyingGlass } from 'phosphor-react'
 import { PageTransition } from '@/components/ui'
 import type { ModelRow } from '@/lib/db/schema'
-import type { ComfyInstance } from '@/app/api/comfy/scan/route'
+import type { ComfyInstance } from '@/lib/comfy-probe'
 
 type ModelType = 'checkpoint' | 'lora' | 'vae' | 'controlnet' | 'upscaler' | 'other'
 

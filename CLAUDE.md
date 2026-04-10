@@ -10,6 +10,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
+# Install dependencies
+pnpm install
+
 # Start web app (Next.js, port 14173)
 pnpm --filter @flowscale/aios-web dev
 
@@ -19,6 +22,10 @@ pnpm typecheck
 # Run tests (vitest)
 pnpm --filter @flowscale/aios-web test
 pnpm --filter @flowscale/workflow test
+
+# Run a single test file
+pnpm --filter @flowscale/aios-web test -- src/lib/someFile.test.ts
+pnpm --filter @flowscale/workflow test -- src/someFile.test.ts
 
 # Run tests with coverage
 pnpm test:coverage
@@ -46,6 +53,21 @@ pnpm release:win      # Windows NSIS installer
 
 Typecheck is the primary correctness tool — always run after changes. `packages/workflow` also has vitest tests.
 
+> **Next.js route exports:** Route files (`route.ts`) can only export HTTP method handlers (`GET`, `POST`, etc.). Never export helper functions from route files — move shared utilities to a separate module (e.g. `utils.ts` in the same directory). Next.js will fail the build otherwise.
+
+## Branching strategy
+
+- Create feature branches from `dev`: `git checkout -b feat/my-feature dev`
+- PRs should target `dev`, not `main`. PRs targeting `main` directly will not be merged without prior discussion.
+
+## Code style
+
+- TypeScript strict mode is enabled — avoid `any`.
+- Use named exports; avoid default exports for components.
+- Import UI primitives from `@flowscale/ui` (the barrel at `apps/web/src/components/ui/index.ts`), not from shadcn paths directly.
+- Tailwind for styling; avoid inline `style` props.
+- Keep API routes thin — move logic into `lib/` utilities.
+
 ## Repo Structure
 
 Turborepo + pnpm workspaces with five packages:
@@ -62,17 +84,24 @@ Turborepo + pnpm workspaces with five packages:
 ### Data flow
 
 All ComfyUI communication goes through Next.js API routes (CORS-free):
-- `GET /api/comfy/scan` — TCP-probes ports **6188–16188** to find running ComfyUI instances
+- `GET /api/comfy/scan` — probes configured instance ports to find running ComfyUI instances
 - `GET|POST /api/comfy/[port]/[...path]` — transparent proxy to `http://127.0.0.1:[port]/[path]`; uses `url.pathname` (not decoded route params) to preserve `%2F` encoding needed for ComfyUI's `/userdata` routes
 
 Persistence is local SQLite at `~/.flowscale/aios.db` via Drizzle ORM + better-sqlite3. Schema is in `apps/web/src/lib/db/schema.ts`; the DB is initialised in `apps/web/src/lib/db/index.ts`.
+
+Settings and secrets are stored in flat JSON files (not the DB):
+- `~/.flowscale/aios/settings.json` — ComfyUI path, install type, managed port, multi-instance configs, Comfy.org API key
+- `~/.flowscale/aios/provider-keys.json` — API keys for cloud providers (fal, replicate, openrouter, huggingface)
+- `~/.flowscale/aios/comfyui-{instanceId}.pid` — PID files for managed ComfyUI processes
+
+Both are managed by `apps/web/src/lib/providerSettings.ts`.
 
 > **Test DDL**: Integration tests use an in-memory SQLite DB built from a hand-written DDL in `apps/web/src/__tests__/integration/setup.ts`. When adding or renaming columns in `schema.ts`, also update that DDL or tests will fail with `SqliteError: no such column`.
 
 ### Database schema
 
 Eleven tables (see `apps/web/src/lib/db/schema.ts` for Drizzle types):
-- **`tools`** — saved tool definitions; `schemaJson` stores `WorkflowIO[]`; `layout` is `'left-right' | 'canvas'`; `status` is `'dev' | 'production'`; `engine` is `'comfyui' | 'api'`
+- **`tools`** — saved tool definitions; `schemaJson` stores `WorkflowIO[]`; `layout` is `'left-right' | 'canvas'`; `status` is `'dev' | 'production'`; `engine` is `'comfyui' | 'api'`; `source` is `'comfyui' | 'registry' | 'custom'`. For API-engine tools, `workflowJson` stores `{ engine, model, pluginId }` instead of a workflow graph.
 - **`executions`** — run history per tool; cascades on tool delete; `status` is `'running' | 'completed' | 'error'`
 - **`canvases`** — visual boards; viewport + settings stored as JSON strings; `isShared` bool
 - **`canvas_items`** — draggable objects on a canvas; composite PK `(canvas_id, id)`; has `type`, `position`, `zIndex`, `locked`, `hidden`, `data`
@@ -135,6 +164,65 @@ For `tools.run`, registry tool inputs use `"${nodeId}.${paramName}"` keys (e.g. 
 
 The `url` field in registry tool outputs is an absolute `http://127.0.0.1:PORT/view?...` URL. Convert to proxy before setting `img.src`: replace with `/api/comfy/PORT/path`.
 
+### Tool plugin system (API-engine tools)
+
+Tools have two engines: `comfyui` (workflow-based, default) and `api` (plugin-driven, local inference).
+
+API-engine tools are backed by plugins in `~/.flowscale/tool-plugins/{id}/`, each containing a `manifest.json` (schema, server config) and `server.py` (HuggingFace model inference server). Plugin logic lives in `apps/web/src/lib/toolPlugins.ts`.
+
+- **Registry plugins** — fetched from `FLOWSCALE_REGISTRY_URL` (default `https://flowscale.ai/tools/registry.json`), cached locally in `~/.flowscale/aios/registry-cache.json` (5-min TTL). Installed via `POST /api/tool-plugins/install/{id}`.
+- **Custom plugins** — placed directly in `~/.flowscale/tool-plugins/`, auto-registered into the `tools` DB on startup.
+- When executing API-engine tools, `POST /api/tools/[id]/executions` checks that the plugin's `server.py` is running on its configured port, then forwards inputs to it.
+
+### ComfyUI multi-instance management
+
+`apps/web/src/lib/comfyui-manager.ts` manages N+1 ComfyUI processes (one per GPU + one CPU-only). Each instance has a stable ID (`gpu-0`, `gpu-1`, `cpu`).
+
+- **Port range:** AIOS-managed instances use base port `41188` (defined as `AIOS_COMFY_BASE_PORT` in `providerSettings.ts`) to avoid collisions with externally launched ComfyUI on default 8188.
+- **State persistence:** PID files at `~/.flowscale/aios/comfyui-{id}.pid` survive Next.js hot-reloads. In-memory `comfyProcesses` map is secondary.
+- **Device isolation:** `CUDA_VISIBLE_DEVICES` (NVIDIA) or `HIP_VISIBLE_DEVICES` (AMD ROCm) env vars pin each instance to a specific GPU. CPU instances use `--cpu` flag.
+- **External detection:** Before starting, `findExternalComfyOnDevice()` scans `/proc/PID/environ` (Linux-only) for non-AIOS `python.*main.py --port` processes on the same device and blocks with an error. Processes on AIOS-configured ports are excluded from external detection.
+- **API:** `GET /api/comfy/manage` returns instance statuses; `POST /api/comfy/manage` accepts `{ action: 'start'|'stop'|'restart', instanceId? }`.
+
+### GPU detection
+
+`apps/web/src/lib/gpu-detect.ts` detects GPUs via `nvidia-smi` (NVIDIA) or `rocm-smi` + `lspci` (AMD). Returns `GpuInfo[]` with index, name, VRAM, backend. Results are process-lifetime cached.
+
+- `GET /api/gpu` — cached GPU + CPU info
+- `POST /api/gpu` — re-detect (clears cache)
+- `POST /api/comfy/instances/detect` — detects GPUs, generates instance configs (one per GPU + CPU), saves to settings
+
+### Modal cloud GPU integration
+
+Modal is a cloud GPU provider used for remote execution of both API-engine tool plugins and ComfyUI instances. Core modules:
+
+- **`apps/web/src/lib/modal-manager.ts`** — Modal CLI installation, authentication, status checks
+- **`apps/web/src/lib/modal-deploy.ts`** — Deploy/undeploy API-engine tool plugins to Modal; persistent state in `~/.flowscale/aios/modal-deployments.json`
+- **`apps/web/src/lib/modal-comfyui.ts`** — Manages shared ComfyUI instances on Modal using virtual port mapping (ports 50000–50999)
+- **`apps/web/scripts/modal-helper.py`** — Python bridge to Modal SDK, called by `modal-deploy.ts`
+
+**API routes:**
+- `POST /api/modal/setup` — install Modal CLI and authenticate
+- `GET /api/modal/status` — Modal auth/install status
+- `POST /api/modal/deploy/[pluginId]` — deploy/undeploy API-engine plugins
+- `GET /api/modal/comfyui` — list deployed cloud ComfyUI instances
+- `POST /api/modal/comfyui/scan` — scan for deployable instances
+
+**GPU tiers:** `T4 | L4 | A10 | L40S | A100-40GB | A100-80GB | RTX-PRO-6000 | H100 | H200 | B200` (default: A10). Plugins can declare Modal support and a default GPU tier in their manifest via `ModalCloudConfig`.
+
+### Compute picker (instance selection)
+
+The `ComputePicker` component (`apps/web/src/components/ComputePicker.tsx`) is a unified UI for selecting execution targets: a specific local ComfyUI instance, "Auto" (round-robin across running instances), or "Modal" (cloud). Three surfaces use it:
+- **Tool page** (`apps/[id]/page.tsx`) — dropdown in the toolbar
+- **Build-tool test step** (`ToolTestPlayground.tsx`) — dropdown in the topbar
+- **Canvas** (`ExecutionMenu.tsx`) — compact dropdown in the floating control bar
+
+When "Auto" is selected (default with 2+ running instances), executions are distributed across running instances via **round-robin** (ref counter in a `useRef`). The resolved port is passed as `comfyPort` in the `POST /api/tools/[id]/executions` body.
+
+### Local inference plugin management
+
+`apps/web/src/lib/localInference.ts` manages local API-engine plugin processes via `child_process.spawn()`. Handles health checks, port allocation, lifecycle management, and stdio log capture.
+
 ### Workflow analysis (`packages/workflow`)
 
 Two ComfyUI workflow formats exist: **API format** (`{ "1": { class_type, inputs } }`) and **graph format** (the `{ nodes, links }` format saved by the UI). Key exports:
@@ -170,7 +258,7 @@ In **production**, Electron spawns the Next.js standalone server from `process.r
 - **`apps/web/src/lib/axios.ts`** — pre-configured Axios instance with base `/`; response interceptor auto-unwraps `.data`, so callers receive the payload directly
 - **`apps/web/src/lib/comfyui-client.ts`** — typed REST + WebSocket client for ComfyUI (`queuePrompt`, `getHistory`, `connectWS`, etc.)
 - **`apps/web/src/lib/platform.ts`** — `isDesktop()` check; `getComfyUIUrl()` / `setComfyUIUrl()` and `getComfyOrgApiKey()` / `setComfyOrgApiKey()` backed by localStorage
-- **`apps/web/src/store/notificationStore.ts`** — Zustand store for UI toast/snackbar notifications
+- **`apps/web/src/store/notificationStore.ts`** — minimal notification hook (console-only, no toast UI); pages that need error display use local state
 
 ### Path aliases (`apps/web`)
 
@@ -190,6 +278,8 @@ These logs are automatically attached to issue reports submitted via the "Report
 ### Reserved ports
 
 - **14173** — `apps/web` Next.js dev server
+- **41188–41200** — AIOS-managed ComfyUI instances (base port `41188`, one per GPU + CPU)
+- **50000–50999** — Virtual ports for Modal cloud ComfyUI instances
 - **5173** and **3001** — occupied by other services on the host; never use these
 
 ### `@flowscale/ui` barrel
@@ -223,6 +313,6 @@ GitHub Actions (`.github/workflows/`):
 
 ## Product concepts
 
-- **Tools** — single-model/workflow endpoints (e.g. Z-Image-Turbo). Built via the Build Tool wizard, stored in the `tools` table, run via `/api/tools/[id]/executions`.
+- **Tools** — single-model/workflow endpoints. Two engines: **ComfyUI-engine** tools (built via the Build Tool wizard from ComfyUI workflows) and **API-engine** tools (backed by local inference plugins with HuggingFace models). Both stored in the `tools` table, run via `/api/tools/[id]/executions`.
 - **Apps** — full-fledged HTML bundles that orchestrate tools via the bridge protocol. Installed apps live in `~/.flowscale/apps/[id]/`; their DB record is in `installed_apps`; per-app state goes in `app_storage`.
 - **Models** — local model files scanned from ComfyUI paths; listed via `/api/models`.

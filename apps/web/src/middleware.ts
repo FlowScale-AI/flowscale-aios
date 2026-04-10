@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/register", "/setup", "/api/auth/", "/api/local-inference/"];
+const PUBLIC_PATHS = ["/login", "/register", "/setup", "/api/auth/", "/api/local-inference/", "/api/setup/"];
 
 // Regex to match /canvas/<uuid> pages and their API data routes
 const SHARED_CANVAS_PAGE = /^\/canvas\/[\w-]+$/;
@@ -46,7 +46,12 @@ export function middleware(request: NextRequest) {
 
   const session = request.cookies.get("fs_session");
   if (!session?.value) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    const loginUrl = new URL("/login", request.url);
+    // Preserve the original URL so we can redirect back after login
+    if (pathname !== "/" && pathname !== "/home") {
+      loginUrl.searchParams.set("next", pathname);
+    }
+    return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();

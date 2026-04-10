@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { isModalComfyPort, resolveComfyBaseUrl } from '@/lib/modal-comfyui'
 
 type Params = { params: Promise<{ port: string }> }
 
@@ -9,15 +10,23 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const stream = new ReadableStream({
     start(controller) {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?clientId=${clientId}`)
+      const portNum = Number(port)
+      const baseUrl = resolveComfyBaseUrl(portNum)
+      const wsProtocol = baseUrl.startsWith('https') ? 'wss' : 'ws'
+      const wsHost = new URL(baseUrl).host
+      const wsUrl = `${wsProtocol}://${wsHost}/ws?clientId=${clientId}`
+      const ws = new WebSocket(wsUrl)
 
       ws.onopen = () => {
         // Subscribe so ComfyUI streams terminal log entries to this socket
-        fetch(`http://127.0.0.1:${port}/internal/logs/subscribe`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ clientId, enabled: true }),
-        }).catch(() => {})
+        // Not available on cloud (Modal) instances — only local ComfyUI Manager exposes this
+        if (!isModalComfyPort(portNum)) {
+          fetch(`http://127.0.0.1:${port}/internal/logs/subscribe`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clientId, enabled: true }),
+          }).catch(() => {})
+        }
       }
 
       ws.onmessage = (event) => {

@@ -1,13 +1,16 @@
 "use client";
 import { Icon } from "@iconify/react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
 import ResultsPill from "./ResultsPill";
 import RunsHistoryPanel from "./RunsHistoryPanel";
 import { ExecutionState } from "../types";
 import { Tooltip, LottieSpinner } from "@/components/ui";
 import { ComfyLogsPanel } from "@/components/ComfyLogsPanel";
 import { X } from "phosphor-react";
+import { InstanceSelector } from "@/components/InstanceSelector";
+import { useModalStatus } from "@/hooks/useModalStatus";
 
 interface ResultItem {
   content_type: string;
@@ -22,7 +25,7 @@ interface ResultItem {
 interface ExecutionMenuProps {
   executionState: ExecutionState;
   activeToolId?: string;
-  onRunGeneration: () => void;
+  onRunGeneration: (comfyPort?: number | "modal") => void;
   onStopGeneration: () => void;
   onResultDragStart: (filename: string, result: any) => void;
   onReset: () => void;
@@ -41,7 +44,31 @@ export default function ExecutionMenu({
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
 
-  const comfyPort =
+  // ── ComfyUI instance selection + auto round-robin ──────────────────────────
+  const { data: comfyManageData } = useQuery<{
+    instances: Array<{ id: string; status: string; port: number; device: string; label: string }>;
+  }>({
+    queryKey: ["comfy-manage"],
+    queryFn: async () => {
+      const res = await fetch("/api/comfy/manage");
+      if (!res.ok) return { instances: [] };
+      return res.json();
+    },
+  });
+  const comfyInstances = comfyManageData?.instances ?? [];
+  const runningInstances = comfyInstances.filter((i) => i.status === "running");
+  const [selectedComfyPort, setSelectedComfyPort] = useState<number | "auto" | "modal" | null>(null);
+  const { data: modalStatus } = useModalStatus();
+
+  /** Resolve port: pinned port if user selected one, 'modal' for cloud, undefined to let server auto-route. */
+  const resolveComfyPort = useCallback((): number | "modal" | undefined => {
+    if (selectedComfyPort === "modal") return "modal";
+    if (selectedComfyPort !== null && selectedComfyPort !== "auto") return selectedComfyPort;
+    // Let the server handle auto-routing (least-busy across all users)
+    return undefined;
+  }, [selectedComfyPort]);
+
+  const fallbackComfyPort =
     typeof window !== "undefined"
       ? (() => {
           const url =
@@ -54,11 +81,26 @@ export default function ExecutionMenu({
           }
         })()
       : 8188;
+  const comfyPort = fallbackComfyPort;
+  const effectiveComfyPort: number =
+    selectedComfyPort !== null && selectedComfyPort !== "auto" && selectedComfyPort !== "modal"
+      ? selectedComfyPort
+      : runningInstances[0]?.port ?? fallbackComfyPort;
+  const comfyInstanceLabel = comfyInstances.find((i) => i.port === effectiveComfyPort)?.label ?? `:${effectiveComfyPort}`;
 
   // Accumulated results from all generations
   const [accumulatedResults, setAccumulatedResults] = useState<
     Record<string, ResultItem>
   >({});
+
+  // Reset accumulated results when the active tool changes
+  const prevToolIdRef = useRef(activeToolId);
+  useEffect(() => {
+    if (activeToolId !== prevToolIdRef.current) {
+      setAccumulatedResults({});
+      prevToolIdRef.current = activeToolId;
+    }
+  }, [activeToolId]);
 
   // Merge new results when execution completes
   useEffect(() => {
@@ -196,7 +238,7 @@ export default function ExecutionMenu({
                   side="top"
                 >
                   <button
-                    onClick={onRunGeneration}
+                    onClick={() => onRunGeneration(resolveComfyPort())}
                     disabled={!activeToolId}
                     className={`rounded-full px-4 py-1.5 text-xs font-medium flex items-center gap-2 transition-colors ${
                       activeToolId
@@ -212,6 +254,20 @@ export default function ExecutionMenu({
                   </button>
                 </Tooltip>
               )}
+              {/* Instance selector */}
+              {comfyInstances.length > 0 && (
+                <>
+                  <div className="w-px h-5 bg-white/10" />
+                  <InstanceSelector
+                    instances={comfyInstances}
+                    value={selectedComfyPort}
+                    onChange={setSelectedComfyPort}
+                    compact
+                    modalConnected={modalStatus?.authenticated}
+                  />
+                </>
+              )}
+
               <div className="w-px h-5 bg-white/10" />
 
               {/* History Button */}
@@ -291,7 +347,7 @@ export default function ExecutionMenu({
               </button>
             </div>
             <div className="flex-1 overflow-hidden p-3">
-              <ComfyLogsPanel port={comfyPort} />
+              <ComfyLogsPanel port={effectiveComfyPort} instanceLabel={comfyInstanceLabel} />
             </div>
           </div>
         </div>

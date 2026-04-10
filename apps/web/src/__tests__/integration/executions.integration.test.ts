@@ -90,6 +90,8 @@ describe('Executions integration', () => {
     expect(data.promptId).toBe('prompt-abc')
     expect(data.comfyPort).toBe(8188)
     expect(data.seed).toBeDefined()
+    // type field must be present so useBatchQueue fires onComfyJobStarted
+    expect(data.type).toBe('comfyui')
   })
 
   it('POST returns 404 for non-existent tool', async () => {
@@ -226,7 +228,11 @@ describe('Executions integration', () => {
 
     const data = await res.json()
     expect(data.status).toBe('completed')
-    expect(data.outputsJson).toContain('output.png')
+    // saveOutputsToDisk must rewrite paths to /api/outputs/... so the client
+    // can render them — raw ComfyUI filenames are not valid image URLs
+    const outputs = JSON.parse(data.outputsJson)
+    expect(outputs[0].path).toMatch(/^\/api\/outputs\//)
+    expect(outputs[0].path).toContain('output.png')
   })
 
   it('PATCH updates execution with error status', async () => {

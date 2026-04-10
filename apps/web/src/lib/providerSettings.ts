@@ -1,6 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { getCpuName } from '@/lib/gpu-detect'
+import { atomicWriteJsonSync } from './atomicWrite'
 
 export type ProviderName = 'fal' | 'replicate' | 'openrouter' | 'huggingface'
 
@@ -8,18 +10,19 @@ export type ProviderName = 'fal' | 'replicate' | 'openrouter' | 'huggingface'
 
 const SETTINGS_FILE = path.join(os.homedir(), '.flowscale', 'aios', 'settings.json')
 
-function readSettingsFile(): Record<string, string> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function readSettingsFile(): Record<string, any> {
   try {
     const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8')
-    return JSON.parse(raw) as Record<string, string>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JSON.parse(raw) as Record<string, any>
   } catch {
     return {}
   }
 }
 
-function writeSettingsFile(settings: Record<string, string>): void {
-  fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true })
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8')
+function writeSettingsFile(settings: Record<string, unknown>): void {
+  atomicWriteJsonSync(SETTINGS_FILE, settings)
 }
 
 export function getComfyUIPath(): string | undefined {
@@ -29,6 +32,142 @@ export function getComfyUIPath(): string | undefined {
 export function setComfyUIPath(p: string): void {
   const settings = readSettingsFile()
   settings['comfyuiPath'] = p
+  writeSettingsFile(settings)
+}
+
+// ── ComfyUI managed instance settings ─────────────────────────────────────────
+
+export type ComfyInstallType = 'github' | 'desktop-app' | 'flowscale-managed'
+
+export function getComfyInstallType(): ComfyInstallType | undefined {
+  return readSettingsFile()['comfyInstallType'] as ComfyInstallType | undefined
+}
+
+export function setComfyInstallType(t: ComfyInstallType): void {
+  const settings = readSettingsFile()
+  settings['comfyInstallType'] = t
+  writeSettingsFile(settings)
+}
+
+/**
+ * Base port for AIOS-managed ComfyUI instances.
+ * Uses 41188+ to avoid collisions with externally launched ComfyUI (default 8188).
+ */
+const AIOS_COMFY_BASE_PORT = 41188
+
+/** The port AIOS will use to start/connect its managed ComfyUI instance. */
+export function getComfyManagedPort(): number {
+  const raw = readSettingsFile()['comfyManagedPort']
+  const parsed = raw ? Number(raw) : NaN
+  if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65535) {
+    return AIOS_COMFY_BASE_PORT
+  }
+  return parsed
+}
+
+export function setComfyManagedPort(port: number): void {
+  const settings = readSettingsFile()
+  settings['comfyManagedPort'] = String(port)
+  writeSettingsFile(settings)
+}
+
+/** Path to the ComfyUI installation that AIOS manages (GitHub clone or .flowscale/comfyui). */
+export function getComfyManagedPath(): string | undefined {
+  // Fall back to legacy comfyuiPath if the new key isn't set
+  return readSettingsFile()['comfyManagedPath'] || readSettingsFile()['comfyuiPath'] || undefined
+}
+
+export function setComfyManagedPath(p: string): void {
+  const settings = readSettingsFile()
+  settings['comfyManagedPath'] = p
+  // Keep legacy key in sync for existing routes that read it
+  settings['comfyuiPath'] = p
+  writeSettingsFile(settings)
+}
+
+// ── ComfyUI multi-instance registry ──────────────────────────────────────────
+
+export interface ComfyInstanceConfig {
+  /** Stable identifier, e.g. 'gpu-0', 'cpu' */
+  id: string
+  /** Port this instance listens on */
+  port: number
+  /** Device specifier: 'cuda:0', 'rocm:1', 'cpu' */
+  device: string
+  /** Human-readable label, e.g. 'GPU 0 — RTX 4090' */
+  label: string
+}
+
+/**
+ * Returns configured ComfyUI instances.
+ * Falls back to a single instance from the legacy `comfyManagedPort` key
+ * if `comfyInstances` is not yet set (backward compatibility).
+ */
+export function getComfyInstances(): ComfyInstanceConfig[] {
+  const settings = readSettingsFile()
+  const arr = settings['comfyInstances']
+  if (Array.isArray(arr) && arr.length > 0) {
+    const validated = arr.filter(
+      (i): i is ComfyInstanceConfig =>
+        typeof i === 'object' && i !== null &&
+        typeof i.id === 'string' &&
+        typeof i.port === 'number' && Number.isInteger(i.port) && i.port >= 1024 && i.port <= 65535 &&
+        typeof i.device === 'string' &&
+        typeof i.label === 'string',
+    )
+    if (validated.length > 0) return validated
+  }
+
+  // Legacy fallback: synthesize a single instance from the old key
+  const port = getComfyManagedPort()
+  const cpuLabel = getCpuName()
+  return [{ id: 'gpu-0', port, device: 'cpu', label: cpuLabel }]
+}
+
+export function setComfyInstances(instances: ComfyInstanceConfig[]): void {
+  const settings = readSettingsFile()
+  settings['comfyInstances'] = instances
+  // Keep legacy key in sync with the first instance
+  if (instances.length > 0) {
+    settings['comfyManagedPort'] = String(instances[0].port)
+  }
+  writeSettingsFile(settings)
+}
+
+export function getComfyInstanceById(id: string): ComfyInstanceConfig | undefined {
+  return getComfyInstances().find((i) => i.id === id)
+}
+
+/** Path to the ComfyUI Desktop App's user-data folder (models, custom_nodes, configs). */
+export function getComfyDesktopUserDataPath(): string | undefined {
+  return readSettingsFile()['comfyDesktopUserDataPath'] || undefined
+}
+
+export function setComfyDesktopUserDataPath(p: string): void {
+  const settings = readSettingsFile()
+  settings['comfyDesktopUserDataPath'] = p
+  writeSettingsFile(settings)
+}
+
+/**
+ * Returns the path where user data (models, custom_nodes) actually lives.
+ * - Desktop App installs → comfyDesktopUserDataPath (e.g. ~/ComfyUI)
+ * - Git clone / managed installs → comfyManagedPath (same dir as the installation)
+ * This is the path Modal scan and copy-assets should use for model/custom_node discovery.
+ */
+export function getComfyUserDataPath(): string | undefined {
+  return getComfyDesktopUserDataPath() || getComfyManagedPath()
+}
+
+// ── Auto-start ComfyUI on launch ─────────────────────────────────────────────
+
+export function getAutoStartComfyUI(): boolean {
+  return readSettingsFile()['autoStartComfyUI'] === true
+}
+
+export function setAutoStartComfyUI(enabled: boolean): void {
+  const settings = readSettingsFile()
+  settings['autoStartComfyUI'] = enabled
   writeSettingsFile(settings)
 }
 
@@ -85,8 +224,7 @@ function readKeysFile(): Partial<Record<ProviderName, string>> {
 }
 
 function writeKeysFile(keys: Partial<Record<ProviderName, string>>): void {
-  fs.mkdirSync(path.dirname(KEYS_FILE), { recursive: true })
-  fs.writeFileSync(KEYS_FILE, JSON.stringify(keys, null, 2), 'utf-8')
+  atomicWriteJsonSync(KEYS_FILE, keys)
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

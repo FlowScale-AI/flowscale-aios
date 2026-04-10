@@ -88,7 +88,22 @@ export function FileUploadInput({
 
   const handleFile = async (file: File) => {
     if (!comfyPort) {
-      setUploadError('No ComfyUI connected')
+      // API-engine tools: read as base64 data URL (no ComfyUI upload needed)
+      setUploading(true)
+      setUploadError(null)
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = (e) => resolve(e.target!.result as string)
+          reader.onerror = reject
+          reader.readAsDataURL(file)
+        })
+        onChange(dataUrl)
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : 'Failed to read file')
+      } finally {
+        setUploading(false)
+      }
       return
     }
     setUploading(true)
@@ -107,7 +122,7 @@ export function FileUploadInput({
     }
   }
 
-  const disabled = !comfyPort
+  const disabled = false
 
   return (
     <div className="flex flex-col gap-1">
@@ -125,7 +140,7 @@ export function FileUploadInput({
           <UploadSimple size={14} className="text-zinc-500 shrink-0" />
         )}
         <span className={`text-sm flex-1 truncate ${value ? 'text-zinc-200' : 'text-zinc-500'}`}>
-          {disabled ? 'No ComfyUI connected' : value || 'Choose file…'}
+          {value ? (value.startsWith('data:') ? 'Image selected' : value) : 'Choose file…'}
         </span>
         {value && !disabled && (
           <button
@@ -148,12 +163,12 @@ export function FileUploadInput({
         }}
       />
       {uploadError && <span className="text-xs text-red-400">{uploadError}</span>}
-      {value && comfyPort && (
+      {value && (
         <div className={`rounded-lg overflow-hidden border border-white/5 bg-zinc-950 ${kind === 'audio' ? 'h-16' : 'h-40'}`}>
           <InputPreview
             kind={kind}
-            src={`/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(value)}&type=input`}
-            filename={value}
+            src={value.startsWith('data:') ? value : `/api/comfy/${comfyPort}/view?filename=${encodeURIComponent(value)}&type=input`}
+            filename={value.startsWith('data:') ? 'uploaded-file' : value}
           />
         </div>
       )}

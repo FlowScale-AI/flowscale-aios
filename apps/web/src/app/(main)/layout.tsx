@@ -5,6 +5,7 @@ import { getSessionUser } from "@/lib/auth";
 import type { Role } from "@/lib/auth";
 import { CanvasStateProvider } from "@/features/canvases/components/CanvasStateContext";
 import Sidebar from "./_Sidebar";
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 
 export default async function MainLayout({
   children,
@@ -37,7 +38,9 @@ export default async function MainLayout({
     <div className="flex h-screen overflow-hidden bg-[var(--color-background)]">
       <Sidebar role={user.role as Role} username={user.username} />
       <main className="flex-1 overflow-hidden">
-        <CanvasStateProvider>{children}</CanvasStateProvider>
+        <CanvasStateProvider>
+          <AppErrorBoundary>{children}</AppErrorBoundary>
+        </CanvasStateProvider>
       </main>
     </div>
   );

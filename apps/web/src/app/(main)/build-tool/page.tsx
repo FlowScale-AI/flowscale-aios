@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useQuery } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   UploadSimple,
@@ -21,6 +22,8 @@ import {
 import { LottieSpinner, FadeIn, StaggerGrid, StaggerItem } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
+import { useModalComfyInstances } from '@/hooks/useModalComfyInstances'
+import { ComputeDropdown, type ComputeGroup } from '@/components/ComputeDropdown'
 
 interface WorkflowIO {
   nodeId: string
@@ -222,6 +225,8 @@ function StepAttach({
   const [loadingWorkflows, setLoadingWorkflows] = useState(false)
   const [loadingWorkflow, setLoadingWorkflow] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const { data: modalComfyData } = useModalComfyInstances()
+  const modalInstances = (modalComfyData?.instances ?? []).filter(i => i.status === 'deployed')
 
   const scanPorts = async () => {
     setScanning(true)
@@ -229,7 +234,11 @@ function StepAttach({
       const res = await fetch('/api/comfy/scan')
       const data: ComfyInstance[] = await res.json()
       setInstances(data)
-      if (data.length > 0) setSelectedPort(data[0].port)
+      if (data.length > 0) {
+        setSelectedPort(data[0].port)
+      } else if (modalInstances.length > 0 && !selectedPort) {
+        setSelectedPort(modalInstances[0].virtualPort)
+      }
     } catch { /* ignore */ } finally {
       setScanning(false)
     }
@@ -250,6 +259,13 @@ function StepAttach({
   }, [])
 
   useEffect(() => { scanPorts() }, [])
+
+  // Auto-select a Modal instance if no local instances found after scan
+  useEffect(() => {
+    if (!scanning && instances.length === 0 && modalInstances.length > 0 && !selectedPort) {
+      setSelectedPort(modalInstances[0].virtualPort)
+    }
+  }, [scanning, instances.length, modalInstances, selectedPort])
 
   useEffect(() => {
     if (selectedPort) fetchWorkflows(selectedPort)
@@ -298,8 +314,23 @@ function StepAttach({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">ComfyUI Instance</span>
-            {selectedPort && (
-              <span className="text-xs text-zinc-600 font-mono-custom">:{selectedPort}</span>
+            {(instances.length > 0 || modalInstances.length > 0) && (
+              <select
+                value={selectedPort ?? ''}
+                onChange={(e) => setSelectedPort(Number(e.target.value))}
+                className="text-xs text-zinc-300 font-mono-custom bg-zinc-900 border border-zinc-800 rounded px-2 py-0.5"
+              >
+                {instances.map((inst) => (
+                  <option key={inst.port} value={inst.port}>
+                    Local :{inst.port}
+                  </option>
+                ))}
+                {modalInstances.map((inst) => (
+                  <option key={inst.virtualPort} value={inst.virtualPort}>
+                    Cloud · {inst.name} ({inst.gpu})
+                  </option>
+                ))}
+              </select>
             )}
           </div>
           <button
@@ -320,7 +351,7 @@ function StepAttach({
           </div>
         )}
 
-        {!scanning && instances.length === 0 && (
+        {!scanning && instances.length === 0 && modalInstances.length === 0 && (
           <div className="flex items-center gap-3 p-4 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-sm">
             <Monitor size={16} weight="duotone" />
             No running ComfyUI detected. Start ComfyUI and click Refresh.
@@ -520,12 +551,18 @@ function StepConfigure({
   }, [workflowJson])
 
   // Analyze on mount — skip if editing (schema already loaded from existing tool)
-  useEffect(() => { if (!initialSchema) runAnalyze() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  const hasRunInitialAnalyze = useRef(false)
+  useEffect(() => {
+    if (!hasRunInitialAnalyze.current && !initialSchema) {
+      hasRunInitialAnalyze.current = true
+      runAnalyze()
+    }
+  }, [initialSchema, runAnalyze])
 
   // Re-analyze when a port is selected — skip in edit mode to preserve existing schema choices
   useEffect(() => {
     if (selectedPort && !toolId) runAnalyze(selectedPort)
-  }, [selectedPort]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedPort, toolId, runAnalyze])
 
   const handleDefaultChange = useCallback((nodeId: string, paramName: string, value: unknown) => {
     setSchema((prev) =>
@@ -1068,6 +1105,18 @@ function StepTest({
     return defaults
   })
 
+  const sseRef = useRef<EventSource | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      sseRef.current?.close()
+      if (pollRef.current) clearInterval(pollRef.current)
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    }
+  }, [])
+
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
   type OutputFile = { filename: string; kind: 'image' | 'video' | 'audio' | 'model' | 'file' }
@@ -1077,6 +1126,32 @@ function StepTest({
   const [execMeta, setExecMeta] = useState<{ seed: number; elapsed: string } | null>(null)
   const [error, setError] = useState<string[]>([])
   const [logsOpen, setLogsOpen] = useState(false)
+
+  // ── "Run on" compute selection ──────────────────────────────────────────────
+  const { data: comfyManageData } = useQuery<{ instances: Array<{ id: string; port: number; status: string; label: string; device: string }> }>({
+    queryKey: ['comfy-manage'],
+    queryFn: async () => {
+      const res = await fetch('/api/comfy/manage')
+      if (!res.ok) return { instances: [] }
+      return res.json()
+    },
+  })
+  const { data: modalComfyData } = useModalComfyInstances()
+  const comfyInstances = comfyManageData?.instances ?? []
+  const modalComfyInstances = modalComfyData?.instances ?? []
+  const [runOn, setRunOn] = useState<string>(() => tool.comfyPort ? `local:${tool.comfyPort}` : 'auto')
+  const isModalSelected = runOn.startsWith('modal:')
+  const resolvedPort: number | null = (() => {
+    if (isModalSelected) {
+      const target = runOn.split(':').slice(1).join(':')
+      return target && target !== 'auto'
+        ? Number(target)
+        : (modalComfyInstances.find(i => i.status === 'deployed')?.virtualPort ?? null)
+    }
+    if (runOn === 'auto') return tool.comfyPort ?? comfyInstances.find(i => i.status === 'running')?.port ?? null
+    const port = runOn.includes(':') ? runOn.split(':').slice(1).join(':') : runOn
+    return port ? Number(port) : null
+  })()
 
   const handleRun = async () => {
     setRunning(true)
@@ -1090,7 +1165,11 @@ function StepTest({
       const res = await fetch(`/api/tools/${tool.id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
+        body: JSON.stringify({
+          inputs,
+          comfyOrgApiKey: getComfyOrgApiKey() || undefined,
+          ...(resolvedPort != null ? { comfyPort: resolvedPort } : {}),
+        }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -1177,7 +1256,9 @@ function StepTest({
       }
 
       // Subscribe to SSE proxy for real-time progress events
+      sseRef.current?.close()
       const sse = new EventSource(`/api/comfy/${result.comfyPort}/ws`)
+      sseRef.current = sse
 
       sse.onmessage = (event) => {
         try {
@@ -1203,22 +1284,28 @@ function StepTest({
       sse.onerror = () => { sse.close() }
 
       // Fallback poll in case SSE misses the completion event
+      // Use longer interval for Modal cloud instances to avoid keeping container alive
+      const isModalPort = result.comfyPort > 50000 && result.comfyPort <= 50999
+      if (pollRef.current) clearInterval(pollRef.current)
       const pollInterval = setInterval(async () => {
         if (done) { clearInterval(pollInterval); return }
         try {
           const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
           if (!histRes.ok) return
-          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean } }>
-          if (hist[result.promptId]?.status?.completed) {
+          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
+          const s = hist[result.promptId]?.status
+          if (s?.completed || s?.status_str === 'success' || s?.status_str === 'error') {
             clearInterval(pollInterval)
             sse.close()
             finish()
           }
         } catch { /* ignore */ }
-      }, 3000)
+      }, isModalPort ? 10_000 : 3000)
+      pollRef.current = pollInterval
 
       // Timeout after 5 minutes
-      setTimeout(() => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      timeoutRef.current = setTimeout(() => {
         if (!done) {
           done = true
           sse.close()
@@ -1269,18 +1356,55 @@ function StepTest({
       )}
 
       {/* No ComfyUI warning */}
-      {!tool.comfyPort && (
+      {!isModalSelected && !resolvedPort && (
         <div className="flex items-center gap-3 p-4 bg-amber-950/20 border border-amber-900/30 rounded-xl text-amber-400 text-sm">
           <Monitor size={16} weight="duotone" />
-          No ComfyUI instance was selected. Start ComfyUI, go back and re-save, or skip to Deploy.
+          No ComfyUI instance available. Start one from Settings, or select a cloud instance.
         </div>
       )}
 
-      {/* Run button */}
-      <div className="flex items-center gap-4">
+      {/* Compute + Run button */}
+      <div className="flex items-center gap-3">
+        <ComputeDropdown
+          value={runOn}
+          onChange={setRunOn}
+          groups={[
+            ...(modalComfyInstances.filter(i => i.status === 'deployed').length > 0
+              ? [{
+                  label: 'All',
+                  icon: 'all' as const,
+                  options: [{ value: 'all:auto', label: 'All: Auto-route' }],
+                }]
+              : []),
+            {
+              label: 'Local',
+              icon: 'local',
+              options: [
+                { value: 'auto', label: 'Local: Auto-route' },
+                ...comfyInstances.map((inst) => ({
+                  value: `local:${inst.port}`,
+                  label: inst.label,
+                  disabled: inst.status !== 'running',
+                })),
+              ],
+            },
+            ...(modalComfyInstances.filter(i => i.status === 'deployed').length > 0
+              ? [{
+                  label: 'Cloud (Modal)',
+                  icon: 'cloud' as const,
+                  options: [
+                    { value: 'modal:auto', label: 'Cloud: Auto-route' },
+                    ...modalComfyInstances
+                      .filter(i => i.status === 'deployed')
+                      .map(i => ({ value: `modal:${i.virtualPort}`, label: `${i.name} (${i.gpu})` })),
+                  ],
+                }]
+              : []),
+          ]}
+        />
         <button
           onClick={handleRun}
-          disabled={running || !tool.comfyPort}
+          disabled={running || !resolvedPort}
           className="flex items-center gap-2 px-5 py-2.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
         >
           {running ? (
@@ -1310,7 +1434,7 @@ function StepTest({
       )}
 
       {/* ComfyUI logs */}
-      {tool.comfyPort && (
+      {resolvedPort && !isModalSelected && (
         <div className="flex flex-col gap-2">
           <button
             onClick={() => setLogsOpen((v) => !v)}
@@ -1321,7 +1445,7 @@ function StepTest({
           </button>
           {logsOpen && (
             <div className="h-48">
-              <ComfyLogsPanel port={tool.comfyPort} />
+              <ComfyLogsPanel port={resolvedPort} />
             </div>
           )}
         </div>
@@ -1573,7 +1697,10 @@ function BuildToolPageInner() {
   return (
     <div className="h-full flex flex-col bg-[var(--color-background)] overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between px-8 py-6 border-b border-white/5 shrink-0">
+      <div className="flex items-center gap-4 px-8 py-6 border-b border-white/5 shrink-0">
+        <button onClick={() => window.history.back()} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+          <ArrowLeft size={18} />
+        </button>
         <div>
           <h1 className="font-tech text-xl font-semibold text-zinc-100">
             {editId ? 'Edit Tool' : 'Build Tool'}

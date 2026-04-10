@@ -83,6 +83,15 @@ export class BridgeServer {
         return res.json()
       }
 
+      // ── instances ──────────────────────────────────────────────────────────
+      case 'instances.list': {
+        this._require('tools')
+        const res = await fetch('/api/comfy/manage')
+        if (!res.ok) return []
+        const data = await res.json() as { instances: unknown[] }
+        return data.instances ?? []
+      }
+
       case 'tools.run': {
         this._require('tools')
         const res = await fetch('/api/bridge/tools/run', {

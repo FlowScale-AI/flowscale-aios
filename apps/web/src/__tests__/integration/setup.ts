@@ -20,9 +20,13 @@ const DDL = `
     schema_json TEXT NOT NULL,
     layout TEXT NOT NULL DEFAULT 'left-right',
     status TEXT NOT NULL DEFAULT 'dev',
+    source TEXT NOT NULL DEFAULT 'comfyui',
     output_dir TEXT,
     comfy_port INTEGER,
     model_version TEXT,
+    source_url TEXT,
+    tool_type TEXT DEFAULT 'custom',
+    last_used_at INTEGER,
     version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
     deployed_at INTEGER
@@ -40,6 +44,7 @@ const DDL = `
     status TEXT NOT NULL DEFAULT 'running',
     error_message TEXT,
     metadata_json TEXT,
+    comfy_port INTEGER,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
     completed_at INTEGER
   );

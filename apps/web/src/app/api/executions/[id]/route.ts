@@ -3,8 +3,10 @@ import { getDb } from '@/lib/db'
 import { executions, tools } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { mkdir, writeFile } from 'fs/promises'
-import { join } from 'path'
+import path, { join } from 'path'
 import { homedir } from 'os'
+import { trackExecEndById } from '@/lib/comfyAutoRoute'
+import { resolveComfyBaseUrl } from '@/lib/modal-comfyui'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
 
@@ -29,11 +31,12 @@ async function saveOutputsToDisk(
       if (!item.filename) return item
       try {
         const subfolder = item.subfolder ?? ''
-        const url = `http://localhost:${comfyPort}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
+        const url = `${resolveComfyBaseUrl(comfyPort)}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
         const res = await fetch(url)
         if (!res.ok) return item
         const buffer = Buffer.from(await res.arrayBuffer())
-        const destName = `${executionId.slice(0, 8)}_${item.filename}`
+        const safeFilename = path.basename(item.filename ?? 'output')
+        const destName = `${executionId.slice(0, 8)}_${safeFilename}`
         await writeFile(join(toolDir, destName), buffer)
         return { ...item, path: `/api/outputs/${toolId}/${destName}` }
       } catch {
@@ -68,25 +71,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: 'No valid fields' }, { status: 400 })
   }
 
-  await db.update(executions).set(updates).where(eq(executions.id, id))
-  const [row] = await db.select().from(executions).where(eq(executions.id, id))
-  if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-
-  // Save outputs to disk when execution completes, then update outputsJson with local paths
+  // If completing with outputs, download files first and replace outputsJson with local paths
   if (body.status === 'completed' && body.outputsJson) {
-    const [tool] = await db.select().from(tools).where(eq(tools.id, row.toolId))
-    if (tool?.comfyPort) {
-      try {
-        const saved = await saveOutputsToDisk(body.outputsJson, tool.comfyPort, tool.id, id)
-        const updatedJson = JSON.stringify(saved)
-        await db.update(executions).set({ outputsJson: updatedJson }).where(eq(executions.id, id))
-        const [updated] = await db.select().from(executions).where(eq(executions.id, id))
-        return NextResponse.json(updated)
-      } catch (err) {
-        console.error('saveOutputsToDisk failed', err)
+    const [exec] = db.select().from(executions).where(eq(executions.id, id)).all()
+    if (exec) {
+      const port = exec.comfyPort || (() => {
+        const [tool] = db.select().from(tools).where(eq(tools.id, exec.toolId)).all()
+        return tool?.comfyPort
+      })()
+      if (port) {
+        try {
+          const saved = await saveOutputsToDisk(body.outputsJson, port, exec.toolId, id)
+          updates.outputsJson = JSON.stringify(saved)
+        } catch (err) {
+          console.error('saveOutputsToDisk failed', err)
+          // Fall through with original outputsJson if download fails
+        }
       }
     }
   }
 
+  // Single write with final paths
+  await db.update(executions).set(updates).where(eq(executions.id, id))
+
+  // Release auto-route tracking when execution finishes
+  if (body.status === 'completed' || body.status === 'error') {
+    trackExecEndById(id)
+  }
+
+  // Always re-read after all updates are done so the response reflects final state
+  const [row] = await db.select().from(executions).where(eq(executions.id, id))
+  if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   return NextResponse.json(row)
 }

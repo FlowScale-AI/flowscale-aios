@@ -7,11 +7,15 @@ import { isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@fl
 import { getRequestUser } from '@/lib/auth'
 import { mkdirSync, writeFileSync, mkdirSync as mkdirSyncFs, writeFileSync as writeFileSyncFs } from 'fs'
 import { mkdir, writeFile } from 'fs/promises'
-import { join } from 'path'
+import path, { join } from 'path'
 import { homedir } from 'os'
 import { inFlightControllers } from '@/lib/inferenceRegistry'
 import { getHistory } from '@/lib/comfyui-client'
-import { getComfyOrgApiKey as getComfyOrgApiKeyServer } from '@/lib/providerSettings'
+import { getComfyOrgApiKey as getComfyOrgApiKeyServer, getComfyInstances } from '@/lib/providerSettings'
+import { getPlugin, type ToolPluginManifest } from '@/lib/toolPlugins'
+import { autoRouteComfyPort, trackExecStart, trackExecEnd } from '@/lib/comfyAutoRoute'
+import { getModalDeployUrl, autoRouteModalDeployment } from '@/lib/modal-deploy'
+import { isModalComfyPort, resolveComfyBaseUrl, getModalComfyByPort } from '@/lib/modal-comfyui'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
 
@@ -29,14 +33,25 @@ async function saveComfyOutputsToDisk(
       if (!item.filename) return item
       try {
         const subfolder = item.subfolder ?? ''
-        const url = `http://localhost:${comfyPort}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
-        const res = await fetch(url)
-        if (!res.ok) return item
+        const comfyBaseUrl = resolveComfyBaseUrl(comfyPort)
+        const url = `${comfyBaseUrl}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(subfolder)}&type=output`
+        // Retry up to 3 times for Modal (container may need a moment after prompt completion)
+        let res: Response | null = null
+        for (let attempt = 0; attempt < 3; attempt++) {
+          res = await fetch(url)
+          if (res.ok) break
+          if (attempt < 2) await new Promise(r => setTimeout(r, 1000))
+        }
+        if (!res || !res.ok) {
+          console.error(`Failed to download output from ${url}: HTTP ${res?.status}`)
+          return item
+        }
         const buffer = Buffer.from(await res.arrayBuffer())
         const destName = `${executionId.slice(0, 8)}_${item.filename}`
         await writeFile(join(toolDir, destName), buffer)
         return { ...item, path: `/api/outputs/${toolId}/${destName}` }
-      } catch {
+      } catch (err) {
+        console.error(`Error downloading output ${item.filename}:`, err)
         return item
       }
     }),
@@ -58,6 +73,7 @@ function inferencePost(
   port: number,
   body: Record<string, unknown>,
   signal: AbortSignal,
+  endpoint: string = '/generate',
 ): Promise<{ ok: boolean; status: number; body: string }> {
   const http = require('http') as typeof import('http')
   const payload = JSON.stringify(body)
@@ -67,7 +83,7 @@ function inferencePost(
       {
         hostname: '127.0.0.1',
         port,
-        path: '/generate',
+        path: endpoint,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -99,26 +115,54 @@ function inferencePost(
   })
 }
 
-async function runApiInference(
+/** Save outputs to disk and update execution record. */
+async function finalizeExecution(
   executionId: string,
-  model: string,
+  outputs: Array<{ kind: string; filename: string; data: string }>,
+) {
+  const db = getDb()
+  const outDir = join(API_OUTPUTS_DIR, executionId)
+  mkdirSync(outDir, { recursive: true })
+
+  const outputItems = outputs.map(({ kind, filename, data }) => {
+    const buffer = Buffer.from(data, 'base64')
+    const safeName = path.basename(filename)
+    if (!safeName || safeName === '.' || safeName === '..') {
+      throw new Error(`Invalid output filename: ${filename}`)
+    }
+    writeFileSync(join(outDir, safeName), buffer)
+    return { kind, filename: safeName, path: `/api/executions/${executionId}/outputs/${safeName}` }
+  })
+
+  await db.update(executions).set({
+    status: 'completed',
+    outputsJson: JSON.stringify(outputItems),
+    completedAt: Date.now(),
+  }).where(eq(executions.id, executionId))
+}
+
+/** Run inference on a local plugin server (e.g. Z-Image Turbo). */
+async function runLocalInference(
+  executionId: string,
+  plugin: ToolPluginManifest,
   inputs: Record<string, unknown>,
   seed: number,
   signal: AbortSignal,
+  device?: string,
 ) {
-  const db = getDb()
-  const LOCAL_INFERENCE_PORT = 8765
+  const server = plugin.server as { port: number; generateEndpoint: string }
 
   try {
-    const inferRes = await inferencePost(LOCAL_INFERENCE_PORT, {
-      prompt: inputs?.['api__prompt'] ?? '',
-      negative_prompt: inputs?.['api__negative_prompt'] ?? '',
-      width: inputs?.['api__width'] ?? 1024,
-      height: inputs?.['api__height'] ?? 1024,
-      num_inference_steps: inputs?.['api__num_inference_steps'] ?? 4,
-      guidance_scale: inputs?.['api__guidance_scale'] ?? 0,
-      seed,
-    }, AbortSignal.any([signal, AbortSignal.timeout(1_800_000)]))
+    const db = getDb()
+    const body: Record<string, unknown> = { seed, ...(device ? { device } : {}) }
+    for (const input of plugin.schema.inputs) {
+      const value = inputs?.[`api__${input.paramName}`]
+      body[input.paramName] = value !== undefined && value !== '' ? value : input.defaultValue
+    }
+
+    const inferRes = await inferencePost(server.port, body,
+      AbortSignal.any([signal, AbortSignal.timeout(1_800_000)]),
+      server.generateEndpoint)
 
     if (!inferRes.ok) {
       await db.update(executions).set({ status: 'error', errorMessage: inferRes.body, completedAt: Date.now() })
@@ -126,32 +170,121 @@ async function runApiInference(
       return
     }
 
-    const { image: imageB64 } = JSON.parse(inferRes.body) as { image: string }
-    const imgBuffer = Buffer.from(imageB64, 'base64')
-    const filename = 'output.png'
-    const outDir = join(API_OUTPUTS_DIR, executionId)
-    mkdirSync(outDir, { recursive: true })
-    writeFileSync(join(outDir, filename), imgBuffer)
+    const responseData = JSON.parse(inferRes.body) as Record<string, string>
+    const outputDef = plugin.schema.outputs[0]
+    const outputField = outputDef?.paramName ?? 'image'
+    const outputType = outputDef?.paramType ?? 'image'
 
-    const outputPath = `/api/executions/${executionId}/outputs/${filename}`
-    const outputItems = [{ kind: 'image', filename, path: outputPath }]
-    await db.update(executions).set({
-      status: 'completed',
-      outputsJson: JSON.stringify(outputItems),
-      completedAt: Date.now(),
-    }).where(eq(executions.id, executionId))
+    // Determine output kind and filename based on the output type
+    let kind: string
+    let filename: string
+    if (outputType === 'video') {
+      kind = 'video'
+      filename = 'output.mp4'
+    } else if (outputType === 'file') {
+      kind = 'file'
+      // Use server-provided filename if available (e.g. lora_file_filename)
+      filename = responseData[`${outputField}_filename`] || 'output.bin'
+    } else {
+      kind = 'image'
+      filename = 'output.png'
+    }
+
+    await finalizeExecution(executionId, [{
+      kind,
+      filename,
+      data: responseData[outputField],
+    }])
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error'
     const isCancel = msg === 'AbortError' || (err instanceof Error && err.name === 'AbortError')
-    await db.update(executions).set({
-      status: 'error',
-      errorMessage: isCancel ? 'Cancelled' : msg,
-      completedAt: Date.now(),
-    }).where(eq(executions.id, executionId))
+    try {
+      await getDb().update(executions).set({
+        status: 'error',
+        errorMessage: isCancel ? 'Cancelled' : msg,
+        completedAt: Date.now(),
+      }).where(eq(executions.id, executionId))
+    } catch (dbErr) {
+      console.error(`Failed to mark execution ${executionId} as error:`, dbErr)
+    }
   } finally {
     inFlightControllers.delete(executionId)
   }
 }
+
+
+/** Run inference on a Modal cloud deployment. */
+async function runModalInference(
+  executionId: string,
+  plugin: ToolPluginManifest,
+  inputs: Record<string, unknown>,
+  seed: number,
+  signal: AbortSignal,
+  modalUrl: string,
+) {
+  try {
+    const db = getDb()
+    const body: Record<string, unknown> = { seed }
+    for (const input of plugin.schema.inputs) {
+      const value = inputs?.[`api__${input.paramName}`]
+      body[input.paramName] = value !== undefined && value !== '' ? value : input.defaultValue
+    }
+
+    const res = await fetch(`${modalUrl.replace(/\/$/, '')}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(600_000)]),
+    })
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => `HTTP ${res.status}`)
+      await db.update(executions).set({ status: 'error', errorMessage: errText, completedAt: Date.now() })
+        .where(eq(executions.id, executionId))
+      return
+    }
+
+    const responseData = await res.json() as Record<string, string>
+    const outputDef = plugin.schema.outputs[0]
+    const outputField = outputDef?.paramName ?? 'image'
+    const outputType = outputDef?.paramType ?? 'image'
+
+    let kind: string
+    let filename: string
+    if (outputType === 'video') {
+      kind = 'video'
+      filename = 'output.mp4'
+    } else if (outputType === 'file') {
+      kind = 'file'
+      filename = responseData[`${outputField}_filename`] || 'output.bin'
+    } else {
+      kind = 'image'
+      filename = 'output.png'
+    }
+
+    await finalizeExecution(executionId, [{
+      kind,
+      filename,
+      data: responseData[outputField],
+    }])
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error'
+    const isCancel = msg === 'AbortError' || (err instanceof Error && err.name === 'AbortError')
+    const isTimeout = msg.includes('TimeoutError') || msg.includes('timed out')
+    try {
+      await getDb().update(executions).set({
+        status: 'error',
+        errorMessage: isCancel ? 'Cancelled' : isTimeout ? 'Modal execution timed out (10 min)' : msg,
+        completedAt: Date.now(),
+      }).where(eq(executions.id, executionId))
+    } catch (dbErr) {
+      console.error(`Failed to mark execution ${executionId} as error:`, dbErr)
+    }
+  } finally {
+    inFlightControllers.delete(executionId)
+  }
+}
+
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const db = getDb()
@@ -176,61 +309,166 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!tool) return NextResponse.json({ error: 'Tool not found' }, { status: 404 })
 
   const body = await req.json()
-  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody } = body
+  const { inputs, comfyOrgApiKey: comfyOrgApiKeyFromBody, comfyPort: comfyPortOverride, device: deviceOverride, provider: providerOverride, modalDeployId, execId: existingExecId } = body
   const comfyOrgApiKey = comfyOrgApiKeyFromBody || getComfyOrgApiKeyServer()
 
-  // ── API-engine tools (non-ComfyUI) ──────────────────────────────────────────
-  if (tool.engine === 'api') {
-    const currentUser = getRequestUser(req)
-    const seed = inputs?.['api__seed'] ?? Math.floor(Math.random() * 2 ** 32)
-    const executionId = uuidv4()
+  /** If an existing execId is provided (from enqueue), update it to 'running'.
+   *  Otherwise, create a new record. Returns the execution ID. */
+  async function upsertExecution(values: {
+    userId: string | null
+    inputsJson: string
+    workflowHash: string
+    seed: number
+    comfyPort?: number
+  }): Promise<string> {
     const now = Date.now()
-
+    if (existingExecId) {
+      // Transition queued → running
+      await db.update(executions).set({
+        status: 'running',
+        inputsJson: values.inputsJson,
+        seed: values.seed,
+        comfyPort: values.comfyPort ?? null,
+        createdAt: now,
+      }).where(eq(executions.id, existingExecId))
+      return existingExecId
+    }
+    const executionId = uuidv4()
     await db.insert(executions).values({
       id: executionId,
       toolId,
+      userId: values.userId,
+      inputsJson: values.inputsJson,
+      workflowHash: values.workflowHash,
+      seed: values.seed,
+      status: 'running',
+      comfyPort: values.comfyPort,
+      createdAt: now,
+    })
+    return executionId
+  }
+
+  // ── API-engine tools (non-ComfyUI, plugin-driven) ───────────────────────────
+  if (tool.engine === 'api') {
+    // ── Modal cloud execution ───────────────────────────────────────────────
+    // Support both old format (comfyPort: 'modal') and new (provider: 'modal', modalDeployId: '...')
+    const provider = providerOverride as string | undefined
+    const isModal = provider === 'modal' || comfyPortOverride === 'modal'
+
+    if (isModal) {
+      const config = JSON.parse(tool.workflowJson) as { engine: string; model: string; pluginId: string }
+      const plugin = getPlugin(config.pluginId)
+      if (!plugin) {
+        return NextResponse.json({ error: `Unknown API plugin: ${config.pluginId}` }, { status: 400 })
+      }
+
+      let modalUrl: string | null = null
+      const resolvedDeployId = (modalDeployId as string | undefined) ?? 'auto'
+
+      if (resolvedDeployId === 'auto') {
+        const deployment = autoRouteModalDeployment(config.pluginId)
+        if (!deployment) {
+          return NextResponse.json({ error: 'No Modal deployments available. Deploy from the tool page first.' }, { status: 400 })
+        }
+        modalUrl = deployment.url
+      } else {
+        modalUrl = getModalDeployUrl(config.pluginId, resolvedDeployId)
+        if (!modalUrl) {
+          return NextResponse.json({ error: `Modal deployment "${resolvedDeployId}" not found or not ready.` }, { status: 400 })
+        }
+      }
+
+      const currentUser = getRequestUser(req)
+      const seed = inputs?.['api__seed'] ?? Math.floor(Math.random() * 2 ** 32)
+      const executionId = await upsertExecution({
+        userId: currentUser?.id ?? null,
+        inputsJson: JSON.stringify({ ...inputs, seed }),
+        workflowHash: tool.workflowHash,
+        seed,
+      })
+      db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()
+
+      const controller = new AbortController()
+      inFlightControllers.set(executionId, controller)
+
+      runModalInference(executionId, plugin, inputs, seed, controller.signal, modalUrl)
+        .catch(async (err) => {
+          console.error(`Unhandled error in runModalInference for ${executionId}:`, err)
+          try {
+            await db.update(executions).set({
+              status: 'error', errorMessage: err instanceof Error ? err.message : 'Unknown error', completedAt: Date.now(),
+            }).where(eq(executions.id, executionId))
+          } catch { /* already logged */ }
+          inFlightControllers.delete(executionId)
+        })
+
+      return NextResponse.json({ executionId, type: 'modal', status: 'running', seed }, { status: 202 })
+    }
+
+    const currentUser = getRequestUser(req)
+    const seed = inputs?.['api__seed'] ?? Math.floor(Math.random() * 2 ** 32)
+    const executionId = await upsertExecution({
       userId: currentUser?.id ?? null,
       inputsJson: JSON.stringify({ ...inputs, seed }),
       workflowHash: tool.workflowHash,
       seed,
-      status: 'running',
-      createdAt: now,
     })
+    db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()
 
-    const config = JSON.parse(tool.workflowJson) as { engine: string; model: string }
+    const config = JSON.parse(tool.workflowJson) as { engine: string; model: string; pluginId: string }
 
-    if (config.model === 'Tongyi-MAI/Z-Image-Turbo') {
-      const LOCAL_INFERENCE_PORT = 8765
+    const plugin = getPlugin(config.pluginId)
 
-      try {
-        // Check the server is up first (fast timeout)
-        await fetch(`http://127.0.0.1:${LOCAL_INFERENCE_PORT}/health`, { signal: AbortSignal.timeout(2000) })
-      } catch {
-        const msg = `Z-Image Turbo inference server is not running. Use the Install & Start button to launch it.`
-        await db.update(executions).set({ status: 'error', errorMessage: msg, completedAt: Date.now() }).where(eq(executions.id, executionId))
-        return NextResponse.json({ error: msg }, { status: 503 })
-      }
-
-      // Fire inference in background — return immediately so the HTTP connection doesn't time out
-      const controller = new AbortController()
-      inFlightControllers.set(executionId, controller)
-      runApiInference(executionId, config.model, inputs, seed, controller.signal)
-
-      return NextResponse.json({ executionId, type: 'api', status: 'running', seed }, { status: 202 })
+    if (!plugin) {
+      await db.update(executions).set({ status: 'error', errorMessage: `Unknown API plugin: ${config.pluginId}`, completedAt: Date.now() }).where(eq(executions.id, executionId))
+      return NextResponse.json({ error: `Unknown API plugin: ${config.pluginId}` }, { status: 400 })
     }
 
-    await db.update(executions).set({ status: 'error', errorMessage: 'Unknown API model', completedAt: Date.now() }).where(eq(executions.id, executionId))
-    return NextResponse.json({ error: 'Unknown API model' }, { status: 400 })
+    const controller = new AbortController()
+    inFlightControllers.set(executionId, controller)
+
+    const { port, healthEndpoint } = plugin.server
+    try {
+      await fetch(`http://127.0.0.1:${port}${healthEndpoint}`, { signal: AbortSignal.timeout(2000) })
+    } catch {
+      const msg = `${plugin.name} inference server is not running. Use the Install & Start button to launch it.`
+      await db.update(executions).set({ status: 'error', errorMessage: msg, completedAt: Date.now() }).where(eq(executions.id, executionId))
+      inFlightControllers.delete(executionId)
+      return NextResponse.json({ error: msg }, { status: 503 })
+    }
+    runLocalInference(executionId, plugin, inputs, seed, controller.signal, deviceOverride)
+      .catch(async (err) => {
+        console.error(`Unhandled error in runLocalInference for ${executionId}:`, err)
+        try {
+          await db.update(executions).set({
+            status: 'error',
+            errorMessage: err instanceof Error ? err.message : 'Unknown error',
+            completedAt: Date.now(),
+          }).where(eq(executions.id, executionId))
+        } catch { /* DB update failed — already logged above */ }
+        inFlightControllers.delete(executionId)
+      })
+
+    return NextResponse.json({ executionId, type: 'api', status: 'running', seed }, { status: 202 })
   }
 
   // ── ComfyUI-engine tools ─────────────────────────────────────────────────────
-  if (!tool.comfyPort) return NextResponse.json({ error: 'No ComfyUI port configured for this tool' }, { status: 400 })
+  // Validate comfyPort override against configured instances to prevent arbitrary port access
+  if (comfyPortOverride != null) {
+    const validPorts = new Set(getComfyInstances().map((i) => i.port))
+    const isValidModalComfyPort = isModalComfyPort(comfyPortOverride) && getModalComfyByPort(comfyPortOverride) != null
+    if (!validPorts.has(comfyPortOverride) && !isValidModalComfyPort) {
+      return NextResponse.json({ error: 'Invalid ComfyUI port — not a configured instance' }, { status: 400 })
+    }
+  }
+  // Server-side auto-routing: when no port override is provided, pick the
+  // least-busy running instance. Falls back to the tool's stored port.
+  const comfyPort = comfyPortOverride ?? await autoRouteComfyPort(tool.comfyPort)
+  if (!comfyPort) return NextResponse.json({ error: 'No ComfyUI port configured for this tool' }, { status: 400 })
 
   // Generate a random seed if not provided in inputs
   const seed = inputs?.seed ?? Math.floor(Math.random() * 2 ** 32)
 
-  const executionId = uuidv4()
-  const now = Date.now()
   const clientId = uuidv4()
 
   // Parse workflow, normalize to API format, and inject inputs.
@@ -244,7 +482,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   let objectInfoMap: ObjectInfoMap | undefined
   try {
-    const infoRes = await fetch(`http://localhost:${tool.comfyPort}/object_info`, {
+    const infoRes = await fetch(`${resolveComfyBaseUrl(comfyPort)}/object_info`, {
       signal: AbortSignal.timeout(3000),
     })
     if (infoRes.ok) objectInfoMap = await infoRes.json() as ObjectInfoMap
@@ -277,28 +515,36 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const currentUser = getRequestUser(req)
 
-  // Insert execution row
-  await db.insert(executions).values({
-    id: executionId,
-    toolId,
+  // Insert or update execution row
+  const executionId = await upsertExecution({
     userId: currentUser?.id ?? null,
     inputsJson: JSON.stringify({ ...inputs, seed }),
     workflowHash: tool.workflowHash,
     seed,
-    status: 'running',
-    createdAt: now,
+    comfyPort,
   })
+  db.update(tools).set({ lastUsedAt: Date.now() }).where(eq(tools.id, toolId)).run()
+  trackExecStart(comfyPort, executionId)
 
   // Queue the prompt via embedded ComfyUI proxy (non-blocking)
   const promptPayload: Record<string, unknown> = { prompt: workflow, client_id: clientId }
   if (comfyOrgApiKey) {
     promptPayload.extra_data = { api_key_comfy_org: comfyOrgApiKey }
   }
-  const queueRes = await fetch(`http://localhost:${tool.comfyPort}/prompt`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(promptPayload),
-  })
+  let queueRes: Response
+  try {
+    queueRes = await fetch(`${resolveComfyBaseUrl(comfyPort)}/prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(promptPayload),
+    })
+  } catch {
+    const errorMessage = `ComfyUI is not reachable on port ${comfyPort}. Make sure it is running.`
+    trackExecEnd(comfyPort)
+    await db.update(executions).set({ status: 'error', errorMessage, completedAt: Date.now() })
+      .where(eq(executions.id, executionId))
+    return NextResponse.json({ error: errorMessage }, { status: 503 })
+  }
 
   if (!queueRes.ok) {
     let detail = ''
@@ -317,6 +563,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           .join('\n')
       : detail || 'Failed to queue prompt'
 
+    trackExecEnd(comfyPort)
     await db.update(executions).set({ status: 'error', errorMessage, completedAt: Date.now() })
       .where(eq(executions.id, executionId))
     return NextResponse.json({ error: errorMessage, nodeErrors }, { status: 502 })
@@ -329,9 +576,53 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Poll ComfyUI history server-side until the prompt completes, then save
   // outputs to disk and return the finished execution. Used by the HTTP SDK so
   // external apps don't need a browser watching a WebSocket.
+  // For Modal ComfyUI, start a background poller that downloads outputs
+  // as soon as the prompt completes (before the container scales down).
+  if (isModalComfyPort(comfyPort)) {
+    const modalBaseUrl = resolveComfyBaseUrl(comfyPort)
+    ;(async () => {
+      const maxWait = 300_000
+      const started = Date.now()
+      while (Date.now() - started < maxWait) {
+        await new Promise((r) => setTimeout(r, 2000))
+        let history: Record<string, unknown>
+        try { history = await getHistory(promptId, modalBaseUrl) } catch { continue }
+        const entry = history[promptId] as {
+          status?: { completed?: boolean; status_str?: string }
+          outputs?: Record<string, { images?: { filename: string; subfolder: string }[] }>
+        } | undefined
+        if (!entry?.status?.completed) continue
+
+        const rawOutputs: OutputItem[] = []
+        for (const nodeOut of Object.values(entry.outputs ?? {})) {
+          for (const img of nodeOut.images ?? []) {
+            rawOutputs.push({ kind: 'image', filename: img.filename, subfolder: img.subfolder ?? '' })
+          }
+        }
+
+        if (entry.status?.status_str === 'error') {
+          trackExecEnd(comfyPort)
+          await db.update(executions).set({ status: 'error', errorMessage: 'ComfyUI reported an error', completedAt: Date.now() })
+            .where(eq(executions.id, executionId))
+          return
+        }
+
+        const savedOutputs = await saveComfyOutputsToDisk(rawOutputs, comfyPort, toolId, executionId)
+        trackExecEnd(comfyPort)
+        await db.update(executions).set({ status: 'completed', outputsJson: JSON.stringify(savedOutputs), completedAt: Date.now() })
+          .where(eq(executions.id, executionId))
+        return
+      }
+      // Timeout
+      trackExecEnd(comfyPort)
+      await db.update(executions).set({ status: 'error', errorMessage: 'Modal execution timed out', completedAt: Date.now() })
+        .where(eq(executions.id, executionId))
+    })().catch(console.error)
+  }
+
   const waitMode = req.nextUrl.searchParams.get('wait') === 'true'
   if (waitMode) {
-    const baseUrl = `http://localhost:${tool.comfyPort}`
+    const baseUrl = resolveComfyBaseUrl(comfyPort)
     const maxWait = 300_000
     const started = Date.now()
 
@@ -356,13 +647,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
       const isError = entry.status?.status_str === 'error'
       if (isError) {
+        trackExecEnd(comfyPort)
         await db.update(executions)
           .set({ status: 'error', errorMessage: 'ComfyUI reported an error', completedAt: Date.now() })
           .where(eq(executions.id, executionId))
         return NextResponse.json({ error: 'ComfyUI reported an error' }, { status: 500 })
       }
 
-      const savedOutputs = await saveComfyOutputsToDisk(rawOutputs, tool.comfyPort, toolId, executionId)
+      const savedOutputs = await saveComfyOutputsToDisk(rawOutputs, comfyPort, toolId, executionId)
+      trackExecEnd(comfyPort)
       await db.update(executions)
         .set({ status: 'completed', outputsJson: JSON.stringify(savedOutputs), completedAt: Date.now() })
         .where(eq(executions.id, executionId))
@@ -371,6 +664,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json(row)
     }
 
+    trackExecEnd(comfyPort)
     await db.update(executions)
       .set({ status: 'error', errorMessage: 'Execution timed out', completedAt: Date.now() })
       .where(eq(executions.id, executionId))
@@ -381,7 +675,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     executionId,
     promptId,
     clientId,
-    comfyPort: tool.comfyPort,
+    comfyPort,
     seed,
+    type: 'comfyui' as const,
   }, { status: 202 })
 }

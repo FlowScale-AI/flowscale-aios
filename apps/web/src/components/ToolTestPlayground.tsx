@@ -1,12 +1,15 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Play, Warning, Monitor, ImageSquare } from 'phosphor-react'
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import { LottieSpinner } from '@/components/ui'
 import { ComfyLogsPanel } from '@/components/ComfyLogsPanel'
 import { getComfyOrgApiKey } from '@/lib/platform'
 import { FileUploadInput, inferInputUploadKind } from '@/components/FileUploadInput'
+import { ComputePicker } from '@/components/ComputePicker'
+import { useModalStatus } from '@/hooks/useModalStatus'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -138,15 +141,70 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
     return defaults
   })
 
+  // ── ComfyUI instance selection ──────────────────────────────────────────────
+  const { data: comfyManageData } = useQuery<{ instances: Array<{ id: string; status: string; port: number; device: string; label: string }> }>({
+    queryKey: ['comfy-manage'],
+    queryFn: async () => {
+      const res = await fetch('/api/comfy/manage')
+      if (!res.ok) return { instances: [] }
+      return res.json()
+    },
+  })
+  const { data: gpuData } = useQuery<{ gpus: Array<{ index: number; name: string; vramMB: number; backend: string }> }>({
+    queryKey: ['gpu-info'],
+    queryFn: async () => {
+      const res = await fetch('/api/gpu')
+      if (!res.ok) return { gpus: [] }
+      return res.json()
+    },
+    staleTime: 60_000,
+  })
+  const comfyInstances = comfyManageData?.instances ?? []
+  const runningInstances = comfyInstances.filter((i) => i.status === 'running')
+  // 'auto' = server-side least-busy routing; number = pinned; null = default (auto); 'modal' = cloud
+  const [selectedComfyPort, setSelectedComfyPort] = useState<number | 'auto' | 'modal' | null>(null)
+  const { data: modalStatus } = useModalStatus()
+  // For display purposes: show the tool's configured port or first running instance
+  const effectiveComfyPort: number | null =
+    selectedComfyPort === 'modal'
+      ? null
+      : selectedComfyPort === 'auto' || selectedComfyPort === null
+      ? (tool.comfyPort ?? runningInstances[0]?.port ?? null)
+      : selectedComfyPort
+  const comfyInstanceLabel = effectiveComfyPort
+    ? comfyInstances.find((i) => i.port === effectiveComfyPort)?.label ?? `:${effectiveComfyPort}`
+    : undefined
+  const isAutoRoute = selectedComfyPort === 'auto' || (selectedComfyPort === null && runningInstances.length > 1)
+
+  const sseRef = useRef<EventSource | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      sseRef.current?.close()
+      if (pollRef.current) clearInterval(pollRef.current)
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    }
+  }, [])
+
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
-  type OutputFile = { filename: string; subfolder?: string; kind: 'image' | 'video' | 'audio' | 'model' | 'file' }
+  type OutputFile = { filename: string; subfolder?: string; path?: string; kind: 'image' | 'video' | 'audio' | 'model' | 'file' }
   type OutputText = { text: string; kind: 'text' }
   type OutputItem = OutputFile | OutputText
   const [outputs, setOutputs] = useState<OutputItem[]>([])
   const [execMeta, setExecMeta] = useState<{ seed: number; elapsed: string } | null>(null)
   const [error, setError] = useState<string[]>([])
   const [logsOpen, setLogsOpen] = useState(false)
+
+  /** Resolve the port: pinned port if user selected one, 'modal' for cloud, undefined to let server auto-route. */
+  const resolveComfyPort = useCallback((): number | 'modal' | undefined => {
+    if (selectedComfyPort === 'modal') return 'modal'
+    if (selectedComfyPort !== null && selectedComfyPort !== 'auto') return selectedComfyPort
+    // Let the server handle auto-routing (least-busy across all users)
+    return undefined
+  }, [selectedComfyPort])
 
   const handleRun = useCallback(async () => {
     setRunning(true)
@@ -157,10 +215,11 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
     const startTime = Date.now()
 
     try {
+      const pinnedPort = resolveComfyPort()
       const res = await fetch(`/api/tools/${tool.id}/executions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined }),
+        body: JSON.stringify({ inputs, comfyOrgApiKey: getComfyOrgApiKey() || undefined, ...(pinnedPort != null ? { comfyPort: pinnedPort } : {}) }),
       })
       if (!res.ok) {
         const err = await res.json()
@@ -233,7 +292,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
             setExecMeta({ seed: result.seed, elapsed: `${elapsed}s` })
 
-            await fetch(`/api/executions/${result.executionId}`, {
+            const patchRes = await fetch(`/api/executions/${result.executionId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -241,14 +300,26 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                 outputsJson: JSON.stringify(files),
                 completedAt: Date.now(),
               }),
-            }).catch(() => {})
+            }).catch(() => null)
+            // Re-read execution to get outputs with saved disk paths (set by saveOutputsToDisk)
+            if (patchRes?.ok) {
+              try {
+                const saved = await patchRes.json()
+                if (saved?.outputsJson) {
+                  const savedOutputs = JSON.parse(saved.outputsJson) as OutputItem[]
+                  if (savedOutputs.length > 0) setOutputs(savedOutputs)
+                }
+              } catch { /* ignore parse errors */ }
+            }
           }
         } catch { /* ignore */ }
 
         setRunning(false)
       }
 
+      sseRef.current?.close()
       const sse = new EventSource(`/api/comfy/${result.comfyPort}/ws`)
+      sseRef.current = sse
 
       sse.onmessage = (event) => {
         try {
@@ -272,21 +343,26 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
 
       sse.onerror = () => { sse.close() }
 
+      if (pollRef.current) clearInterval(pollRef.current)
+      const isModalPort = result.comfyPort > 50000 && result.comfyPort <= 50999
       const pollInterval = setInterval(async () => {
         if (done) { clearInterval(pollInterval); return }
         try {
           const histRes = await fetch(`/api/comfy/${result.comfyPort}/history/${result.promptId}`)
           if (!histRes.ok) return
-          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean } }>
-          if (hist[result.promptId]?.status?.completed) {
+          const hist = await histRes.json() as Record<string, { status?: { completed?: boolean; status_str?: string } }>
+          const s = hist[result.promptId]?.status
+          if (s?.completed || s?.status_str === 'success' || s?.status_str === 'error') {
             clearInterval(pollInterval)
             sse.close()
             finish()
           }
         } catch { /* ignore */ }
-      }, 3000)
+      }, isModalPort ? 10_000 : 3000)
+      pollRef.current = pollInterval
 
-      setTimeout(() => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      timeoutRef.current = setTimeout(() => {
         if (!done) {
           done = true
           sse.close()
@@ -300,7 +376,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
       setError(['Failed to start execution'])
       setRunning(false)
     }
-  }, [inputs, tool.id, tool.comfyPort])
+  }, [inputs, tool.id, resolveComfyPort])
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -309,15 +385,25 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
         <div className="flex-1">
           <p className="text-xs text-zinc-500">Run the tool with test inputs before deploying.</p>
         </div>
-        {!tool.comfyPort && (
+        {!effectiveComfyPort && (
           <div className="flex items-center gap-2 text-amber-400 text-xs">
             <Monitor size={13} weight="duotone" />
             No ComfyUI connected
           </div>
         )}
+        {/* Instance selector */}
+        {comfyInstances.length > 0 && (
+          <ComputePicker
+            instances={comfyInstances}
+            gpuInfo={gpuData?.gpus}
+            value={selectedComfyPort}
+            onChange={setSelectedComfyPort}
+            modalConnected={modalStatus?.authenticated}
+          />
+        )}
         <button
           onClick={handleRun}
-          disabled={running || !tool.comfyPort}
+          disabled={running || !effectiveComfyPort}
           className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed text-black text-sm font-semibold rounded-md transition-colors"
         >
           {running ? (
@@ -371,7 +457,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                               <FileUploadInput
                                 kind={uploadKind}
                                 value={String(inputs[key] ?? '')}
-                                comfyPort={tool.comfyPort}
+                                comfyPort={effectiveComfyPort}
                                 onChange={(filename) => setInputs((prev) => ({ ...prev, [key]: filename }))}
                               />
                             )
@@ -425,7 +511,9 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                           </div>
                         )
                       }
-                      const url = `/api/comfy/${tool.comfyPort}/view?filename=${encodeURIComponent(out.filename)}${out.subfolder ? `&subfolder=${encodeURIComponent(out.subfolder)}` : ''}&type=output`
+                      const url = out.path?.startsWith('/')
+                        ? out.path
+                        : `/api/comfy/${effectiveComfyPort}/view?filename=${encodeURIComponent(out.filename)}${out.subfolder ? `&subfolder=${encodeURIComponent(out.subfolder)}` : ''}&type=output`
                       if (out.kind === 'image') return (
                         <div key={i} className={cardClass}>
                           <div className="h-36 bg-zinc-950 overflow-hidden">
@@ -477,7 +565,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
               </div>
 
               {/* Logs footer */}
-              {tool.comfyPort && (
+              {effectiveComfyPort && (
                 <div className="border-t border-white/5 shrink-0">
                   <button
                     onClick={() => setLogsOpen((v) => !v)}
@@ -491,7 +579,7 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                   </button>
                   {logsOpen && (
                     <div className="h-40">
-                      <ComfyLogsPanel port={tool.comfyPort} />
+                      <ComfyLogsPanel port={effectiveComfyPort} instanceLabel={comfyInstanceLabel} />
                     </div>
                   )}
                 </div>

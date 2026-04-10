@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { analyzeWorkflow, analyzeGraphSourceNodes, isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@flowscale/workflow'
 import { createHash } from 'crypto'
+import { resolveComfyBaseUrl } from '@/lib/modal-comfyui'
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest) {
   let objectInfoMap: ObjectInfoMap | undefined
   if (comfyPort && typeof comfyPort === 'number') {
     try {
-      const infoRes = await fetch(`http://localhost:${comfyPort}/object_info`, {
+      const infoRes = await fetch(`${resolveComfyBaseUrl(comfyPort)}/object_info`, {
         signal: AbortSignal.timeout(3000),
       })
       if (infoRes.ok) objectInfoMap = await infoRes.json() as ObjectInfoMap

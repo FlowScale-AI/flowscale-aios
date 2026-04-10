@@ -1,61 +1,44 @@
 import { NextResponse } from 'next/server'
-import { createConnection } from 'net'
+import { getComfyInstances } from '@/lib/providerSettings'
+import { probePort } from '@/lib/comfy-probe'
 
-export interface ComfyInstance {
-  port: number
-  systemStats: Record<string, unknown> | null
-}
-
-const COMFY_SCAN_START_PORT = 6188
-const COMFY_SCAN_END_PORT = 16188
-const COMFY_SCAN_BATCH_SIZE = 200
-
-async function probePort(port: number): Promise<ComfyInstance | null> {
-  // First check TCP is open
-  const isOpen = await new Promise<boolean>((resolve) => {
-    const socket = createConnection({ port, host: '127.0.0.1' })
-    socket.setTimeout(1500)
-    socket.on('connect', () => { socket.destroy(); resolve(true) })
-    socket.on('error', () => resolve(false))
-    socket.on('timeout', () => { socket.destroy(); resolve(false) })
-  })
-
-  if (!isOpen) return null
-
-  // Try to get system stats
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/system_stats`, {
-      signal: AbortSignal.timeout(2000),
-    })
-    if (!res.ok) return null
-    const stats = await res.json() as Record<string, unknown>
-    return { port, systemStats: stats }
-  } catch {
-    return null
-  }
-}
+/** Well-known ports where ComfyUI commonly runs (desktop app, default, etc.) */
+const WELL_KNOWN_PORTS = [8000, 8188]
 
 export async function GET() {
-  const ports = Array.from(
-    { length: COMFY_SCAN_END_PORT - COMFY_SCAN_START_PORT + 1 },
-    (_, i) => COMFY_SCAN_START_PORT + i,
+  const instances = getComfyInstances()
+  const configuredPorts = new Set(instances.map((i) => i.port))
+
+  // Probe all configured instance ports in parallel
+  const results = await Promise.all(
+    instances.map(async (cfg) => {
+      const probe = await probePort(cfg.port)
+      if (!probe) return null
+      return { ...probe, instanceId: cfg.id, device: cfg.device, label: cfg.label }
+    }),
   )
 
-  const instances: ComfyInstance[] = []
-  for (let i = 0; i < ports.length; i += COMFY_SCAN_BATCH_SIZE) {
-    const batch = ports.slice(i, i + COMFY_SCAN_BATCH_SIZE)
-    const results = await Promise.all(batch.map(probePort))
-    instances.push(...results.filter((r): r is ComfyInstance => r !== null))
-  }
+  // Also probe well-known ports that aren't already configured
+  const extraPorts = WELL_KNOWN_PORTS.filter((p) => !configuredPorts.has(p))
+  const extraResults = await Promise.all(
+    extraPorts.map(async (port) => {
+      const probe = await probePort(port)
+      if (!probe) return null
+      return { ...probe, instanceId: `external-${port}`, device: 'auto', label: `ComfyUI :${port}` }
+    }),
+  )
+
+  const alive = [...results, ...extraResults].filter(Boolean)
 
   // Fire-and-forget model scan for each discovered instance
-  for (const instance of instances) {
+  for (const inst of alive) {
+    if (!inst) continue
     fetch('http://localhost:14173/api/models/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ comfyPort: instance.port }),
+      body: JSON.stringify({ comfyPort: inst.port }),
     }).catch(() => { /* background — ignore errors */ })
   }
 
-  return NextResponse.json(instances)
+  return NextResponse.json(alive)
 }
