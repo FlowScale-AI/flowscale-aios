@@ -640,38 +640,6 @@ export default function ToolsPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                {/* Coming soon placeholder cards */}
-                {[
-                  { id: 'coming-flux-lora', name: 'Flux LoRA Trainer', type: 'training' as ToolType, description: 'Train Flux LoRA models on your images' },
-                  { id: 'coming-sdxl-lora', name: 'SDXL LoRA Trainer', type: 'training' as ToolType, description: 'Train SDXL LoRA models with AI-Toolkit' },
-                ].filter((p) => !search.trim() || p.name.toLowerCase().includes(search.toLowerCase()) || p.description.toLowerCase().includes(search.toLowerCase()))
-                .map((placeholder) => {
-                  const cfg = TOOL_TYPE_CONFIG[placeholder.type]
-                  return (
-                    <div key={placeholder.id} className="group flex flex-col rounded-xl border border-white/5 bg-[var(--color-background-panel)] opacity-70 overflow-hidden">
-                      <div className="flex flex-col p-4 flex-1">
-                        <div className="flex items-start justify-between gap-2 mb-2">
-                          <div className={`size-9 rounded-lg ${cfg.bgColor} border ${cfg.borderColor} flex items-center justify-center shrink-0`}>
-                            <Wrench size={16} weight="duotone" className={cfg.textColor} />
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${cfg.textColor} ${cfg.bgColor} ${cfg.borderColor}`}>
-                              {cfg.label}
-                            </span>
-                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full border text-zinc-400 bg-zinc-800 border-zinc-700">
-                              Coming Soon
-                            </span>
-                          </div>
-                        </div>
-                        <h3 className="text-sm font-medium text-zinc-200 mb-1">{placeholder.name}</h3>
-                        <p className="text-xs text-zinc-500 line-clamp-2 leading-relaxed flex-1">{placeholder.description}</p>
-                      </div>
-                      <div className="flex items-center justify-end px-4 py-2 border-t border-white/5">
-                        <span className="text-xs text-zinc-600">Coming soon</span>
-                      </div>
-                    </div>
-                  )
-                })}
                 {filteredCatalog.map((entry) => {
                   const isInstalled = installedPluginIds.has(entry.id) || installedToolIds.has(`${entry.id}-builtin`)
                   const localVersion = installedVersions[entry.id]
