@@ -63,6 +63,7 @@ interface UserMe {
 interface NetworkData {
   port: number;
   addresses: string[];
+  lanShare: boolean;
 }
 
 type UserRow = {
@@ -1896,6 +1897,28 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
 
   const autoStartEnabled = comfySetup?.autoStartComfyUI ?? false;
 
+  // Track whether the user has toggled LAN sharing this session so we can
+  // surface a "restart required" hint — the bind address is set when the
+  // Next.js server is spawned, so the change only takes effect on relaunch.
+  const [lanShareDirty, setLanShareDirty] = useState(false);
+
+  const lanShareMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const res = await fetch("/api/settings/lan-share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lanShare: enabled }),
+      });
+      if (!res.ok) throw new Error("Failed to save setting");
+    },
+    onSuccess: () => {
+      setLanShareDirty(true);
+      queryClient.invalidateQueries({ queryKey: ["network"] });
+    },
+  });
+
+  const lanShareEnabled = network?.lanShare ?? false;
+
   const [copied, setCopied] = useState<string | null>(null);
 
   const openInBrowser = (url: string) => {
@@ -1964,6 +1987,48 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
               Network Access
             </h2>
           </div>
+
+          {/* LAN sharing toggle */}
+          <div className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg mb-2">
+            <div className="flex-1 min-w-0 pr-4">
+              <div className="text-sm text-zinc-300">
+                Allow LAN access
+              </div>
+              <p className="text-xs text-zinc-600 mt-0.5">
+                Bind the app server to all network interfaces so other devices
+                on your Wi-Fi can reach tools, apps, and canvases. Off by
+                default — exposes every AIOS API to the local network.
+              </p>
+            </div>
+            <button
+              onClick={() => lanShareMutation.mutate(!lanShareEnabled)}
+              disabled={lanShareMutation.isPending}
+              className={[
+                "relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 disabled:opacity-50",
+                lanShareEnabled ? "bg-emerald-500" : "bg-zinc-700",
+              ].join(" ")}
+              title={
+                lanShareEnabled ? "Disable LAN access" : "Enable LAN access"
+              }
+            >
+              <span
+                className={[
+                  "inline-block size-3.5 rounded-full bg-white transition-transform",
+                  lanShareEnabled ? "translate-x-[18px]" : "translate-x-1",
+                ].join(" ")}
+              />
+            </button>
+          </div>
+          {lanShareDirty && (
+            <div className="flex items-start gap-2 p-3 mb-2 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+              <Warning size={14} className="text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-300/90">
+                Restart FlowScale AI OS for this change to take effect. The
+                bind address is set when the app server starts.
+              </p>
+            </div>
+          )}
+
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg">
               <div className="flex-1 min-w-0">
@@ -2001,10 +2066,20 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
               return (
                 <div
                   key={ip}
-                  className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg"
+                  className={[
+                    "flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg",
+                    lanShareEnabled ? "" : "opacity-50",
+                  ].join(" ")}
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs text-zinc-500 mb-1">Network</div>
+                    <div className="text-xs text-zinc-500 mb-1 flex items-center gap-2">
+                      <span>Network</span>
+                      {!lanShareEnabled && (
+                        <span className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded">
+                          Disabled
+                        </span>
+                      )}
+                    </div>
                     <span className="text-sm font-mono-custom text-zinc-300">
                       {url}
                     </span>
@@ -2012,8 +2087,13 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
                   <div className="flex items-center gap-2 shrink-0 ml-4">
                     <button
                       onClick={() => copyUrl(url)}
-                      className="p-1.5 text-zinc-500 hover:text-white transition-colors"
-                      title="Copy URL"
+                      disabled={!lanShareEnabled}
+                      className="p-1.5 text-zinc-500 hover:text-white transition-colors disabled:hover:text-zinc-500 disabled:cursor-not-allowed"
+                      title={
+                        lanShareEnabled
+                          ? "Copy URL"
+                          : "Enable LAN access to use this link"
+                      }
                     >
                       {copied === url ? (
                         <Check size={14} className="text-emerald-400" />
@@ -2023,7 +2103,8 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
                     </button>
                     <button
                       onClick={() => openInBrowser(url)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
+                      disabled={!lanShareEnabled}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors disabled:opacity-60 disabled:hover:bg-zinc-800 disabled:cursor-not-allowed"
                     >
                       <ArrowSquareOut size={12} /> Open
                     </button>
@@ -2033,8 +2114,9 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
             })}
           </div>
           <p className="text-xs text-zinc-600 mt-2">
-            Use the network URL to open FlowScale AI OS from any device on the
-            same network.
+            {lanShareEnabled
+              ? "Use the network URL to open FlowScale AI OS from any device on the same network."
+              : "Enable LAN access above to share FlowScale AI OS with other devices on your network."}
           </p>
 
           {/* App Port */}

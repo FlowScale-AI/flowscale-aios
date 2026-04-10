@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { networkInterfaces } from 'os'
+import { getLanShareEnabled } from '@/lib/providerSettings'
 
 // Docker/virtual bridge interfaces to exclude
 const VIRTUAL_PREFIXES = ['docker', 'br-', 'veth', 'virbr', 'lxc', 'flannel', 'cni', 'podman']
@@ -23,5 +24,9 @@ export async function GET() {
   return NextResponse.json({
     port: 14173,
     addresses,
+    // The settings UI shows the addresses unconditionally, but badges them
+    // as "disabled" when lanShare is off so the user understands the links
+    // won't work until they opt in.
+    lanShare: getLanShareEnabled(),
   })
 }
