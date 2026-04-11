@@ -190,6 +190,67 @@ function CustomToolCard({
   )
 }
 
+/**
+ * CTA card shown at the end of the Available Tools grid. Invites users to
+ * request custom tools for training/running AI models by emailing or joining
+ * the Discord community. Uses the desktop bridge when available (the Electron
+ * will-navigate handler blocks bare mailto/target=_blank clicks).
+ */
+function CustomToolRequestCard() {
+  const openUrl = (url: string) => {
+    if (typeof window !== 'undefined' && window.desktop?.shell?.openExternal) {
+      window.desktop.shell.openExternal(url)
+      return
+    }
+    if (url.startsWith('mailto:')) {
+      window.location.href = url
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+  }
+
+  return (
+    <div className="group flex flex-col rounded-xl border border-dashed border-white/10 bg-[var(--color-background-panel)]/50 hover:border-emerald-500/30 hover:bg-[var(--color-background-panel)] transition-all duration-150 overflow-hidden">
+      <div className="flex flex-col p-4 flex-1">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="size-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
+            <Wrench size={16} weight="duotone" className="text-emerald-400" />
+          </div>
+          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
+            Custom
+          </span>
+        </div>
+        <h3 className="text-sm font-medium text-zinc-200 mb-1">Need a custom tool?</h3>
+        <p className="text-xs text-zinc-500 line-clamp-3 leading-relaxed flex-1">
+          Want a custom tool for training or running your own AI models? Reach
+          out directly or join the Discord community &mdash; we&rsquo;ll help
+          you build it.
+        </p>
+      </div>
+      <div className="flex items-center gap-2 px-4 py-2 border-t border-white/5">
+        <button
+          onClick={() =>
+            openUrl(
+              'mailto:aman@flowscale.ai?subject=Custom%20tool%20request%20for%20FlowScale%20AI%20OS',
+            )
+          }
+          className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-md transition-colors"
+        >
+          <ArrowSquareOut size={11} />
+          Email
+        </button>
+        <button
+          onClick={() => openUrl('https://discord.gg/XgPTrNM7Du')}
+          className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-[#a5aeff] bg-[#5865F2]/10 hover:bg-[#5865F2]/20 border border-[#5865F2]/30 rounded-md transition-colors"
+        >
+          <ArrowSquareOut size={11} />
+          Discord
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function CatalogCard({
   entry,
   onInstall,
@@ -658,6 +719,11 @@ export default function ToolsPage() {
                     />
                   )
                 })}
+
+                {/* Custom Tool card — "don't see what you need?" CTA.
+                    Rendered last in the grid so it's visible only once the
+                    user has scanned the available catalog. */}
+                <CustomToolRequestCard />
               </div>
             )}
           </>

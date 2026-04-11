@@ -203,6 +203,26 @@ function formatDate(ms: number | null) {
   return new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
+/**
+ * Open an external URL (https, http, or mailto) via the desktop bridge when
+ * available, falling back to browser navigation. Using this helper everywhere
+ * avoids the Electron `will-navigate` handler, which cancels any non-http
+ * click inside the renderer (so a bare `<a href="mailto:">` silently does
+ * nothing in the packaged app).
+ */
+function openExternalUrl(url: string): void {
+  if (typeof window === "undefined") return;
+  if (window.desktop?.shell?.openExternal) {
+    window.desktop.shell.openExternal(url);
+    return;
+  }
+  if (url.startsWith("mailto:")) {
+    window.location.href = url;
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
 // ─── Main page (with Suspense boundary for useSearchParams) ──────────────────
 
 export default function SettingsPage() {
@@ -1039,49 +1059,48 @@ function ComputeTab() {
         {/* Modal cloud deployments (only when connected) */}
         <ModalDeploymentsSection />
 
-        {/* V2 placeholder: Connect another machine */}
+        {/* Custom Cloud — CTA for bringing your own cloud */}
         <section>
-          <div className="p-5 rounded-xl border border-dashed border-white/10 bg-[var(--color-background-panel)]/30 opacity-50">
-            <div className="flex items-center gap-3">
-              <div className="size-9 rounded-lg border border-white/10 bg-zinc-800/50 flex items-center justify-center overflow-hidden shrink-0">
-                <Monitor size={18} className="text-zinc-600" />
+          <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+            <div className="flex items-start gap-3">
+              <div className="size-9 rounded-lg border border-white/10 bg-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+                <Cloud size={18} className="text-zinc-400" />
               </div>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-zinc-400">
-                    Connect another machine
-                  </span>
-                  <span className="px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500 bg-zinc-800 rounded-full border border-zinc-700">
-                    V2
+                  <span className="text-sm font-semibold text-zinc-200">
+                    Custom Cloud
                   </span>
                 </div>
                 <p className="text-xs text-zinc-600 mt-0.5">
-                  Add remote machines to your compute pool
+                  Want to run FlowScale AI OS on AWS, GCP, RunPod, Lambda
+                  Labs, or your own infrastructure instead of Modal? Reach out
+                  and we&rsquo;ll help you get set up.
                 </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* V2 placeholder: Multi-cloud */}
-        <section>
-          <div className="p-5 rounded-xl border border-dashed border-white/10 bg-[var(--color-background-panel)]/30 opacity-50">
-            <div className="flex items-center gap-3">
-              <div className="size-9 rounded-lg border border-white/10 bg-zinc-800/50 flex items-center justify-center overflow-hidden shrink-0">
-                <Cloud size={18} className="text-zinc-600" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-zinc-400">
-                    Multi-cloud
-                  </span>
-                  <span className="px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500 bg-zinc-800 rounded-full border border-zinc-700">
-                    V2
-                  </span>
+                <div className="flex items-center gap-2 mt-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openExternalUrl(
+                        "mailto:aman@flowscale.ai?subject=Custom%20cloud%20setup%20for%20FlowScale%20AI%20OS",
+                      )
+                    }
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px] font-medium rounded-lg transition-colors"
+                  >
+                    <ArrowSquareOut size={11} />
+                    aman@flowscale.ai
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openExternalUrl("https://discord.gg/XgPTrNM7Du")
+                    }
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#5865F2]/10 hover:bg-[#5865F2]/20 text-[#a5aeff] border border-[#5865F2]/30 text-[11px] font-medium rounded-lg transition-colors"
+                  >
+                    <ArrowSquareOut size={11} />
+                    Join Discord
+                  </button>
                 </div>
-                <p className="text-xs text-zinc-600 mt-0.5">
-                  Deploy to AWS, RunPod, and more
-                </p>
               </div>
             </div>
           </div>

@@ -280,6 +280,62 @@ export function ComputePicker({
               </div>
             </Link>
           ) : null}
+
+          {/* Custom Cloud — CTAs, not selectable compute targets. Uses
+              window.desktop.shell.openExternal in Electron because the
+              will-navigate handler blocks non-http clicks in the renderer;
+              falls back to direct navigation in the browser. */}
+          <div className="h-px bg-white/5 my-1" />
+          <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">
+            Custom Cloud
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const mailto =
+                "mailto:aman@flowscale.ai?subject=Custom%20cloud%20setup%20for%20FlowScale%20AI%20OS"
+              if (typeof window !== "undefined" && window.desktop?.shell?.openExternal) {
+                window.desktop.shell.openExternal(mailto)
+              } else {
+                window.location.href = mailto
+              }
+              setOpen(false)
+            }}
+            className="w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Cloud size={14} weight="duotone" className="text-zinc-500" />
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-zinc-300">aman@flowscale.ai</div>
+                <div className="text-[10px] text-zinc-600 mt-0.5 truncate">
+                  Bring your own cloud — get in touch
+                </div>
+              </div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const url = "https://discord.gg/XgPTrNM7Du"
+              if (typeof window !== "undefined" && window.desktop?.shell?.openExternal) {
+                window.desktop.shell.openExternal(url)
+              } else {
+                window.open(url, "_blank", "noopener,noreferrer")
+              }
+              setOpen(false)
+            }}
+            className="w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Cloud size={14} weight="duotone" className="text-zinc-500" />
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-zinc-300">Join Discord</div>
+                <div className="text-[10px] text-zinc-600 mt-0.5 truncate">
+                  discord.gg/XgPTrNM7Du
+                </div>
+              </div>
+            </div>
+          </button>
         </div>
       )}
     </div>
