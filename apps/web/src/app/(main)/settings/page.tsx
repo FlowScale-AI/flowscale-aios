@@ -42,6 +42,10 @@ import {
   UsersThree,
   Database,
   Plugs,
+  CloudArrowUp,
+  Monitor,
+  Cloud,
+  MagnifyingGlass,
 } from "phosphor-react";
 import { PageTransition, Modal } from "@/components/ui";
 import { useUpdateStore } from "@/store/updateStore";
