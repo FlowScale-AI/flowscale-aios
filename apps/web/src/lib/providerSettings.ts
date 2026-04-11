@@ -171,6 +171,29 @@ export function setAutoStartComfyUI(enabled: boolean): void {
   writeSettingsFile(settings)
 }
 
+// ── LAN sharing ──────────────────────────────────────────────────────────────
+
+/**
+ * Whether the packaged Next.js server should bind to 0.0.0.0 (all interfaces)
+ * so the app is reachable from other devices on the LAN. Defaults to false —
+ * the packaged app binds to 127.0.0.1 only, matching a normal local desktop
+ * app. Enabling this exposes every AIOS API route to anyone on the same
+ * network, so it's an explicit opt-in.
+ *
+ * Read by apps/desktop/src/main.ts at Next.js startup. Changes require an app
+ * restart to take effect because the bind address is set when the child
+ * process is spawned.
+ */
+export function getLanShareEnabled(): boolean {
+  return readSettingsFile()['lanShare'] === true
+}
+
+export function setLanShareEnabled(enabled: boolean): void {
+  const settings = readSettingsFile()
+  settings['lanShare'] = enabled
+  writeSettingsFile(settings)
+}
+
 export function getComfyOrgApiKey(): string | undefined {
   return readSettingsFile()['comfyOrgApiKey'] || undefined
 }

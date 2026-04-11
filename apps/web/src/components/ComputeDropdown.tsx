@@ -147,6 +147,62 @@ export function ComputeDropdown({ value, onChange, groups }: ComputeDropdownProp
               </div>
             )
           })}
+
+          {/* Custom Cloud footer — CTA, not a selectable compute target.
+              Opens the mailto via the desktop bridge when in Electron (the
+              main process's will-navigate handler blocks bare mailto clicks)
+              and falls back to direct navigation in the browser. */}
+          <div className="border-t border-white/5 mt-1">
+            <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
+              <Cloud size={11} weight="duotone" className="text-zinc-500" />
+              <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
+                Custom Cloud
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const mailto =
+                  'mailto:aman@flowscale.ai?subject=Custom%20cloud%20setup%20for%20FlowScale%20AI%20OS'
+                if (typeof window !== 'undefined' && window.desktop?.shell?.openExternal) {
+                  window.desktop.shell.openExternal(mailto)
+                } else {
+                  window.location.href = mailto
+                }
+                setOpen(false)
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/5 hover:text-zinc-100 transition-colors"
+            >
+              <span className="w-3.5 shrink-0" />
+              <span className="flex-1 min-w-0">
+                <span className="block truncate">aman@flowscale.ai</span>
+                <span className="block text-[10px] text-zinc-600 truncate">
+                  Bring your own cloud — get in touch
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const url = 'https://discord.gg/XgPTrNM7Du'
+                if (typeof window !== 'undefined' && window.desktop?.shell?.openExternal) {
+                  window.desktop.shell.openExternal(url)
+                } else {
+                  window.open(url, '_blank', 'noopener,noreferrer')
+                }
+                setOpen(false)
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 pb-2.5 text-left text-xs text-zinc-300 hover:bg-white/5 hover:text-zinc-100 transition-colors"
+            >
+              <span className="w-3.5 shrink-0" />
+              <span className="flex-1 min-w-0">
+                <span className="block truncate">Join Discord</span>
+                <span className="block text-[10px] text-zinc-600 truncate">
+                  discord.gg/XgPTrNM7Du
+                </span>
+              </span>
+            </button>
+          </div>
         </div>
       )}
     </div>

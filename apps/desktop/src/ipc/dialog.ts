@@ -7,7 +7,14 @@ const watchers = new Map<string, FSWatcher>()
 function isSafeExternalUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:'
+    // Allow http(s) for web links and mailto for email CTAs. Other schemes
+    // (file:, javascript:, custom protocol handlers) stay blocked — they
+    // either have no legitimate use from the renderer or are a security risk.
+    return (
+      parsed.protocol === 'https:' ||
+      parsed.protocol === 'http:' ||
+      parsed.protocol === 'mailto:'
+    )
   } catch {
     return false
   }

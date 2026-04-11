@@ -59,6 +59,7 @@ interface UserMe {
 interface NetworkData {
   port: number;
   addresses: string[];
+  lanShare: boolean;
 }
 
 type UserRow = {
@@ -141,12 +142,7 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
     "Access the HuggingFace Inference API to run models from the Hub.",
 };
 
-type Tab =
-  | "providers"
-  | "comfyui"
-  | "storage"
-  | "users"
-  | "general";
+type Tab = "providers" | "comfyui" | "storage" | "users" | "general";
 
 const TAB_CONFIG: {
   id: Tab;
@@ -189,6 +185,26 @@ const TAB_CONFIG: {
 function formatDate(ms: number | null) {
   if (!ms) return "\u2014";
   return new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
+}
+
+/**
+ * Open an external URL (https, http, or mailto) via the desktop bridge when
+ * available, falling back to browser navigation. Using this helper everywhere
+ * avoids the Electron `will-navigate` handler, which cancels any non-http
+ * click inside the renderer (so a bare `<a href="mailto:">` silently does
+ * nothing in the packaged app).
+ */
+function openExternalUrl(url: string): void {
+  if (typeof window === "undefined") return;
+  if (window.desktop?.shell?.openExternal) {
+    window.desktop.shell.openExternal(url);
+    return;
+  }
+  if (url.startsWith("mailto:")) {
+    window.location.href = url;
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 }
 
 // ─── Main page (with Suspense boundary for useSearchParams) ──────────────────
@@ -335,6 +351,752 @@ function SettingsPageInner() {
         </div>
       )}
     </>
+  );
+}
+
+// ─── Compute Tab ─────────────────────────────────────────────────────────────
+
+interface GpuUtilization {
+  index: number;
+  vramUsedMB: number;
+  vramTotalMB: number;
+  gpuUtil: number;
+}
+
+function ModalComputeCard() {
+  const queryClient = useQueryClient();
+  const [phase, setPhase] = useState<
+    "idle" | "installing" | "authenticating" | "connected" | "error"
+  >("idle");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const { data: modalStatus } = useQuery<{
+    installed: boolean;
+    authenticated: boolean;
+    workspace?: string;
+    authInProgress?: boolean;
+  }>({
+    queryKey: ["modal-status"],
+    queryFn: async () => {
+      const res = await fetch("/api/modal/status");
+      if (!res.ok) return { installed: false, authenticated: false };
+      return res.json();
+    },
+    refetchInterval: phase === "authenticating" ? 3000 : false,
+    staleTime: 10_000,
+  });
+
+  // Auto-detect connection on mount
+  useEffect(() => {
+    if (modalStatus?.authenticated && phase === "idle") {
+      setPhase("connected");
+    }
+  }, [modalStatus?.authenticated, phase]);
+
+  // Detect auth completion while polling
+  useEffect(() => {
+    if (modalStatus?.authenticated && phase === "authenticating") {
+      setPhase("connected");
+    }
+  }, [modalStatus?.authenticated, phase]);
+
+  const setupMutation = useMutation({
+    mutationFn: async (action: string) => {
+      const res = await fetch("/api/modal/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Action failed");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["modal-status"] });
+    },
+  });
+
+  async function handleLogin() {
+    setErrorMsg(null);
+    try {
+      // Step 1: Install if needed
+      if (!modalStatus?.installed) {
+        setPhase("installing");
+        const result = await setupMutation.mutateAsync("install");
+        if (!result.success) {
+          setPhase("error");
+          setErrorMsg(result.error || "Failed to install Modal CLI");
+          return;
+        }
+      }
+      // Step 2: Authenticate — the API spawns `modal token new` and returns the auth URL
+      setPhase("authenticating");
+      const authResult = await setupMutation.mutateAsync("authenticate");
+      // Open the auth URL in the browser so the user can complete the flow
+      let authUrl = authResult.url;
+      let debugInfo = authResult.debug;
+      // If the URL wasn't ready yet, poll for it a few times
+      if (!authUrl) {
+        for (let i = 0; i < 8; i++) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const poll = await fetch("/api/modal/setup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "auth-url" }),
+          });
+          const data = await poll.json();
+          debugInfo = data.debug;
+          if (data.url) {
+            authUrl = data.url;
+            break;
+          }
+        }
+      }
+      if (authUrl) {
+        window.open(authUrl, "_blank");
+      } else {
+        // Failed to get URL — show debug info
+        setPhase("error");
+        const errParts = ["Failed to get auth URL from Modal CLI."];
+        if (debugInfo?.error) errParts.push(`Error: ${debugInfo.error}`);
+        if (debugInfo?.output)
+          errParts.push(`Output: ${debugInfo.output.slice(0, 200)}`);
+        if (debugInfo?.modalBin) errParts.push(`Binary: ${debugInfo.modalBin}`);
+        setErrorMsg(errParts.join(" "));
+        return;
+      }
+      // Polling will detect when auth completes
+    } catch (err: any) {
+      setPhase("error");
+      setErrorMsg(err.message || "Setup failed");
+    }
+  }
+
+  async function handleDisconnect() {
+    try {
+      await setupMutation.mutateAsync("disconnect");
+      setPhase("idle");
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    }
+  }
+
+  return (
+    <section>
+      <div
+        className={`p-5 rounded-xl border transition-colors ${phase === "connected" ? "border-purple-500/20 bg-[var(--color-background-panel)]" : "border-white/5 bg-[var(--color-background-panel)]/50"}`}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <div className="size-9 rounded-lg border border-purple-500/20 bg-purple-500/10 flex items-center justify-center overflow-hidden shrink-0">
+              <Cloud size={18} className="text-purple-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-zinc-200">
+                  Modal.com
+                </span>
+                {phase === "connected" && (
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
+                    <span className="size-1.5 rounded-full bg-emerald-400" />
+                    Connected
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-zinc-600 mt-0.5">
+                {phase === "connected"
+                  ? `Workspace: ${modalStatus?.workspace ?? "default"}`
+                  : "Cloud GPU compute on demand — A100, H100, and more."}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Disconnected / idle */}
+        {phase === "idle" && (
+          <button
+            onClick={handleLogin}
+            disabled={setupMutation.isPending}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 transition-all disabled:opacity-50"
+          >
+            <CloudArrowUp size={16} />
+            Login with Modal
+          </button>
+        )}
+
+        {/* Installing */}
+        {phase === "installing" && (
+          <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-zinc-900/50 border border-white/5">
+            <CircleNotch size={14} className="animate-spin text-purple-400" />
+            <span className="text-sm text-zinc-300">
+              Installing Modal CLI...
+            </span>
+          </div>
+        )}
+
+        {/* Authenticating */}
+        {phase === "authenticating" && (
+          <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-zinc-900/50 border border-white/5">
+            <CircleNotch size={14} className="animate-spin text-purple-400" />
+            <span className="text-sm text-zinc-300">
+              Waiting for browser authentication...
+            </span>
+          </div>
+        )}
+
+        {/* Connected */}
+        {phase === "connected" && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDisconnect}
+              disabled={setupMutation.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-40"
+            >
+              <X size={12} />
+              Disconnect
+            </button>
+          </div>
+        )}
+
+        {/* Error */}
+        {phase === "error" && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-950/30 border border-red-500/20">
+              <Warning size={14} className="text-red-400 shrink-0" />
+              <span className="text-xs text-red-300">{errorMsg}</span>
+            </div>
+            <button
+              onClick={() => {
+                setPhase("idle");
+                setErrorMsg(null);
+              }}
+              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              <ArrowCounterClockwise size={12} />
+              Retry
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+interface PluginDeployRecord {
+  id: string;
+  name: string;
+  status: "deploying" | "deployed" | "failed";
+  appName: string;
+  url: string;
+  gpu: string;
+  deployedAt: number;
+  error?: string;
+}
+
+function ModalDeploymentsSection() {
+  const { data: modalStatus } = useModalStatus();
+  const { data: modalComfyData } = useQuery<{
+    instances: Array<{
+      id: string;
+      name: string;
+      status: string;
+      gpu: string;
+      virtualPort: number;
+    }>;
+  }>({
+    queryKey: ["modal-comfyui-instances"],
+    queryFn: async () => {
+      const res = await fetch("/api/modal/comfyui");
+      if (!res.ok) return { instances: [] };
+      return res.json();
+    },
+    enabled: modalStatus?.authenticated === true,
+  });
+  const { data: pluginDeployData } = useQuery<{
+    deployments: Record<string, PluginDeployRecord[]>;
+  }>({
+    queryKey: ["modal-all-deployments"],
+    queryFn: async () => {
+      const res = await fetch("/api/modal/deployments");
+      if (!res.ok) return { deployments: {} };
+      return res.json();
+    },
+    enabled: modalStatus?.authenticated === true,
+    refetchInterval: 15_000,
+  });
+
+  const queryClient = useQueryClient();
+
+  const comfyInstances = modalComfyData?.instances ?? [];
+  const pluginDeployments = pluginDeployData?.deployments ?? {};
+  const allPluginDeploys = Object.entries(pluginDeployments).flatMap(
+    ([pluginId, records]) => records.map((r) => ({ ...r, pluginId })),
+  );
+
+  const hasAnyDeployments =
+    comfyInstances.length > 0 || allPluginDeploys.length > 0;
+
+  if (!modalStatus?.authenticated) return null;
+
+  const undeployPlugin = async (pluginId: string, deployId: string) => {
+    await fetch(`/api/modal/deploy/${pluginId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "undeploy", deployId }),
+    });
+    queryClient.invalidateQueries({ queryKey: ["modal-all-deployments"] });
+  };
+
+  const undeployComfy = async (instanceId: string) => {
+    await fetch("/api/modal/comfyui", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "undeploy", instanceId }),
+    });
+    queryClient.invalidateQueries({ queryKey: ["modal-comfyui-instances"] });
+  };
+
+  return (
+    <section>
+      <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="size-9 rounded-lg border border-purple-500/20 bg-purple-500/10 flex items-center justify-center overflow-hidden shrink-0">
+            <Cloud size={18} className="text-purple-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-zinc-200">
+                Cloud Deployments
+              </span>
+              {hasAnyDeployments && (
+                <span className="px-1.5 py-0.5 text-[10px] font-semibold text-purple-400 bg-purple-400/10 rounded-full border border-purple-400/20">
+                  {comfyInstances.length + allPluginDeploys.length} active
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-zinc-600 mt-0.5">
+              All Modal deployments across tools and ComfyUI instances
+            </p>
+          </div>
+        </div>
+
+        {!hasAnyDeployments ? (
+          <p className="text-xs text-zinc-600 py-2">
+            No active cloud deployments.
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            {/* ComfyUI instances */}
+            {comfyInstances.map((inst) => (
+              <div
+                key={inst.id}
+                className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Monitor size={13} className="text-purple-400/70" />
+                  <span className="text-xs font-medium text-zinc-300">
+                    {inst.name}
+                  </span>
+                  <span className="text-[10px] font-mono text-zinc-600">
+                    {inst.gpu}
+                  </span>
+                  <span className="px-1.5 py-0.5 text-[9px] font-semibold text-zinc-500 bg-zinc-800 rounded-full">
+                    ComfyUI
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-[10px] ${inst.status === "deployed" ? "text-emerald-400" : inst.status === "deploying" ? "text-amber-400" : "text-red-400"}`}
+                  >
+                    {inst.status}
+                  </span>
+                  {inst.status === "deployed" && (
+                    <button
+                      onClick={() => undeployComfy(inst.id)}
+                      className="text-zinc-600 hover:text-red-400 transition-colors"
+                      title="Stop deployment"
+                    >
+                      <Stop size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {/* Tool plugin deployments */}
+            {allPluginDeploys.map((d) => (
+              <div
+                key={`${d.pluginId}-${d.id}`}
+                className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Lightning size={13} className="text-purple-400/70" />
+                  <span className="text-xs font-medium text-zinc-300">
+                    {d.name}
+                  </span>
+                  <span className="text-[10px] font-mono text-zinc-600">
+                    {d.gpu}
+                  </span>
+                  <span className="px-1.5 py-0.5 text-[9px] font-semibold text-zinc-500 bg-zinc-800 rounded-full">
+                    {d.pluginId}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-[10px] ${d.status === "deployed" ? "text-emerald-400" : d.status === "deploying" ? "text-amber-400" : "text-red-400"}`}
+                  >
+                    {d.status}
+                  </span>
+                  {d.status === "failed" && d.error && (
+                    <span
+                      className="text-[10px] text-red-400 max-w-[150px] truncate"
+                      title={d.error}
+                    >
+                      {d.error}
+                    </span>
+                  )}
+                  {(d.status === "deployed" || d.status === "failed") && (
+                    <button
+                      onClick={() => undeployPlugin(d.pluginId, d.id)}
+                      className="text-zinc-600 hover:text-red-400 transition-colors"
+                      title={
+                        d.status === "failed" ? "Remove" : "Stop deployment"
+                      }
+                    >
+                      {d.status === "failed" ? (
+                        <Trash size={12} />
+                      ) : (
+                        <Stop size={12} />
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ComputeTab() {
+  const queryClient = useQueryClient();
+
+  // Per-GPU "Available for jobs" toggle — UI-only, stored in localStorage
+  const [gpuAvailability, setGpuAvailability] = useState<
+    Record<string, boolean>
+  >({});
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("flowscale-gpu-availability");
+      if (stored) setGpuAvailability(JSON.parse(stored));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const toggleGpuAvailability = (key: string) => {
+    setGpuAvailability((prev) => {
+      const next = { ...prev, [key]: prev[key] === false ? true : false };
+      localStorage.setItem("flowscale-gpu-availability", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const isGpuAvailable = (key: string) => gpuAvailability[key] !== false; // default true
+
+  const { data: gpuData } = useQuery<{ gpus: GpuInfo[]; cpu: CpuInfo }>({
+    queryKey: ["gpu-detect"],
+    queryFn: async () => {
+      const res = await fetch("/api/gpu");
+      if (!res.ok) return { gpus: [] };
+      return res.json();
+    },
+  });
+
+  const { data: gpuUtilization = [] } = useQuery<GpuUtilization[]>({
+    queryKey: ["gpu-utilization"],
+    queryFn: async () => {
+      const res = await fetch("/api/gpu/utilization");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchInterval: 5000,
+  });
+
+  const { data: comfyManage } = useQuery<ComfyManageResponse>({
+    queryKey: ["comfy-manage"],
+    queryFn: async () => {
+      const res = await fetch("/api/comfy/manage");
+      if (!res.ok)
+        return {
+          instances: [],
+          managedPath: null,
+          installType: null,
+          isSetup: false,
+        };
+      return res.json();
+    },
+  });
+
+  const detectedGpus = gpuData?.gpus ?? [];
+  const cpuInfo = gpuData?.cpu;
+
+  const detectGpusMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/gpu", { method: "POST" });
+      if (!res.ok) throw new Error("Detection failed");
+      const data = await res.json();
+      if (comfyManage?.isSetup) {
+        await fetch("/api/comfy/instances/detect", { method: "POST" });
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gpu-detect"] });
+      queryClient.invalidateQueries({ queryKey: ["comfy-manage"] });
+      queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
+    },
+  });
+
+  return (
+    <div className="px-10 pb-8">
+      <div className="max-w-3xl space-y-6">
+        {/* GPU Detection */}
+        <section>
+          <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="size-9 rounded-lg border border-white/10 bg-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+                  <Lightning size={18} className="text-zinc-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-zinc-200">
+                      Devices
+                    </span>
+                    {(detectedGpus.length > 0 || cpuInfo) && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 rounded-full border border-emerald-400/20">
+                        {detectedGpus.length + (cpuInfo ? 1 : 0)} devices
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-600 mt-0.5">
+                    Available hardware for local inference tools
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => detectGpusMutation.mutate()}
+                disabled={detectGpusMutation.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-[11px] font-medium rounded-lg transition-colors"
+                title="Detect available GPUs"
+              >
+                {detectGpusMutation.isPending ? (
+                  <CircleNotch size={11} className="animate-spin" />
+                ) : (
+                  <MagnifyingGlass size={11} />
+                )}
+                Detect GPUs
+              </button>
+            </div>
+            {(detectedGpus.length > 0 || cpuInfo) && (
+              <div className="mt-3 space-y-1.5">
+                {detectedGpus.map((gpu) => {
+                  const key = `${gpu.backend}:${gpu.index}`;
+                  const available = isGpuAvailable(key);
+                  const util = gpuUtilization.find(
+                    (u) => u.index === gpu.index,
+                  );
+                  const vramPct =
+                    util && util.vramTotalMB > 0
+                      ? Math.round((util.vramUsedMB / util.vramTotalMB) * 100)
+                      : 0;
+                  return (
+                    <div
+                      key={gpu.index}
+                      className={[
+                        "py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5 transition-opacity",
+                        available ? "" : "opacity-40",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <Lightning
+                            size={13}
+                            className="text-emerald-400/70"
+                          />
+                          <span className="text-xs font-medium text-zinc-300">
+                            {gpu.name}
+                          </span>
+                          <span className="text-[10px] font-mono text-zinc-600">
+                            {key}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] font-mono text-zinc-500">
+                            {gpu.vramMB >= 1024
+                              ? `${(gpu.vramMB / 1024).toFixed(1)} GB`
+                              : `${gpu.vramMB} MB`}
+                          </span>
+                          <span className="text-[10px] text-zinc-600">
+                            {available ? "Available" : "Disabled"}
+                          </span>
+                          <button
+                            onClick={() => toggleGpuAvailability(key)}
+                            className={[
+                              "relative inline-flex h-4 w-7 items-center rounded-full transition-colors shrink-0",
+                              available ? "bg-emerald-500" : "bg-zinc-700",
+                            ].join(" ")}
+                            title={
+                              available
+                                ? "Available for jobs — click to disable"
+                                : "Disabled for jobs — click to enable"
+                            }
+                          >
+                            <span
+                              className={[
+                                "inline-block size-3 rounded-full bg-white transition-transform",
+                                available
+                                  ? "translate-x-3.5"
+                                  : "translate-x-0.5",
+                              ].join(" ")}
+                            />
+                          </button>
+                        </div>
+                      </div>
+                      {util && (
+                        <div className="mt-1.5 flex items-center gap-2">
+                          <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${vramPct > 90 ? "bg-red-500/70" : vramPct > 70 ? "bg-amber-500/60" : "bg-emerald-500/60"}`}
+                              style={{ width: `${vramPct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-mono text-zinc-600">
+                            {(util.vramUsedMB / 1024).toFixed(1)}/
+                            {(util.vramTotalMB / 1024).toFixed(0)} GB
+                          </span>
+                          <span className="text-[10px] font-mono text-zinc-600">
+                            GPU {util.gpuUtil}%
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {cpuInfo && (
+                  <div
+                    className={[
+                      "flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5 transition-opacity",
+                      isGpuAvailable("cpu") ? "" : "opacity-40",
+                    ].join(" ")}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Cpu size={13} className="text-zinc-500" />
+                      <span className="text-xs font-medium text-zinc-300">
+                        {cpuInfo.model}
+                      </span>
+                      <span className="text-[10px] font-mono text-zinc-600">
+                        {cpuInfo.cores}C/{cpuInfo.threads}T
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-mono text-zinc-500">
+                        {cpuInfo.ramGB} GB RAM
+                      </span>
+                      <span className="text-[10px] text-zinc-600">
+                        {isGpuAvailable("cpu") ? "Available" : "Disabled"}
+                      </span>
+                      <button
+                        onClick={() => toggleGpuAvailability("cpu")}
+                        className={[
+                          "relative inline-flex h-4 w-7 items-center rounded-full transition-colors shrink-0",
+                          isGpuAvailable("cpu")
+                            ? "bg-emerald-500"
+                            : "bg-zinc-700",
+                        ].join(" ")}
+                        title={
+                          isGpuAvailable("cpu")
+                            ? "Available for jobs — click to disable"
+                            : "Disabled for jobs — click to enable"
+                        }
+                      >
+                        <span
+                          className={[
+                            "inline-block size-3 rounded-full bg-white transition-transform",
+                            isGpuAvailable("cpu")
+                              ? "translate-x-3.5"
+                              : "translate-x-0.5",
+                          ].join(" ")}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Modal.com */}
+        <ModalComputeCard />
+
+        {/* Modal cloud deployments (only when connected) */}
+        <ModalDeploymentsSection />
+
+        {/* Custom Cloud — CTA for bringing your own cloud */}
+        <section>
+          <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+            <div className="flex items-start gap-3">
+              <div className="size-9 rounded-lg border border-white/10 bg-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+                <Cloud size={18} className="text-zinc-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-zinc-200">
+                    Custom Cloud
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-600 mt-0.5">
+                  Want to run FlowScale AI OS on AWS, GCP, RunPod, Lambda Labs,
+                  or your own infrastructure instead of Modal? Reach out and
+                  we&rsquo;ll help you get set up.
+                </p>
+                <div className="flex items-center gap-2 mt-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openExternalUrl(
+                        "mailto:aman@flowscale.ai?subject=Custom%20cloud%20setup%20for%20FlowScale%20AI%20OS",
+                      )
+                    }
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px] font-medium rounded-lg transition-colors"
+                  >
+                    <ArrowSquareOut size={11} />
+                    aman@flowscale.ai
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openExternalUrl("https://discord.gg/XgPTrNM7Du")
+                    }
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#5865F2]/10 hover:bg-[#5865F2]/20 text-[#a5aeff] border border-[#5865F2]/30 text-[11px] font-medium rounded-lg transition-colors"
+                  >
+                    <ArrowSquareOut size={11} />
+                    Join Discord
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
   );
 }
 
@@ -1144,6 +1906,28 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
 
   const autoStartEnabled = comfySetup?.autoStartComfyUI ?? false;
 
+  // Track whether the user has toggled LAN sharing this session so we can
+  // surface a "restart required" hint — the bind address is set when the
+  // Next.js server is spawned, so the change only takes effect on relaunch.
+  const [lanShareDirty, setLanShareDirty] = useState(false);
+
+  const lanShareMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const res = await fetch("/api/settings/lan-share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lanShare: enabled }),
+      });
+      if (!res.ok) throw new Error("Failed to save setting");
+    },
+    onSuccess: () => {
+      setLanShareDirty(true);
+      queryClient.invalidateQueries({ queryKey: ["network"] });
+    },
+  });
+
+  const lanShareEnabled = network?.lanShare ?? false;
+
   const [copied, setCopied] = useState<string | null>(null);
 
   const openInBrowser = (url: string) => {
@@ -1212,6 +1996,46 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
               Network Access
             </h2>
           </div>
+
+          {/* LAN sharing toggle */}
+          <div className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg mb-2">
+            <div className="flex-1 min-w-0 pr-4">
+              <div className="text-sm text-zinc-300">Allow LAN access</div>
+              <p className="text-xs text-zinc-600 mt-0.5">
+                Bind the app server to all network interfaces so other devices
+                on your Wi-Fi can reach tools, apps, and canvases. Off by
+                default — exposes every AIOS API to the local network.
+              </p>
+            </div>
+            <button
+              onClick={() => lanShareMutation.mutate(!lanShareEnabled)}
+              disabled={lanShareMutation.isPending}
+              className={[
+                "relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 disabled:opacity-50",
+                lanShareEnabled ? "bg-emerald-500" : "bg-zinc-700",
+              ].join(" ")}
+              title={
+                lanShareEnabled ? "Disable LAN access" : "Enable LAN access"
+              }
+            >
+              <span
+                className={[
+                  "inline-block size-3.5 rounded-full bg-white transition-transform",
+                  lanShareEnabled ? "translate-x-[18px]" : "translate-x-1",
+                ].join(" ")}
+              />
+            </button>
+          </div>
+          {lanShareDirty && (
+            <div className="flex items-start gap-2 p-3 mb-2 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+              <Warning size={14} className="text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-300/90">
+                Restart FlowScale AI OS for this change to take effect. The bind
+                address is set when the app server starts.
+              </p>
+            </div>
+          )}
+
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg">
               <div className="flex-1 min-w-0">
@@ -1249,10 +2073,20 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
               return (
                 <div
                   key={ip}
-                  className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg"
+                  className={[
+                    "flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg",
+                    lanShareEnabled ? "" : "opacity-50",
+                  ].join(" ")}
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs text-zinc-500 mb-1">Network</div>
+                    <div className="text-xs text-zinc-500 mb-1 flex items-center gap-2">
+                      <span>Network</span>
+                      {!lanShareEnabled && (
+                        <span className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded">
+                          Disabled
+                        </span>
+                      )}
+                    </div>
                     <span className="text-sm font-mono-custom text-zinc-300">
                       {url}
                     </span>
@@ -1260,8 +2094,13 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
                   <div className="flex items-center gap-2 shrink-0 ml-4">
                     <button
                       onClick={() => copyUrl(url)}
-                      className="p-1.5 text-zinc-500 hover:text-white transition-colors"
-                      title="Copy URL"
+                      disabled={!lanShareEnabled}
+                      className="p-1.5 text-zinc-500 hover:text-white transition-colors disabled:hover:text-zinc-500 disabled:cursor-not-allowed"
+                      title={
+                        lanShareEnabled
+                          ? "Copy URL"
+                          : "Enable LAN access to use this link"
+                      }
                     >
                       {copied === url ? (
                         <Check size={14} className="text-emerald-400" />
@@ -1271,7 +2110,8 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
                     </button>
                     <button
                       onClick={() => openInBrowser(url)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
+                      disabled={!lanShareEnabled}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors disabled:opacity-60 disabled:hover:bg-zinc-800 disabled:cursor-not-allowed"
                     >
                       <ArrowSquareOut size={12} /> Open
                     </button>
@@ -1281,8 +2121,9 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
             })}
           </div>
           <p className="text-xs text-zinc-600 mt-2">
-            Use the network URL to open FlowScale AI OS from any device on the
-            same network.
+            {lanShareEnabled
+              ? "Use the network URL to open FlowScale AI OS from any device on the same network."
+              : "Enable LAN access above to share FlowScale AI OS with other devices on your network."}
           </p>
 
           {/* App Port */}

@@ -161,6 +161,23 @@ function findSystemNode(): string | null {
   }
 }
 
+/**
+ * Read the LAN-share opt-in flag from ~/.flowscale/aios/settings.json.
+ * Returns false (loopback-only bind) if the file or key is missing or
+ * unreadable. Kept self-contained here because the desktop package can't
+ * import from apps/web at runtime.
+ */
+function readLanShareSetting(): boolean {
+  try {
+    const settingsFile = path.join(app.getPath('home'), '.flowscale', 'aios', 'settings.json')
+    const raw = readFileSync(settingsFile, 'utf-8')
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return parsed['lanShare'] === true
+  } catch {
+    return false
+  }
+}
+
 function startNextServer(port: number): void {
   // In production: spawn the standalone Next.js server built into the app
   const serverScript = path.join(
@@ -181,17 +198,23 @@ function startNextServer(port: number): void {
   const useSystemNode = !!systemNode
 
   const nodeBin = systemNode ?? process.execPath
+  // LAN sharing is opt-in: when enabled in settings we bind to 0.0.0.0 so
+  // other devices on the same network can reach the server (e.g. via the
+  // shareable link generated from os.networkInterfaces()). Default is
+  // loopback-only — matches a normal local desktop app and keeps every
+  // AIOS API route off the network until the user explicitly turns it on.
+  const bindHost = readLanShareSetting() ? '0.0.0.0' : '127.0.0.1'
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     PORT: String(port),
-    HOSTNAME: '127.0.0.1',
+    HOSTNAME: bindHost,
   }
   if (!useSystemNode) {
     // Fallback: make the Electron binary behave as plain Node.js
     env.ELECTRON_RUN_AS_NODE = '1'
   }
 
-  log.info('[server] Starting Next.js standalone server:', serverScript, 'on port', port, '(node:', nodeBin, ')')
+  log.info('[server] Starting Next.js standalone server:', serverScript, 'on', `${bindHost}:${port}`, '(node:', nodeBin, ')')
 
   nextServer = spawn(nodeBin, [serverScript], { env, stdio: 'pipe' })
 
