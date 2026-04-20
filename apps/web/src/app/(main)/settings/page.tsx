@@ -1697,10 +1697,12 @@ const UPDATE_COMMAND =
 function UpdatesSection() {
   const { status, version, progress, error, setChecking } = useUpdateStore();
   const [isMac, setIsMac] = useState(false);
+  const [isWindows, setIsWindows] = useState(false);
   const [cmdCopied, setCmdCopied] = useState(false);
 
   useEffect(() => {
     setIsMac(window.desktop?.platform === "darwin");
+    setIsWindows(window.desktop?.platform === "win32");
   }, []);
 
   function handleCopyCommand() {
@@ -1710,6 +1712,11 @@ function UpdatesSection() {
   }
 
   async function handleCheck() {
+    // On Windows, open the download page instead of checking for updates
+    if (isWindows) {
+      openExternalUrl("https://flowscale.ai/download");
+      return;
+    }
     setChecking();
     await window.desktop?.updates?.check();
   }
@@ -1731,7 +1738,23 @@ function UpdatesSection() {
         </h2>
       </div>
       <div className="p-4 bg-zinc-900/50 border border-white/5 rounded-lg">
-        {status === "idle" && (
+        {/* Windows: Always show download page button */}
+        {isWindows && (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-zinc-400">
+              Visit the download page to get the latest version.
+            </span>
+            <button
+              onClick={handleCheck}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 rounded-md transition-colors"
+            >
+              <ArrowsClockwise size={13} /> Check for updates
+            </button>
+          </div>
+        )}
+
+        {/* macOS / Linux: Full update flow */}
+        {!isWindows && status === "idle" && (
           <div className="flex items-center justify-between">
             <span className="text-sm text-zinc-400">
               Check for the latest version.
@@ -1745,14 +1768,14 @@ function UpdatesSection() {
           </div>
         )}
 
-        {status === "checking" && (
+        {!isWindows && status === "checking" && (
           <div className="flex items-center gap-2 text-sm text-zinc-400">
             <ArrowsClockwise size={14} className="animate-spin" /> Checking for
             updates\u2026
           </div>
         )}
 
-        {status === "up-to-date" && (
+        {!isWindows && status === "up-to-date" && (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm text-emerald-400">
               <CheckCircle size={14} weight="fill" /> You&apos;re up to date.
@@ -1795,7 +1818,7 @@ function UpdatesSection() {
           </div>
         )}
 
-        {status === "available" && !isMac && (
+        {status === "available" && !isMac && !isWindows && (
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm text-zinc-200 font-medium">
@@ -1814,7 +1837,7 @@ function UpdatesSection() {
           </div>
         )}
 
-        {status === "downloading" && !isMac && (
+        {status === "downloading" && !isMac && !isWindows && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span className="text-zinc-400">
@@ -1833,7 +1856,7 @@ function UpdatesSection() {
           </div>
         )}
 
-        {status === "downloaded" && !isMac && (
+        {status === "downloaded" && !isMac && !isWindows && (
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm text-zinc-200 font-medium">
@@ -1852,7 +1875,7 @@ function UpdatesSection() {
           </div>
         )}
 
-        {status === "error" && (
+        {!isWindows && status === "error" && (
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm text-red-400">Update check failed</div>
