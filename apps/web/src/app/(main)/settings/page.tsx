@@ -1540,6 +1540,48 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   });
   const savedBaseDir = baseDirData?.baseDirectory;
 
+  // ── Extra ports to scan for external ComfyUI instances ─────────────────────
+  const [portInput, setPortInput] = useState("");
+  const { data: extraPortsData } = useQuery<{ ports: number[]; wellKnown: number[] }>({
+    queryKey: ["extra-comfy-ports"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings/extra-comfy-ports");
+      if (!res.ok) return { ports: [], wellKnown: [] };
+      return res.json();
+    },
+  });
+  const extraPorts = extraPortsData?.ports ?? [];
+  const wellKnownPorts = extraPortsData?.wellKnown ?? [];
+  const allScannedPorts = [...new Set([...wellKnownPorts, ...extraPorts])].sort((a, b) => a - b);
+  const saveExtraPortsMutation = useMutation({
+    mutationFn: async (ports: number[]) => {
+      const res = await fetch("/api/settings/extra-comfy-ports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ports }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to save ports");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["extra-comfy-ports"] });
+      queryClient.invalidateQueries({ queryKey: ["comfy-scan"] });
+    },
+    onError: (err: Error) => { showError(err.message); },
+  });
+  const addPort = (): void => {
+    const p = Number(portInput.trim());
+    if (!Number.isInteger(p) || p < 1024 || p > 65535) {
+      showError("Port must be an integer between 1024 and 65535");
+      return;
+    }
+    if (extraPorts.includes(p)) { setPortInput(""); return; }
+    saveExtraPortsMutation.mutate([...extraPorts, p]);
+    setPortInput("");
+  };
+
   // ── Spawn-log viewer ────────────────────────────────────────────────────────
   const [logInstanceId, setLogInstanceId] = useState<string | null>(null);
   const { data: logData } = useQuery<{ log: string | null }>({
@@ -1878,6 +1920,67 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
               instance shares data with your other ComfyUI. Leave blank to use
               the installation path above.
             </p>
+          </div>
+
+          {/* Extra ports to scan for external ComfyUI instances */}
+          <div className="border-t border-white/5 pt-4 mt-4">
+            <label className="block text-xs font-medium text-zinc-500 mb-1.5">
+              Additional ports to scan{" "}
+              <span className="text-zinc-600 font-normal">(optional)</span>
+            </label>
+            {extraPorts.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {extraPorts.map((p) => (
+                  <span
+                    key={p}
+                    className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-mono-custom bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded"
+                  >
+                    :{p}
+                    <button
+                      onClick={() =>
+                        saveExtraPortsMutation.mutate(extraPorts.filter((x) => x !== p))
+                      }
+                      disabled={saveExtraPortsMutation.isPending}
+                      className="text-emerald-400/60 hover:text-emerald-200 transition-colors"
+                      title={`Remove port ${p}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="number"
+                min={1024}
+                max={65535}
+                value={portInput}
+                onChange={(e) => setPortInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addPort(); }}
+                placeholder="e.g. 9000"
+                className="flex-1 px-3 py-2 text-xs font-mono-custom bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+              />
+              <button
+                disabled={!portInput.trim() || saveExtraPortsMutation.isPending}
+                onClick={addPort}
+                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Add
+              </button>
+            </div>
+            <p className="text-[11px] text-zinc-600 mt-1.5">
+              Add ports where you run ComfyUI outside the default range.
+              Scanned on top of well-known ports for auto-discovery.
+            </p>
+            {allScannedPorts.length > 0 && (
+              <div className="mt-2 text-[11px] text-zinc-500">
+                Currently scanning:{" "}
+                <span className="font-mono-custom text-zinc-400">
+                  {allScannedPorts.join(", ")}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 

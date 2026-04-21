@@ -6,7 +6,7 @@ import { createConnection } from 'net'
  * checked by the spawn guardrail to prevent device collisions.
  * Keep this as the single source of truth — add new well-known ports here.
  */
-export const WELL_KNOWN_COMFY_PORTS = [8000, 8188, 8189] as const
+export const WELL_KNOWN_COMFY_PORTS = [8000, 8188, 8189, 8190] as const
 
 export interface ComfyInstance {
   port: number
