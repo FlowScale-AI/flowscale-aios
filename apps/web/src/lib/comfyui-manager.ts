@@ -65,7 +65,7 @@ function isProcessAlive(pid: number): boolean {
 }
 
 /** Returns the best Python executable for the given ComfyUI installation. */
-function findPythonExec(comfyPath: string): string {
+export function findPythonExec(comfyPath: string): string {
   // Explicit user override always wins.
   const override = getComfyPythonPath()
   if (override && existsSync(override)) return override

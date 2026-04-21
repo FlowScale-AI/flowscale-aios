@@ -3,7 +3,9 @@
  * Detects available GPUs (NVIDIA via nvidia-smi, AMD via rocm-smi + lspci).
  */
 
-import { execSync } from 'child_process'
+import { execSync, execFileSync } from 'child_process'
+import { getComfyUIPath } from './providerSettings'
+import { findPythonExec } from './comfyui-manager'
 
 export interface GpuInfo {
   index: number
@@ -152,18 +154,71 @@ function detectAmdGpusWindows(): GpuInfo[] {
 }
 
 /**
+ * Authoritative GPU detection via ComfyUI's bundled PyTorch. Whatever this returns
+ * is exactly what ComfyUI will see — including the indices HIP_VISIBLE_DEVICES and
+ * CUDA_VISIBLE_DEVICES select against.
+ *
+ * Preferred over registry/nvidia-smi/rocm-smi because it resolves the Windows
+ * iGPU-vs-discrete enumeration mismatch: HIP on Windows skips iGPUs, so Windows
+ * adapter index 1 can end up as HIP index 0. Asking torch directly avoids that.
+ */
+function detectGpusViaTorch(): GpuInfo[] | null {
+  const comfyPath = getComfyUIPath()
+  if (!comfyPath) return null
+  let python: string
+  try { python = findPythonExec(comfyPath) } catch { return null }
+
+  // Emit TSV on stdout: "cuda|rocm\tindex\tname\tvramMB" per device.
+  const script = [
+    'import sys, json',
+    'try:',
+    '    import torch',
+    '    n = torch.cuda.device_count()',
+    '    backend = "rocm" if getattr(torch.version, "hip", None) else "cuda"',
+    '    rows = []',
+    '    for i in range(n):',
+    '        p = torch.cuda.get_device_properties(i)',
+    '        rows.append([backend, i, p.name, int(p.total_memory // (1024*1024))])',
+    '    print(json.dumps(rows))',
+    'except Exception as e:',
+    '    print("ERR:" + str(e), file=sys.stderr); sys.exit(1)',
+  ].join('\n')
+
+  try {
+    // Pass the script via stdin — avoids cmd.exe quote/newline issues for multi-line scripts.
+    const raw = execFileSync(python, ['-'], {
+      input: script,
+      encoding: 'utf-8',
+      timeout: 15_000,
+    }).trim()
+    if (!raw) return null
+    const rows = JSON.parse(raw) as Array<[string, number, string, number]>
+    return rows.map(([backend, index, name, vramMB]) => ({
+      index,
+      name,
+      vramMB,
+      backend: backend === 'rocm' ? 'rocm' : 'cuda',
+    }))
+  } catch {
+    return null
+  }
+}
+
+/**
  * Returns all detected GPUs on the system.
  * Result is cached for the lifetime of the Node process.
  */
 export function detectGpus(): GpuInfo[] {
   if (cachedGpus !== null) return cachedGpus
 
-  // Try NVIDIA first, then ROCm
-  let gpus = detectNvidiaGpus()
-  if (gpus.length === 0) {
-    gpus = detectRocmGpus()
-  }
-  // Windows AMD fallback — rocm-smi/lspci don't exist there
+  // Prefer torch — authoritative and correctly indexed for ComfyUI (HIP and
+  // CUDA both expose devices in the same order torch sees them).
+  let gpus = detectGpusViaTorch() ?? []
+
+  // Fall back to tool-based detection when ComfyUI's Python isn't available
+  // (e.g. first-time install before ComfyUI is configured).
+  if (gpus.length === 0) gpus = detectNvidiaGpus()
+  if (gpus.length === 0) gpus = detectRocmGpus()
   if (gpus.length === 0 && process.platform === 'win32') {
     gpus = detectAmdGpusWindows()
   }
