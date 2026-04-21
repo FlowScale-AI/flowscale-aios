@@ -182,6 +182,15 @@ function walkAndFlatten(dir, totals = { nmDirs: 0, written: 0 }) {
   return totals
 }
 
+// Only Windows needs this — it's a workaround for MAX_PATH (260 chars) which
+// breaks the NSIS installer/uninstaller on paths inside pnpm's virtual store.
+// Linux/macOS have no such limit, so preserving pnpm's space-efficient symlink
+// layout produces smaller packages and faster builds.
+if (process.platform !== 'win32') {
+  console.log('[flatten-standalone] Skipping on non-Windows platform')
+  process.exit(0)
+}
+
 if (!fs.existsSync(STANDALONE)) {
   console.error(`[flatten-standalone] ${STANDALONE} does not exist — run \`next build\` first`)
   process.exit(1)
