@@ -7,13 +7,18 @@
  */
 
 import { spawn, execSync, type ChildProcess } from 'child_process'
-import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, readdirSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, readdirSync, createWriteStream, statSync } from 'fs'
 import { createConnection, createServer } from 'net'
 import path from 'path'
 import os from 'os'
-import { getComfyManagedPath, getComfyInstances, getComfyInstanceById } from './providerSettings'
+import { getComfyManagedPath, getComfyInstances, getComfyInstanceById, getComfyPythonPath, getComfyBaseDirectory } from './providerSettings'
+import { WELL_KNOWN_COMFY_PORTS } from './comfy-probe'
 
 const AIOS_DIR = path.join(os.homedir(), '.flowscale', 'aios')
+
+function logFile(instanceId: string): string {
+  return path.join(AIOS_DIR, `comfyui-${instanceId}.log`)
+}
 
 function pidFile(instanceId: string): string {
   return path.join(AIOS_DIR, `comfyui-${instanceId}.pid`)
@@ -60,16 +65,23 @@ function isProcessAlive(pid: number): boolean {
 }
 
 /** Returns the best Python executable for the given ComfyUI installation. */
-function findPythonExec(comfyPath: string): string {
+export function findPythonExec(comfyPath: string): string {
+  // Explicit user override always wins.
+  const override = getComfyPythonPath()
+  if (override && existsSync(override)) return override
+
   const isWin = process.platform === 'win32'
 
   const candidates = isWin
     ? [
         path.join(comfyPath, 'venv', 'Scripts', 'python.exe'),
+        path.join(comfyPath, '.venv', 'Scripts', 'python.exe'),
       ]
     : [
         path.join(comfyPath, 'venv', 'bin', 'python3'),
         path.join(comfyPath, 'venv', 'bin', 'python'),
+        path.join(comfyPath, '.venv', 'bin', 'python3'),
+        path.join(comfyPath, '.venv', 'bin', 'python'),
         // macOS Desktop App bundles Python in the .app Resources sibling dirs:
         path.join(comfyPath, '..', 'python_embeds', 'bin', 'python3'),
         path.join(comfyPath, '..', 'venv', 'bin', 'python3'),
@@ -214,6 +226,52 @@ function findExternalComfyOnDevice(device: string): number | null {
 }
 
 /**
+ * Cross-platform device-conflict check. Queries /system_stats on each external
+ * ComfyUI (well-known ports + configured managed ports other than ourselves)
+ * and returns a matching port if its `devices[]` overlaps with `device`.
+ *
+ * PyTorch-ROCm presents AMD GPUs as `type: "cuda"` in /system_stats, so a
+ * managed `rocm:N` instance conflicts with an external `cuda:N` entry.
+ */
+async function findExternalComfyOnDeviceViaApi(
+  device: string,
+  ownInstanceId: string,
+): Promise<number | null> {
+  const ownPorts = new Set(
+    getComfyInstances().filter((i) => i.id !== ownInstanceId).map((i) => i.port),
+  )
+  const ports = Array.from(new Set<number>([...WELL_KNOWN_COMFY_PORTS, ...ownPorts]))
+
+  const wantIndex = device === 'cpu' ? null : parseInt(device.split(':')[1] ?? '', 10)
+
+  for (const port of ports) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/system_stats`, {
+        signal: AbortSignal.timeout(1500),
+      })
+      if (!res.ok) continue
+      const stats = (await res.json()) as {
+        devices?: Array<{ type?: string; index?: number }>
+      }
+      const devices = stats.devices ?? []
+      if (device === 'cpu') {
+        // CPU instance: conflict only if external has *only* CPU devices
+        if (devices.length > 0 && devices.every((d) => d.type === 'cpu')) return port
+      } else {
+        // GPU instance: conflict on matching index with a non-CPU device.
+        // `type: "cuda"` covers both NVIDIA CUDA and AMD ROCm in PyTorch.
+        if (Number.isFinite(wantIndex) && devices.some((d) => d.type !== 'cpu' && d.index === wantIndex)) {
+          return port
+        }
+      }
+    } catch {
+      // port not open / not ComfyUI / timeout — skip
+    }
+  }
+  return null
+}
+
+/**
  * Starts a specific ComfyUI instance. Returns immediately after spawning.
  * Throws if configuration is missing, binary can't be found, or port is already in use.
  */
@@ -221,12 +279,22 @@ export async function startInstance(instanceId: string): Promise<{ port: number;
   const config = getComfyInstanceById(instanceId)
   if (!config) throw new Error(`Unknown ComfyUI instance: ${instanceId}`)
 
-  // Guard: don't start if an external ComfyUI is already using this device
+  // Guard: Linux /proc scan — catches processes directly (works even if HTTP is slow)
   const externalPid = findExternalComfyOnDevice(config.device)
   if (externalPid) {
     throw new Error(
       `Another ComfyUI instance (PID ${externalPid}) is already running on ${config.label}. ` +
       `Stop the external instance first, then try again.`,
+    )
+  }
+
+  // Guard: cross-platform check — probe /system_stats on external ComfyUIs
+  // to see if they already claim this device. Works on Windows/macOS/Linux.
+  const externalPort = await findExternalComfyOnDeviceViaApi(config.device, instanceId)
+  if (externalPort) {
+    throw new Error(
+      `Another ComfyUI is already running on ${config.label} (detected on port ${externalPort}). ` +
+      `Stop it first, then try again.`,
     )
   }
 
@@ -247,16 +315,69 @@ export async function startInstance(instanceId: string): Promise<{ port: number;
   const python = findPythonExec(comfyPath)
   const env = buildDeviceEnv(config.device)
 
-  const child = spawn(
-    python,
-    [mainPy, '--port', String(config.port), '--listen', '127.0.0.1', ...(config.device === 'cpu' ? ['--cpu'] : [])],
-    {
+  // ComfyUI Desktop ships its frontend as a bundled web dir instead of the
+  // pip `comfyui-frontend-package`. When that layout is detected, point
+  // main.py at the bundled frontend so it doesn't crash on startup.
+  const desktopFrontEnd = path.join(comfyPath, 'web_custom_versions', 'desktop_app')
+  const frontEndArgs = existsSync(desktopFrontEnd) ? ['--front-end-root', desktopFrontEnd] : []
+
+  // User-configured data directory — passed as --base-directory so the managed
+  // instance shares models/input/output/user with an external ComfyUI workspace.
+  const baseDir = getComfyBaseDirectory()
+  const baseDirArgs = baseDir && existsSync(baseDir) ? ['--base-directory', baseDir] : []
+
+  const args = [
+    mainPy,
+    '--port', String(config.port),
+    '--listen', '127.0.0.1',
+    ...frontEndArgs,
+    ...baseDirArgs,
+    ...(config.device === 'cpu' ? ['--cpu'] : []),
+  ]
+
+  // Truncate the per-instance log on each start and write a banner so we can
+  // distinguish runs. Keeps only the latest boot — rotation isn't needed for
+  // debugging "why did this just die" cases.
+  mkdirSync(AIOS_DIR, { recursive: true })
+  const logStream = createWriteStream(logFile(instanceId), { flags: 'w' })
+  // Cap on-disk log size. The API tails the last 16 KB, so losing the middle
+  // of a long-running log is acceptable. Prevents unbounded growth from a
+  // verbose model spamming stdout.
+  const LOG_CAP_BYTES = 10 * 1024 * 1024 // 10 MB
+  let logBytesWritten = 0
+  let logCapReached = false
+  const writeLog = (chunk: string | Buffer) => {
+    if (logCapReached) return
+    const size = typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+    if (logBytesWritten + size > LOG_CAP_BYTES) {
+      logCapReached = true
+      logStream.write('\n[log cap reached — further output suppressed]\n')
+      return
+    }
+    logBytesWritten += size
+    logStream.write(chunk)
+  }
+  writeLog(
+    `[${new Date().toISOString()}] spawn: ${python} ${args.map((a) => (a.includes(' ') ? `"${a}"` : a)).join(' ')}\n` +
+    `[cwd] ${comfyPath}\n` +
+    `[device] ${config.device}\n\n`,
+  )
+
+  // Any failure between stream creation and handler wiring must not leak the
+  // open file descriptor — close it and rethrow.
+  let child: ChildProcess
+  try {
+    child = spawn(python, args, {
       cwd: comfyPath,
       detached: false,
       stdio: 'pipe',
       env,
-    },
-  )
+    })
+  } catch (err) {
+    logStream.write(`\n[${new Date().toISOString()}] spawn threw: ${err instanceof Error ? err.message : String(err)}\n`)
+    logStream.end()
+    throw err
+  }
 
   comfyProcesses.set(instanceId, child)
 
@@ -264,23 +385,46 @@ export async function startInstance(instanceId: string): Promise<{ port: number;
     writePid(instanceId, child.pid)
   }
 
-  child.stdout?.on('data', () => { /* consumed to avoid back-pressure */ })
-  child.stderr?.on('data', () => { /* consumed to avoid back-pressure */ })
+  child.stdout?.on('data', (buf: Buffer) => { writeLog(buf) })
+  child.stderr?.on('data', (buf: Buffer) => { writeLog(buf) })
 
   child.on('error', (err) => {
     console.error(`ComfyUI instance ${instanceId} spawn error:`, err)
+    writeLog(`\n[${new Date().toISOString()}] spawn error: ${err.message}\n`)
     comfyProcesses.delete(instanceId)
     removePid(instanceId)
   })
 
-  child.on('exit', () => {
+  child.on('exit', (code, signal) => {
+    writeLog(`\n[${new Date().toISOString()}] exit code=${code ?? 'null'} signal=${signal ?? 'null'}\n`)
+    logStream.end()
     comfyProcesses.delete(instanceId)
     removePid(instanceId)
   })
 
-  if (!child.pid) throw new Error(`Failed to spawn ComfyUI instance ${instanceId}`)
+  if (!child.pid) {
+    logStream.end()
+    throw new Error(`Failed to spawn ComfyUI instance ${instanceId}`)
+  }
 
   return { port: config.port, pid: child.pid }
+}
+
+/**
+ * Returns the last N bytes of a managed instance's log file, or null if the
+ * log doesn't exist yet. Used by the UI to surface crash causes.
+ */
+export function getInstanceLogTail(instanceId: string, bytes = 16_384): string | null {
+  const file = logFile(instanceId)
+  if (!existsSync(file)) return null
+  try {
+    const size = statSync(file).size
+    const start = Math.max(0, size - bytes)
+    const buf = readFileSync(file)
+    return buf.slice(start).toString('utf-8')
+  } catch {
+    return null
+  }
 }
 
 /** Sends SIGTERM to a managed ComfyUI instance (SIGKILL after 5 s). */

@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 /**
- * Rebuilds native Node.js addons (e.g. better-sqlite3) inside the Next.js
- * standalone output so they match Electron's Node.js ABI.
+ * Replaces native .node binaries in the Next.js standalone output with versions
+ * compiled against Electron's Node ABI — not the system Node ABI.
  *
- * The standalone build only includes pre-built .node binaries (no source/gyp
- * files), so we rebuild from the root node_modules (where sources exist) and
- * copy the resulting binary into the standalone output.
+ * On Windows the packaged server spawns under ELECTRON_RUN_AS_NODE (since
+ * findSystemNode() can't locate node reliably), so .node files prebuilt for
+ * system Node v22 (ABI 127) fail to load in Electron's newer Node (ABI 140).
+ *
+ * Uses prebuild-install to download the electron-variant prebuilt binary for
+ * each native module found in the standalone tree. Faster and toolchain-free
+ * versus compiling from source.
  */
+
 const { execSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
@@ -16,74 +21,70 @@ const STANDALONE_DIR = path.resolve(__dirname, '../../web/.next/standalone')
 
 if (!fs.existsSync(STANDALONE_DIR)) {
   console.error('[rebuild-standalone] Standalone build not found at', STANDALONE_DIR)
-  console.error('[rebuild-standalone] Run "pnpm build" first.')
   process.exit(1)
 }
 
-const electronPkg = require('electron/package.json')
-const electronVersion = electronPkg.version
-console.log(`[rebuild-standalone] Rebuilding native modules for Electron ${electronVersion}...`)
+const electronVersion = require('electron/package.json').version
+console.log(`[rebuild-standalone] Target: Electron ${electronVersion}`)
 
-// Find native .node files in the standalone output and rebuild their sources
-const nativeFiles = execSync(
-  `find "${STANDALONE_DIR}" -name "*.node" -type f`,
-  { encoding: 'utf-8' }
-).trim()
-
-if (!nativeFiles) {
-  console.log('[rebuild-standalone] No native modules found — nothing to rebuild.')
-  process.exit(0)
+// Locate prebuild-install binary in the monorepo's pnpm store
+function findPrebuildInstall() {
+  const candidates = [
+    path.join(ROOT_DIR, 'node_modules', 'prebuild-install', 'bin.js'),
+  ]
+  const pnpmDir = path.join(ROOT_DIR, 'node_modules', '.pnpm')
+  if (fs.existsSync(pnpmDir)) {
+    for (const entry of fs.readdirSync(pnpmDir)) {
+      if (entry.startsWith('prebuild-install@')) {
+        candidates.push(path.join(pnpmDir, entry, 'node_modules', 'prebuild-install', 'bin.js'))
+      }
+    }
+  }
+  for (const c of candidates) if (fs.existsSync(c)) return c
+  return null
 }
 
-for (const nativeFile of nativeFiles.split('\n')) {
-  // Extract module name and version from the pnpm path
-  // e.g. .../node_modules/.pnpm/better-sqlite3@12.6.2/node_modules/better-sqlite3/build/Release/better_sqlite3.node
-  const pnpmMatch = nativeFile.match(/\.pnpm\/([^@]+)@([^/]+)\//)
-  if (!pnpmMatch) {
-    console.warn(`[rebuild-standalone] Skipping non-pnpm native module: ${nativeFile}`)
-    continue
-  }
-
-  const [, moduleName, moduleVersion] = pnpmMatch
-  const binaryName = path.basename(nativeFile)
-
-  // Find matching source in root node_modules
-  const sourceDir = path.join(
-    ROOT_DIR, 'node_modules', '.pnpm',
-    `${moduleName}@${moduleVersion}`, 'node_modules', moduleName
-  )
-
-  if (!fs.existsSync(path.join(sourceDir, 'binding.gyp'))) {
-    console.warn(`[rebuild-standalone] No source for ${moduleName}@${moduleVersion} — skipping.`)
-    continue
-  }
-
-  console.log(`[rebuild-standalone] Rebuilding ${moduleName}@${moduleVersion} for Electron ${electronVersion}...`)
-
-  // Rebuild using node-gyp with Electron headers
-  execSync(
-    [
-      'npx', 'node-gyp', 'rebuild',
-      `--target=${electronVersion}`,
-      `--arch=${process.arch}`,
-      '--dist-url=https://electronjs.org/headers',
-    ].join(' '),
-    { stdio: 'inherit', cwd: sourceDir }
-  )
-
-  // Copy rebuilt binary into standalone output
-  const builtBinary = path.join(sourceDir, 'build', 'Release', binaryName)
-  if (!fs.existsSync(builtBinary)) {
-    console.error(`[rebuild-standalone] Rebuilt binary not found: ${builtBinary}`)
-    process.exit(1)
-  }
-
-  console.log(`[rebuild-standalone] Copying rebuilt binary to standalone...`)
-  fs.copyFileSync(builtBinary, nativeFile)
-
-  // Restore the module for system Node.js so dev workflow isn't broken
-  console.log(`[rebuild-standalone] Restoring ${moduleName} for system Node.js...`)
-  execSync('npx node-gyp rebuild', { stdio: 'inherit', cwd: sourceDir })
+const prebuildBin = findPrebuildInstall()
+if (!prebuildBin) {
+  console.error('[rebuild-standalone] prebuild-install not found in node_modules — cannot continue.')
+  process.exit(1)
 }
 
-console.log('[rebuild-standalone] Done.')
+// Walk standalone tree for any package containing a build/Release/*.node file
+function findNativePackages(dir, out = new Set()) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const sub = path.join(dir, entry.name)
+    const releaseDir = path.join(sub, 'build', 'Release')
+    if (fs.existsSync(releaseDir)) {
+      const hasNode = fs.readdirSync(releaseDir).some((f) => f.endsWith('.node'))
+      if (hasNode && fs.existsSync(path.join(sub, 'package.json'))) {
+        out.add(sub)
+        continue
+      }
+    }
+    findNativePackages(sub, out)
+  }
+  return out
+}
+
+const packages = findNativePackages(STANDALONE_DIR)
+console.log(`[rebuild-standalone] Found ${packages.size} native package director${packages.size === 1 ? 'y' : 'ies'}`)
+
+let rebuilt = 0
+for (const pkgDir of packages) {
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf-8'))
+  const relPath = path.relative(STANDALONE_DIR, pkgDir)
+  console.log(`[rebuild-standalone] ${pkgJson.name}@${pkgJson.version}  (${relPath})`)
+  try {
+    execSync(
+      `node "${prebuildBin}" --runtime electron --target ${electronVersion}`,
+      { cwd: pkgDir, stdio: 'inherit' }
+    )
+    rebuilt++
+  } catch (err) {
+    console.warn(`[rebuild-standalone] prebuild-install failed for ${pkgJson.name}: ${err.message}`)
+  }
+}
+
+console.log(`[rebuild-standalone] Done — ${rebuilt}/${packages.size} rebuilt for Electron ${electronVersion}`)

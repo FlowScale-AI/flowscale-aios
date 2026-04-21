@@ -968,6 +968,14 @@ export default function ToolPage() {
       return res.json()
     },
   })
+  const { data: comfyScanData } = useQuery<Array<{ port: number; instanceId?: string; device?: string; label?: string }>>({
+    queryKey: ['comfy-scan'],
+    queryFn: async () => {
+      const res = await fetch('/api/comfy/scan')
+      return res.ok ? res.json() : []
+    },
+    refetchInterval: 10_000,
+  })
   const { data: gpuHardwareData } = useQuery<{ gpus: Array<{ index: number; name: string; vramMB: number; backend: string }> }>({
     queryKey: ['gpu-info'],
     queryFn: async () => {
@@ -977,7 +985,18 @@ export default function ToolPage() {
     },
     staleTime: 60_000,
   })
-  const comfyInstances = comfyManageData?.instances ?? []
+  const managedInstances = comfyManageData?.instances ?? []
+  const managedPorts = new Set(managedInstances.map((i) => i.port))
+  const externalInstances = (comfyScanData ?? [])
+    .filter((inst) => !managedPorts.has(inst.port))
+    .map((inst) => ({
+      id: inst.instanceId ?? `external-${inst.port}`,
+      status: 'running',
+      port: inst.port,
+      device: inst.device ?? 'auto',
+      label: inst.label ?? `ComfyUI :${inst.port}`,
+    }))
+  const comfyInstances = [...managedInstances, ...externalInstances]
   const runningInstances = comfyInstances.filter((i) => i.status === 'running')
   const { data: modalStatus } = useModalStatus()
   const { data: modalComfyData } = useModalComfyInstances()

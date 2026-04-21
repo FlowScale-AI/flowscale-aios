@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, nativeImage, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell } from 'electron'
 import path from 'path'
 import { spawn, type ChildProcess } from 'child_process'
 import { writeFileSync, copyFileSync, mkdirSync, existsSync, readFileSync, unlinkSync, readdirSync } from 'fs'
@@ -300,6 +300,11 @@ app.whenReady().then(async () => {
   registerUpdaterIpc()
   registerReportIpc()
 
+  ipcMain.handle('app:relaunch', () => {
+    app.relaunch()
+    app.quit()
+  })
+
   // macOS: register protocol after ready
   if (process.platform === 'darwin') {
     app.setAsDefaultProtocolClient('flowscaleaios')
@@ -417,15 +422,27 @@ function killInferenceServer(): void {
   } catch { /* nothing on port */ }
 }
 
+function killNextServerTree(): void {
+  if (!nextServer) return
+  const pid = nextServer.pid
+  nextServer = null
+  if (pid && process.platform === 'win32') {
+    try { execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' }) } catch { /* already gone */ }
+  } else if (pid) {
+    try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ }
+  }
+}
+
 app.on('before-quit', async (event) => {
   if (isQuitting) {
     // Second pass — actually quit, clean up the Next.js server
-    if (nextServer) {
-      nextServer.kill()
-      nextServer = null
-    }
+    killNextServerTree()
     return
   }
+
+  // Claim the quit immediately so the nextServer exit handler won't restart it
+  // while we're tearing down.
+  isQuitting = true
 
   // Always kill the AIOS-managed ComfyUI instance on quit
   killManagedComfyUI()
@@ -443,7 +460,8 @@ app.on('before-quit', async (event) => {
     })
 
     if (response === 2) {
-      // Cancel — don't quit
+      // Cancel — un-claim the quit so a future before-quit runs normally
+      isQuitting = false
       return
     }
 
@@ -453,13 +471,9 @@ app.on('before-quit', async (event) => {
     }
     // response 1 = Keep Running & Quit — leave it running
 
-    isQuitting = true
+    killNextServerTree()
     app.quit()
   } else {
-    // No inference server — clean up and quit normally
-    if (nextServer) {
-      nextServer.kill()
-      nextServer = null
-    }
+    killNextServerTree()
   }
 })
