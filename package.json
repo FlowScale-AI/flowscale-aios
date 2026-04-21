@@ -9,9 +9,9 @@
     "lint": "turbo lint",
     "test": "turbo test",
     "test:coverage": "turbo test:coverage",
-    "release:linux": "turbo build --force && pnpm --filter @flowscale/aios-desktop exec electron-builder --config electron-builder.yml --linux --publish never",
-    "release:mac": "turbo build --force && pnpm --filter @flowscale/aios-desktop exec electron-builder --config electron-builder.yml --mac --publish never",
-    "release:win": "turbo build --force && pnpm --filter @flowscale/aios-desktop exec electron-builder --config electron-builder.yml --win --publish never"
+    "release:linux": "turbo build --force && pnpm --filter @flowscale/aios-desktop exec node scripts/rebuild-standalone-native.js && pnpm --filter @flowscale/aios-desktop exec electron-builder --config electron-builder.yml --linux --publish never",
+    "release:mac": "turbo build --force && pnpm --filter @flowscale/aios-desktop exec node scripts/rebuild-standalone-native.js && pnpm --filter @flowscale/aios-desktop exec electron-builder --config electron-builder.yml --mac --publish never",
+    "release:win": "turbo build --force && pnpm --filter @flowscale/aios-desktop exec node scripts/rebuild-standalone-native.js && pnpm --filter @flowscale/aios-desktop exec electron-builder --config electron-builder.yml --win --publish never"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.0.18",

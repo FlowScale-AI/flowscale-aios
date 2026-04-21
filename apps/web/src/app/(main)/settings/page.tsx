@@ -1272,7 +1272,7 @@ function ProviderCard({ provider }: { provider: ProviderStatus }) {
                   ? "Connected"
                   : "Failed"}
           </button>
-          <span className="text-zinc-800">\u00B7</span>
+          <span className="text-zinc-800">·</span>
           <button
             onClick={() => removeMutation.mutate()}
             disabled={removeMutation.isPending}
@@ -1308,7 +1308,7 @@ function ProvidersTab() {
           {isLoading ? (
             <div className="flex items-center gap-2 py-8 text-zinc-600 justify-center">
               <CircleNotch size={16} className="animate-spin" />
-              <span className="text-sm">Loading\u2026</span>
+              <span className="text-sm">Loading…</span>
             </div>
           ) : (
             <div className="flex flex-col gap-3">
@@ -2009,7 +2009,7 @@ function UpdatesSection() {
         {status === "checking" && (
           <div className="flex items-center gap-2 text-sm text-zinc-400">
             <ArrowsClockwise size={14} className="animate-spin" /> Checking for
-            updates\u2026
+            updates…
           </div>
         )}
 
@@ -2031,7 +2031,7 @@ function UpdatesSection() {
           <div className="space-y-3">
             <div>
               <div className="text-sm text-zinc-200 font-medium">
-                Update available \u2014 v{version}
+                Update available — v{version}
               </div>
               <div className="text-xs text-zinc-500 mt-0.5">
                 Run this command in Terminal to update.
@@ -2060,7 +2060,7 @@ function UpdatesSection() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm text-zinc-200 font-medium">
-                Update available \u2014 v{version}
+                Update available — v{version}
               </div>
               <div className="text-xs text-zinc-500 mt-0.5">
                 Download and install when ready.
@@ -2079,7 +2079,7 @@ function UpdatesSection() {
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span className="text-zinc-400">
-                Downloading v{version}\u2026
+                Downloading v{version}…
               </span>
               <span className="text-zinc-500 font-mono-custom text-xs">
                 {progress}%
@@ -2146,31 +2146,6 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
     },
   });
 
-  const { data: comfySetup } = useQuery<{ autoStartComfyUI: boolean }>({
-    queryKey: ["comfyui-setup"],
-    queryFn: async () => {
-      const res = await fetch("/api/settings/comfyui-setup");
-      if (!res.ok) return { autoStartComfyUI: false };
-      return res.json();
-    },
-  });
-
-  const autoStartMutation = useMutation({
-    mutationFn: async (enabled: boolean) => {
-      const res = await fetch("/api/settings/comfyui-setup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ autoStartComfyUI: enabled }),
-      });
-      if (!res.ok) throw new Error("Failed to save setting");
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["comfyui-setup"] });
-    },
-  });
-
-  const autoStartEnabled = comfySetup?.autoStartComfyUI ?? false;
-
   // Track whether the user has toggled LAN sharing this session so we can
   // surface a "restart required" hint — the bind address is set when the
   // Next.js server is spawned, so the change only takes effect on relaunch.
@@ -2215,44 +2190,6 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
         {/* Updates */}
         {isDesktop && <UpdatesSection />}
 
-        {/* Auto-start ComfyUI */}
-        <section>
-          <div className="flex items-center gap-2 mb-4">
-            <GearSix size={16} className="text-zinc-400" />
-            <h2 className="font-tech text-sm font-semibold text-zinc-200">
-              Startup
-            </h2>
-          </div>
-          <div className="flex items-center justify-between p-4 bg-zinc-900/50 border border-white/5 rounded-lg">
-            <div>
-              <div className="text-sm text-zinc-300">
-                Auto-start ComfyUI on launch
-              </div>
-              <p className="text-xs text-zinc-600 mt-0.5">
-                Automatically start all ComfyUI instances when the app launches
-              </p>
-            </div>
-            <button
-              onClick={() => autoStartMutation.mutate(!autoStartEnabled)}
-              disabled={autoStartMutation.isPending}
-              className={[
-                "relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 disabled:opacity-50",
-                autoStartEnabled ? "bg-emerald-500" : "bg-zinc-700",
-              ].join(" ")}
-              title={
-                autoStartEnabled ? "Disable auto-start" : "Enable auto-start"
-              }
-            >
-              <span
-                className={[
-                  "inline-block size-3.5 rounded-full bg-white transition-transform",
-                  autoStartEnabled ? "translate-x-[18px]" : "translate-x-1",
-                ].join(" ")}
-              />
-            </button>
-          </div>
-        </section>
-
         {/* Network Access */}
         <section>
           <div className="flex items-center gap-2 mb-4">
@@ -2296,10 +2233,20 @@ function GeneralTab({ isDesktop }: { isDesktop: boolean }) {
           {lanShareDirty && (
             <div className="flex items-start gap-2 p-3 mb-2 bg-amber-500/5 border border-amber-500/20 rounded-lg">
               <Warning size={14} className="text-amber-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-300/90">
-                Restart FlowScale AI OS for this change to take effect. The
-                bind address is set when the app server starts.
-              </p>
+              <div className="flex-1 flex items-start justify-between gap-3">
+                <p className="text-xs text-amber-300/90">
+                  Restart FlowScale AI OS for this change to take effect. The
+                  bind address is set when the app server starts.
+                </p>
+                {typeof window !== "undefined" && window.desktop?.app && (
+                  <button
+                    onClick={() => window.desktop?.app?.relaunch()}
+                    className="shrink-0 text-xs font-medium text-amber-200 hover:text-amber-100 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded px-3 py-1 transition-colors"
+                  >
+                    Restart now
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -2559,7 +2506,7 @@ function UsersPanel({
       <div className="flex-1 overflow-y-auto px-10 py-2">
         {loading ? (
           <div className="flex items-center justify-center h-40 text-zinc-500 text-sm">
-            Loading\u2026
+            Loading…
           </div>
         ) : usersTab === "pending" ? (
           pending.length === 0 ? (
@@ -2589,7 +2536,7 @@ function UsersPanel({
                       )}
                     </div>
                     <div className="text-xs text-zinc-500">
-                      Requested {ROLE_LABELS[u.role] ?? u.role} \u00B7{" "}
+                      Requested {ROLE_LABELS[u.role] ?? u.role} ·{" "}
                       {formatDate(u.createdAt)}
                     </div>
                   </div>

@@ -31,6 +31,9 @@ interface DesktopBridge {
   report?: {
     getSystemInfo(): Promise<{ version: string; platform: string; logs: string }>
   }
+  app?: {
+    relaunch(): Promise<void>
+  }
   updates?: {
     onAvailable(callback: (info: { version: string }) => void): () => void
     onNotAvailable(callback: () => void): () => void
