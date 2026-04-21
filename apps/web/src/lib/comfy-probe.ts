@@ -1,5 +1,13 @@
 import { createConnection } from 'net'
 
+/**
+ * Ports where an externally-launched ComfyUI is commonly found. Probed by the
+ * scan route for auto-discovery, allowlisted by the executions route, and
+ * checked by the spawn guardrail to prevent device collisions.
+ * Keep this as the single source of truth — add new well-known ports here.
+ */
+export const WELL_KNOWN_COMFY_PORTS = [8000, 8188, 8189] as const
+
 export interface ComfyInstance {
   port: number
   systemStats: Record<string, unknown> | null

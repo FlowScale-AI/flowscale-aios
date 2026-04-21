@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getComfyInstances } from '@/lib/providerSettings'
-import { probePort } from '@/lib/comfy-probe'
-
-/** Well-known ports where ComfyUI commonly runs (desktop app, default, etc.) */
-const WELL_KNOWN_PORTS = [8000, 8188]
+import { probePort, WELL_KNOWN_COMFY_PORTS } from '@/lib/comfy-probe'
 
 export async function GET() {
   const instances = getComfyInstances()
@@ -19,7 +16,7 @@ export async function GET() {
   )
 
   // Also probe well-known ports that aren't already configured
-  const extraPorts = WELL_KNOWN_PORTS.filter((p) => !configuredPorts.has(p))
+  const extraPorts = WELL_KNOWN_COMFY_PORTS.filter((p) => !configuredPorts.has(p))
   const extraResults = await Promise.all(
     extraPorts.map(async (port) => {
       const probe = await probePort(port)

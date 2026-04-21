@@ -46,6 +46,7 @@ import {
   Plugs,
   Monitor,
   Cloud,
+  FileText,
 } from "phosphor-react";
 import { PageTransition, Modal } from "@/components/ui";
 import { useUpdateStore } from "@/store/updateStore";
@@ -1386,7 +1387,33 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       },
     });
 
+  const { data: comfyScan } = useQuery<Array<{ port: number; instanceId?: string; device?: string; label?: string }>>({
+    queryKey: ["comfy-scan"],
+    queryFn: async () => {
+      const res = await fetch("/api/comfy/scan");
+      return res.ok ? res.json() : [];
+    },
+    refetchInterval: 10_000,
+  });
+
   const managedInstances = comfyManage?.instances ?? [];
+  const managedPorts = new Set(managedInstances.map((i) => i.port));
+  const externalInstances: Array<ComfyManagedInstance & { external: true }> = (comfyScan ?? [])
+    .filter((inst) => !managedPorts.has(inst.port))
+    .map((inst) => ({
+      id: inst.instanceId ?? `external-${inst.port}`,
+      status: "running" as const,
+      port: inst.port,
+      device: inst.device ?? "external",
+      label: inst.label ?? `ComfyUI :${inst.port}`,
+      external: true,
+    }));
+  const allInstances: Array<ComfyManagedInstance & { external?: boolean }> = [
+    ...managedInstances,
+    ...externalInstances,
+  ];
+  // Bulk actions only apply to managed instances — external ComfyUIs
+  // (e.g. ComfyUI Desktop) aren't under our lifecycle control.
   const anyRunning = managedInstances.some((i) => i.status === "running");
   const anyStopped = managedInstances.some((i) => i.status === "stopped");
   const anyStarting = managedInstances.some((i) => i.status === "starting");
@@ -1447,6 +1474,87 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
 
   const savedPath = comfyPathData?.comfyuiPath;
 
+  // ── Python executable path (for venvs outside the ComfyUI tree) ────────────
+  const [pythonInput, setPythonInput] = useState("");
+  const [pythonSaved, setPythonSaved] = useState(false);
+  const { data: pythonPathData } = useQuery<{ pythonPath: string | null }>({
+    queryKey: ["comfyui-python-path"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings/comfyui-python-path");
+      if (!res.ok) return { pythonPath: null };
+      return res.json();
+    },
+  });
+  const savePythonPathMutation = useMutation({
+    mutationFn: async (p: string) => {
+      const res = await fetch("/api/settings/comfyui-python-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pythonPath: p }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to save Python path");
+      }
+    },
+    onSuccess: () => {
+      setPythonInput("");
+      setPythonSaved(true);
+      queryClient.invalidateQueries({ queryKey: ["comfyui-python-path"] });
+      setTimeout(() => setPythonSaved(false), 2500);
+    },
+    onError: (err: Error) => { showError(err.message); },
+  });
+  const savedPythonPath = pythonPathData?.pythonPath;
+
+  // ── Data directory (--base-directory) ──────────────────────────────────────
+  const [baseDirInput, setBaseDirInput] = useState("");
+  const [baseDirSaved, setBaseDirSaved] = useState(false);
+  const { data: baseDirData } = useQuery<{ baseDirectory: string | null }>({
+    queryKey: ["comfyui-base-directory"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings/comfyui-base-directory");
+      if (!res.ok) return { baseDirectory: null };
+      return res.json();
+    },
+  });
+  const saveBaseDirMutation = useMutation({
+    mutationFn: async (p: string) => {
+      const res = await fetch("/api/settings/comfyui-base-directory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseDirectory: p }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Failed to save data directory");
+      }
+    },
+    onSuccess: () => {
+      setBaseDirInput("");
+      setBaseDirSaved(true);
+      queryClient.invalidateQueries({ queryKey: ["comfyui-base-directory"] });
+      setTimeout(() => setBaseDirSaved(false), 2500);
+    },
+    onError: (err: Error) => { showError(err.message); },
+  });
+  const savedBaseDir = baseDirData?.baseDirectory;
+
+  // ── Spawn-log viewer ────────────────────────────────────────────────────────
+  const [logInstanceId, setLogInstanceId] = useState<string | null>(null);
+  const { data: logData } = useQuery<{ log: string | null }>({
+    queryKey: ["comfy-logs", logInstanceId],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/comfy/manage/logs?instanceId=${encodeURIComponent(logInstanceId!)}`,
+      );
+      if (!res.ok) return { log: null };
+      return res.json();
+    },
+    enabled: logInstanceId != null,
+    refetchInterval: logInstanceId ? 2000 : false,
+  });
+
   return (
     <div className="px-10 pb-8">
       <div className="max-w-3xl">
@@ -1466,10 +1574,10 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                   <span className="text-sm font-semibold text-zinc-200">
                     ComfyUI
                   </span>
-                  {managedInstances.length > 0 && (
+                  {allInstances.length > 0 && (
                     <span className="text-[10px] font-mono text-zinc-600">
-                      {managedInstances.length} instance
-                      {managedInstances.length !== 1 ? "s" : ""}
+                      {allInstances.length} instance
+                      {allInstances.length !== 1 ? "s" : ""}
                     </span>
                   )}
                 </div>
@@ -1522,9 +1630,9 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
           </div>
 
           {/* Instance list */}
-          {managedInstances.length > 0 && (
+          {allInstances.length > 0 && (
             <div className="space-y-2 mb-4">
-              {managedInstances.map((inst) => (
+              {allInstances.map((inst) => (
                 <div
                   key={inst.id}
                   className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5"
@@ -1542,9 +1650,14 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                       :{inst.port}
                     </span>
                     <InstanceStatusBadge status={inst.status} />
+                    {inst.external && (
+                      <span className="text-[10px] font-mono text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-800/70 border border-white/5">
+                        External
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {inst.status === "stopped" && (
+                    {!inst.external && inst.status === "stopped" && (
                       <button
                         onClick={() =>
                           comfyActionMutation.mutate({
@@ -1559,7 +1672,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                         <Play size={12} weight="fill" />
                       </button>
                     )}
-                    {(inst.status === "running" ||
+                    {!inst.external && (inst.status === "running" ||
                       inst.status === "starting") && (
                       <>
                         <button
@@ -1592,6 +1705,15 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                           <Stop size={12} weight="fill" />
                         </button>
                       </>
+                    )}
+                    {!inst.external && (
+                      <button
+                        onClick={() => setLogInstanceId(inst.id)}
+                        className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
+                        title={`View log for ${inst.label}`}
+                      >
+                        <FileText size={12} />
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1638,11 +1760,144 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
               subdirectories.
             </p>
           </div>
+
+          {/* Python executable override */}
+          <div className="border-t border-white/5 pt-4 mt-4">
+            <label className="block text-xs font-medium text-zinc-500 mb-1.5">
+              Python executable{" "}
+              <span className="text-zinc-600 font-normal">(optional)</span>
+            </label>
+            {savedPythonPath && (
+              <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
+                <CheckCircle size={11} weight="fill" />
+                {savedPythonPath}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <FolderOpen
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={pythonInput}
+                  onChange={(e) => setPythonInput(e.target.value)}
+                  placeholder={
+                    savedPythonPath ??
+                    "e.g. C:\\Users\\you\\Documents\\ComfyUI\\.venv\\Scripts\\python.exe"
+                  }
+                  className="w-full pl-8 pr-3 py-2 text-xs font-mono-custom bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+                />
+              </div>
+              <button
+                disabled={!pythonInput.trim() || savePythonPathMutation.isPending}
+                onClick={() =>
+                  savePythonPathMutation.mutate(pythonInput.trim())
+                }
+                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {pythonSaved ? "Saved \u2713" : "Save"}
+              </button>
+              {savedPythonPath && (
+                <button
+                  disabled={savePythonPathMutation.isPending}
+                  onClick={() => savePythonPathMutation.mutate("")}
+                  className="px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 bg-transparent hover:bg-zinc-800 border border-zinc-800 rounded-lg transition-colors disabled:opacity-40"
+                  title="Clear override"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-600 mt-1.5">
+              Point to the <span className="font-mono-custom">python</span> /{" "}
+              <span className="font-mono-custom">python.exe</span> inside your
+              venv when it lives outside the ComfyUI source tree (e.g. ComfyUI
+              Desktop at{" "}
+              <span className="font-mono-custom">~/Documents/ComfyUI/.venv</span>
+              ). Leave blank to auto-detect.
+            </p>
+          </div>
+
+          {/* Data directory override (--base-directory) */}
+          <div className="border-t border-white/5 pt-4 mt-4">
+            <label className="block text-xs font-medium text-zinc-500 mb-1.5">
+              Data directory{" "}
+              <span className="text-zinc-600 font-normal">(optional)</span>
+            </label>
+            {savedBaseDir && (
+              <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
+                <CheckCircle size={11} weight="fill" />
+                {savedBaseDir}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <FolderOpen
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={baseDirInput}
+                  onChange={(e) => setBaseDirInput(e.target.value)}
+                  placeholder={
+                    savedBaseDir ??
+                    "e.g. C:\\Users\\you\\Documents\\ComfyUI"
+                  }
+                  className="w-full pl-8 pr-3 py-2 text-xs font-mono-custom bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+                />
+              </div>
+              <button
+                disabled={!baseDirInput.trim() || saveBaseDirMutation.isPending}
+                onClick={() => saveBaseDirMutation.mutate(baseDirInput.trim())}
+                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {baseDirSaved ? "Saved \u2713" : "Save"}
+              </button>
+              {savedBaseDir && (
+                <button
+                  disabled={saveBaseDirMutation.isPending}
+                  onClick={() => saveBaseDirMutation.mutate("")}
+                  className="px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 bg-transparent hover:bg-zinc-800 border border-zinc-800 rounded-lg transition-colors disabled:opacity-40"
+                  title="Clear override"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-600 mt-1.5">
+              Passed to main.py as{" "}
+              <span className="font-mono-custom">--base-directory</span>. Point
+              this at your existing ComfyUI workspace (containing{" "}
+              <span className="font-mono-custom">models/</span>,{" "}
+              <span className="font-mono-custom">input/</span>,{" "}
+              <span className="font-mono-custom">output/</span>,{" "}
+              <span className="font-mono-custom">user/</span>) so the managed
+              instance shares data with your other ComfyUI. Leave blank to use
+              the installation path above.
+            </p>
+          </div>
         </div>
 
         {/* Cloud Instances section — shown when Modal is authenticated */}
         {modalStatus?.authenticated && <ModalComfySection />}
       </div>
+
+      {/* Spawn-log viewer */}
+      <Modal
+        isOpen={logInstanceId != null}
+        onClose={() => setLogInstanceId(null)}
+        title={`Log — ${logInstanceId ?? ""}`}
+        maxWidth="max-w-3xl"
+      >
+        <div className="max-h-[60vh] overflow-auto rounded-lg bg-black/60 border border-white/5 p-3">
+          <pre className="text-[11px] font-mono-custom text-zinc-300 whitespace-pre-wrap break-words">
+            {logData?.log ?? "No log yet — start the instance to generate output."}
+          </pre>
+        </div>
+      </Modal>
     </div>
   );
 }

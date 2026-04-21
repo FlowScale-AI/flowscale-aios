@@ -107,6 +107,51 @@ function detectRocmGpus(): GpuInfo[] {
 }
 
 /**
+ * Windows-specific AMD GPU detection via registry. Works because
+ * `rocm-smi` + `lspci` (used on Linux) don't exist on Windows.
+ *
+ * Reads the VRAM from `HardwareInformation.qwMemorySize` (64-bit, accurate
+ * for cards >4 GB) instead of `Win32_VideoController.AdapterRAM` (32-bit,
+ * wraps at ~4 GB).
+ */
+function detectAmdGpusWindows(): GpuInfo[] {
+  try {
+    // PowerShell snippet outputs lines: NAME\tVRAM_BYTES.
+    // Passed via -EncodedCommand (UTF-16-LE + base64) to avoid cmd.exe
+    // quoting issues with embedded quotes / backticks.
+    const ps =
+      "$items = Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\*' -ErrorAction SilentlyContinue;" +
+      "foreach ($item in $items) {" +
+      "  $mem = $item.'HardwareInformation.qwMemorySize';" +
+      "  if ($mem -ne $null) { Write-Output ($item.DriverDesc + [char]9 + $mem) }" +
+      "}"
+    const encoded = Buffer.from(ps, 'utf16le').toString('base64')
+
+    const raw = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded}`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim()
+
+    if (!raw) return []
+
+    const gpus: GpuInfo[] = []
+    let index = 0
+    for (const line of raw.split(/\r?\n/)) {
+      const [name, vramStr] = line.split('\t')
+      if (!name || !vramStr) continue
+      if (!/amd|radeon|ati/i.test(name)) continue
+      const vramBytes = Number(vramStr.trim())
+      if (!Number.isFinite(vramBytes)) continue
+      const vramMB = Math.round(vramBytes / (1024 * 1024))
+      gpus.push({ index: index++, name: name.trim(), vramMB, backend: 'rocm' })
+    }
+    return gpus
+  } catch {
+    return []
+  }
+}
+
+/**
  * Returns all detected GPUs on the system.
  * Result is cached for the lifetime of the Node process.
  */
@@ -117,6 +162,10 @@ export function detectGpus(): GpuInfo[] {
   let gpus = detectNvidiaGpus()
   if (gpus.length === 0) {
     gpus = detectRocmGpus()
+  }
+  // Windows AMD fallback — rocm-smi/lspci don't exist there
+  if (gpus.length === 0 && process.platform === 'win32') {
+    gpus = detectAmdGpusWindows()
   }
 
   cachedGpus = gpus

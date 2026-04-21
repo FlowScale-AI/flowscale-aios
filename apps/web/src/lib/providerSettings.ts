@@ -85,6 +85,38 @@ export function setComfyManagedPath(p: string): void {
   writeSettingsFile(settings)
 }
 
+/**
+ * Explicit path to the Python executable used to spawn managed ComfyUI.
+ * If unset, comfyui-manager falls back to heuristic lookup. Needed when the
+ * venv lives outside the ComfyUI source tree (e.g. ComfyUI Desktop).
+ */
+export function getComfyPythonPath(): string | undefined {
+  return readSettingsFile()['comfyPythonPath'] || undefined
+}
+
+export function setComfyPythonPath(p: string): void {
+  const settings = readSettingsFile()
+  if (p) settings['comfyPythonPath'] = p
+  else delete settings['comfyPythonPath']
+  writeSettingsFile(settings)
+}
+
+/**
+ * Explicit data directory for managed ComfyUI (passed as --base-directory).
+ * Lets the managed instance share models/input/output/user with an external
+ * ComfyUI (e.g. ComfyUI Desktop's workspace at ~/Documents/ComfyUI).
+ */
+export function getComfyBaseDirectory(): string | undefined {
+  return readSettingsFile()['comfyBaseDirectory'] || undefined
+}
+
+export function setComfyBaseDirectory(p: string): void {
+  const settings = readSettingsFile()
+  if (p) settings['comfyBaseDirectory'] = p
+  else delete settings['comfyBaseDirectory']
+  writeSettingsFile(settings)
+}
+
 // ── ComfyUI multi-instance registry ──────────────────────────────────────────
 
 export interface ComfyInstanceConfig {

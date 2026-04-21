@@ -16,6 +16,7 @@ import { getPlugin, type ToolPluginManifest } from '@/lib/toolPlugins'
 import { autoRouteComfyPort, trackExecStart, trackExecEnd } from '@/lib/comfyAutoRoute'
 import { getModalDeployUrl, autoRouteModalDeployment } from '@/lib/modal-deploy'
 import { isModalComfyPort, resolveComfyBaseUrl, getModalComfyByPort } from '@/lib/modal-comfyui'
+import { WELL_KNOWN_COMFY_PORTS } from '@/lib/comfy-probe'
 
 type OutputItem = { filename?: string; subfolder?: string; kind?: string; path?: string; text?: string }
 
@@ -453,11 +454,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   // ── ComfyUI-engine tools ─────────────────────────────────────────────────────
-  // Validate comfyPort override against configured instances to prevent arbitrary port access
+  // Validate comfyPort override against configured instances to prevent arbitrary port access.
+  // Also allow well-known external ComfyUI ports (desktop app defaults) so users can target a
+  // ComfyUI they launched outside FlowScale (e.g. ComfyUI Desktop on :8000).
   if (comfyPortOverride != null) {
     const validPorts = new Set(getComfyInstances().map((i) => i.port))
     const isValidModalComfyPort = isModalComfyPort(comfyPortOverride) && getModalComfyByPort(comfyPortOverride) != null
-    if (!validPorts.has(comfyPortOverride) && !isValidModalComfyPort) {
+    const isWellKnownExternal = (WELL_KNOWN_COMFY_PORTS as readonly number[]).includes(comfyPortOverride)
+    if (!validPorts.has(comfyPortOverride) && !isValidModalComfyPort && !isWellKnownExternal) {
       return NextResponse.json({ error: 'Invalid ComfyUI port — not a configured instance' }, { status: 400 })
     }
   }
