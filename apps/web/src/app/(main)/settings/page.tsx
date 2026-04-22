@@ -1582,6 +1582,75 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     setPortInput("");
   };
 
+  // ── Custom launch scripts ───────────────────────────────────────────────────
+  const [scriptLabelInput, setScriptLabelInput] = useState("");
+  const [scriptPathInput, setScriptPathInput] = useState("");
+
+  const { data: customScriptsData } = useQuery<{ scripts: Array<{ id: string; label: string; path: string }> }>({
+    queryKey: ["custom-scripts"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings/custom-scripts");
+      if (!res.ok) return { scripts: [] };
+      return res.json();
+    },
+  });
+  const customScripts = customScriptsData?.scripts ?? [];
+
+  const saveCustomScriptsMutation = useMutation({
+    mutationFn: async (scripts: Array<{ id: string; label: string; path: string }>) => {
+      const res = await fetch("/api/settings/custom-scripts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scripts }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error || "Failed to save scripts");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["custom-scripts"] });
+    },
+    onError: (err: Error) => { showError(err.message); },
+  });
+
+  const addScript = (): void => {
+    const label = scriptLabelInput.trim();
+    const scriptPath = scriptPathInput.trim();
+    if (!label || !scriptPath) {
+      showError("Label and path are required");
+      return;
+    }
+    const newScript = { id: crypto.randomUUID(), label, path: scriptPath };
+    saveCustomScriptsMutation.mutate([...customScripts, newScript]);
+    setScriptLabelInput("");
+    setScriptPathInput("");
+  };
+
+  const removeScript = (id: string): void => {
+    saveCustomScriptsMutation.mutate(customScripts.filter((s) => s.id !== id));
+  };
+
+  const saveLaunchScriptMutation = useMutation({
+    mutationFn: async ({ instanceId, scriptId }: { instanceId: string; scriptId: string | null }) => {
+      const res = await fetch("/api/settings/comfy-instances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instances: [{ id: instanceId, launchScriptId: scriptId ?? "" }],
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error || "Failed to save launch mode");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["comfy-manage"] });
+    },
+    onError: (err: Error) => { showError(err.message); },
+  });
+
   // ── Spawn-log viewer ────────────────────────────────────────────────────────
   const [logInstanceId, setLogInstanceId] = useState<string | null>(null);
   const { data: logData } = useQuery<{ log: string | null }>({
@@ -1981,6 +2050,73 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                 </span>
               </div>
             )}
+          </div>
+
+          {/* Custom launch scripts */}
+          <div className="border-t border-white/5 pt-4 mt-4">
+            <label className="block text-xs font-medium text-zinc-500 mb-1.5">
+              Custom launch scripts{" "}
+              <span className="text-zinc-600 font-normal">(optional)</span>
+            </label>
+            <p className="text-[11px] text-zinc-600 mb-3">
+              Register <span className="font-mono text-zinc-500">.bat</span>,{" "}
+              <span className="font-mono text-zinc-500">.sh</span>, or{" "}
+              <span className="font-mono text-zinc-500">.ps1</span> scripts to use instead of AIOS&apos;s built-in launch. Assign one per instance above.
+            </p>
+
+            {customScripts.length > 0 && (
+              <div className="space-y-1.5 mb-3">
+                {customScripts.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-zinc-900/50 border border-white/5"
+                  >
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <span className="text-xs font-medium text-zinc-300 truncate">{s.label}</span>
+                      <span className="text-[10px] font-mono text-zinc-600 truncate">{s.path}</span>
+                    </div>
+                    <button
+                      onClick={() => removeScript(s.id)}
+                      className="ml-3 p-1 text-zinc-600 hover:text-red-400 transition-colors shrink-0"
+                      title="Remove script"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={scriptLabelInput}
+                onChange={(e) => setScriptLabelInput(e.target.value)}
+                placeholder="Label (e.g. RTX 4060 Ti)"
+                className="w-32 px-3 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors shrink-0"
+              />
+              <div className="relative flex-1">
+                <FolderOpen
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={scriptPathInput}
+                  onChange={(e) => setScriptPathInput(e.target.value)}
+                  placeholder="Path to .bat / .sh / .ps1"
+                  onKeyDown={(e) => { if (e.key === "Enter") addScript(); }}
+                  className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+                />
+              </div>
+              <button
+                disabled={!scriptLabelInput.trim() || !scriptPathInput.trim() || saveCustomScriptsMutation.isPending}
+                onClick={addScript}
+                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              >
+                Add
+              </button>
+            </div>
           </div>
         </div>
 
