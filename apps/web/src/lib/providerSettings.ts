@@ -149,6 +149,14 @@ export interface ComfyInstanceConfig {
   device: string
   /** Human-readable label, e.g. 'GPU 0 — RTX 4090' */
   label: string
+  /** References CustomScript.id; absent = AIOS managed launch */
+  launchScriptId?: string
+}
+
+export interface CustomScript {
+  id: string
+  label: string
+  path: string
 }
 
 /**
@@ -189,6 +197,24 @@ export function setComfyInstances(instances: ComfyInstanceConfig[]): void {
 
 export function getComfyInstanceById(id: string): ComfyInstanceConfig | undefined {
   return getComfyInstances().find((i) => i.id === id)
+}
+
+export function getCustomScripts(): CustomScript[] {
+  const raw = readSettingsFile()['customScripts']
+  if (!Array.isArray(raw)) return []
+  return raw.filter(
+    (s): s is CustomScript =>
+      typeof s === 'object' && s !== null &&
+      typeof s.id === 'string' &&
+      typeof s.label === 'string' &&
+      typeof s.path === 'string',
+  )
+}
+
+export function setCustomScripts(scripts: CustomScript[]): void {
+  const settings = readSettingsFile()
+  settings['customScripts'] = scripts
+  writeSettingsFile(settings)
 }
 
 /** Path to the ComfyUI Desktop App's user-data folder (models, custom_nodes, configs). */
