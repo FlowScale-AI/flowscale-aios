@@ -4,6 +4,7 @@ import { executions, tools, users } from '@/lib/db/schema'
 import { eq, desc } from 'drizzle-orm'
 import { v4 as uuidv4 } from 'uuid'
 import { isValidComfyWorkflow, normalizeWorkflow, type ObjectInfoMap } from '@flowscale/workflow'
+import { resolveImageInput, isDataUrl, isOutputRef } from '@/lib/comfy-image-upload'
 import { getRequestUser } from '@/lib/auth'
 import { mkdirSync, writeFileSync, mkdirSync as mkdirSyncFs, writeFileSync as writeFileSyncFs } from 'fs'
 import { mkdir, writeFile } from 'fs/promises'
@@ -513,6 +514,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       inputValue = isProvided ? provided : field.defaultValue
     }
     if (inputValue !== undefined) {
+      // Data URLs and output refs need to be uploaded to the chosen ComfyUI's
+      // input dir before queuing — passing them through verbatim lands them in
+      // LoadImage as filenames, which fails with "Invalid image file".
+      // This is also the path that makes auto-route + image uploads work when
+      // the user has multiple ComfyUIs with disjoint input directories.
+      if (isDataUrl(inputValue) || isOutputRef(inputValue)) {
+        try {
+          inputValue = await resolveImageInput(inputValue, comfyPort)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Failed to upload image input'
+          return NextResponse.json({ error: message }, { status: 502 })
+        }
+      }
       workflow[field.nodeId].inputs[field.paramName] = inputValue
     }
   }

@@ -2050,7 +2050,12 @@ export default function ToolPage() {
                           key={`${field.nodeId}__${field.paramName}`}
                           field={field}
                           value={inputs[`${field.nodeId}__${field.paramName}`]}
-                          comfyPort={tool.comfyPort}
+                          // Auto/Modal routing picks the execution port server-side — uploading
+                          // directly to any one local port risks landing the file in an input
+                          // directory the chosen executor doesn't share. Pass null so the
+                          // uploader emits a data URL and the executions route uploads to the
+                          // actually-chosen port.
+                          comfyPort={runOn === 'auto' || isModalSelected ? null : tool.comfyPort}
                           onChange={(v) =>
                             setInputs((prev) => ({
                               ...prev,

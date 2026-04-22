@@ -11,8 +11,8 @@
  * probe ports on every single execution request.
  */
 
-import { getComfyInstances } from './providerSettings'
-import { probePort } from './comfy-probe'
+import { getComfyInstances, getExtraComfyPorts } from './providerSettings'
+import { probePort, WELL_KNOWN_COMFY_PORTS } from './comfy-probe'
 
 // ── In-memory execution tracking ─────────────────────────────────────────────
 
@@ -64,9 +64,17 @@ async function getRunningPorts(): Promise<number[]> {
     return cachedRunningPorts
   }
 
-  const instances = getComfyInstances()
+  // Candidates = AIOS-managed configured ports ∪ well-known external ports
+  // ∪ user-supplied extras. Without the externals, auto-route would skip
+  // ComfyUI Desktop (default :8000), portable installs on :8188/:8189, and
+  // anything else the user runs outside AIOS.
+  const candidates = new Set<number>([
+    ...getComfyInstances().map((i) => i.port),
+    ...WELL_KNOWN_COMFY_PORTS,
+    ...getExtraComfyPorts(),
+  ])
   const results = await Promise.all(
-    instances.map(async (i) => ({ port: i.port, alive: !!(await probePort(i.port)) })),
+    [...candidates].map(async (port) => ({ port, alive: !!(await probePort(port)) })),
   )
 
   cachedRunningPorts = results.filter((r) => r.alive).map((r) => r.port)

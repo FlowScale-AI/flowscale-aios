@@ -4,6 +4,9 @@
  */
 
 import { execSync, execFileSync } from 'child_process'
+import { writeFileSync, unlinkSync, mkdtempSync } from 'fs'
+import { tmpdir } from 'os'
+import * as path from 'path'
 import { getComfyUIPath } from './providerSettings'
 import { findPythonExec } from './comfyui-manager'
 
@@ -184,12 +187,21 @@ function detectGpusViaTorch(): GpuInfo[] | null {
     '    print("ERR:" + str(e), file=sys.stderr); sys.exit(1)',
   ].join('\n')
 
+  // Write script to a temp file rather than piping via stdin — stdin-driven
+  // python invocations fail with STATUS_DLL_INIT_FAILED (0xC0000142) in some
+  // Next.js dev environments on Windows when the venv python needs to locate
+  // DLLs relative to its own directory during init.
+  const tmpDir = mkdtempSync(path.join(tmpdir(), 'flowscale-gpudetect-'))
+  const scriptFile = path.join(tmpDir, 'detect.py')
+  writeFileSync(scriptFile, script, 'utf-8')
+
   try {
-    // Pass the script via stdin — avoids cmd.exe quote/newline issues for multi-line scripts.
-    const raw = execFileSync(python, ['-'], {
-      input: script,
+    // cwd = python's own directory so Windows DLL resolution finds sibling
+    // DLLs first (matters for relocated venvs and ComfyUI Desktop bundles).
+    const raw = execFileSync(python, [scriptFile], {
       encoding: 'utf-8',
       timeout: 15_000,
+      cwd: path.dirname(python),
     }).trim()
     if (!raw) return null
     const rows = JSON.parse(raw) as Array<[string, number, string, number]>
@@ -201,6 +213,8 @@ function detectGpusViaTorch(): GpuInfo[] | null {
     }))
   } catch {
     return null
+  } finally {
+    try { unlinkSync(scriptFile) } catch { /* ignore */ }
   }
 }
 

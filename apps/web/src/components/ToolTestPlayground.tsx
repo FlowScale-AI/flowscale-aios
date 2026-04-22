@@ -453,11 +453,16 @@ export function ToolTestPlayground({ tool }: { tool: ToolForTest }) {
                         {(() => {
                           const uploadKind = inferInputUploadKind(field.nodeType)
                           if (uploadKind) {
+                            // Auto-route picks the execution port server-side, so uploading
+                            // to any one port risks landing the file in an input directory
+                            // the chosen executor doesn't share. Passing `null` makes the
+                            // uploader produce a data URL; the executions route re-uploads
+                            // to whichever port actually wins the round-robin.
                             return (
                               <FileUploadInput
                                 kind={uploadKind}
                                 value={String(inputs[key] ?? '')}
-                                comfyPort={effectiveComfyPort}
+                                comfyPort={isAutoRoute ? null : effectiveComfyPort}
                                 onChange={(filename) => setInputs((prev) => ({ ...prev, [key]: filename }))}
                               />
                             )

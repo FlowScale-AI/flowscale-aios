@@ -480,7 +480,7 @@ export function getInstanceLogTail(instanceId: string, bytes = 16_384): string |
  * custom scripts spawn via cmd.exe whose Python child won't die on cmd kill).
  * On Unix, sends SIGTERM with a SIGKILL fallback after 5 s.
  */
-function killProcessTree(pid: number): void {
+export function killProcessTree(pid: number): void {
   if (process.platform === 'win32') {
     try {
       execSync(`taskkill /F /T /PID ${pid}`, { timeout: 5000 })

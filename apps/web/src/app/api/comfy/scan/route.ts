@@ -6,7 +6,9 @@ export async function GET() {
   const instances = getComfyInstances()
   const configuredPorts = new Set(instances.map((i) => i.port))
 
-  // Probe all configured instance ports in parallel
+  // Probe all configured instance ports in parallel — `devices` comes from the
+  // probe (ComfyUI's /system_stats), not the instance config, so we get the
+  // *actual* GPU the running process is using.
   const results = await Promise.all(
     instances.map(async (cfg) => {
       const probe = await probePort(cfg.port)

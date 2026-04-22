@@ -4,6 +4,7 @@
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "turbo dev",
+    "dev:web": "node apps/web/node_modules/next/dist/bin/next dev --dir apps/web --port 14173 --hostname 0.0.0.0",
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",

@@ -1136,8 +1136,31 @@ function StepTest({
       return res.json()
     },
   })
+  // Externally-launched ComfyUIs (ComfyUI Desktop, custom-port portable, etc.)
+  // need to appear in the picker too — the manage endpoint only knows about
+  // AIOS-managed instances, so we merge in scan results that aren't already
+  // claimed by a managed entry.
+  const { data: comfyScanData } = useQuery<Array<{ port: number; instanceId?: string; device?: string; label?: string }>>({
+    queryKey: ['comfy-scan'],
+    queryFn: async () => {
+      const res = await fetch('/api/comfy/scan')
+      return res.ok ? res.json() : []
+    },
+    refetchInterval: 10_000,
+  })
   const { data: modalComfyData } = useModalComfyInstances()
-  const comfyInstances = comfyManageData?.instances ?? []
+  const managedInstances = comfyManageData?.instances ?? []
+  const managedPorts = new Set(managedInstances.map((i) => i.port))
+  const externalInstances = (comfyScanData ?? [])
+    .filter((inst) => !managedPorts.has(inst.port))
+    .map((inst) => ({
+      id: inst.instanceId ?? `external-${inst.port}`,
+      status: 'running',
+      port: inst.port,
+      device: inst.device ?? 'auto',
+      label: inst.label ?? `ComfyUI :${inst.port}`,
+    }))
+  const comfyInstances = [...managedInstances, ...externalInstances]
   const modalComfyInstances = modalComfyData?.instances ?? []
   const [runOn, setRunOn] = useState<string>(() => tool.comfyPort ? `local:${tool.comfyPort}` : 'auto')
   const isModalSelected = runOn.startsWith('modal:')

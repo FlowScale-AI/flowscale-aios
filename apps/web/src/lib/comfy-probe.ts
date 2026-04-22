@@ -8,9 +8,18 @@ import { createConnection } from 'net'
  */
 export const WELL_KNOWN_COMFY_PORTS = [8000, 8188, 8189, 8190] as const
 
+export interface ComfyDevice {
+  name: string
+  type: string
+  index: number
+  vram_total?: number
+  vram_free?: number
+}
+
 export interface ComfyInstance {
   port: number
   systemStats: Record<string, unknown> | null
+  devices?: ComfyDevice[]   // parsed from systemStats.devices
   instanceId?: string   // e.g. 'gpu-0', 'cpu'
   device?: string       // e.g. 'cuda:0', 'cpu'
   label?: string        // e.g. 'GPU 0 — RTX 4090'
@@ -33,7 +42,10 @@ export async function probePort(port: number): Promise<ComfyInstance | null> {
     })
     if (!res.ok) return null
     const stats = await res.json() as Record<string, unknown>
-    return { port, systemStats: stats }
+    const devices = Array.isArray(stats?.devices)
+      ? (stats.devices as ComfyDevice[]).filter((d) => d && typeof d.name === 'string')
+      : undefined
+    return { port, systemStats: stats, devices }
   } catch {
     return null
   }
