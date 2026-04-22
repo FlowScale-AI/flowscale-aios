@@ -73,6 +73,11 @@ export function buildScriptSpawnArgs(
   if (platform === 'win32') {
     if (ext === '.bat') return { cmd: 'cmd.exe', args: ['/c', scriptPath] }
     if (ext === '.ps1') return { cmd: 'powershell.exe', args: ['-ExecutionPolicy', 'Bypass', '-File', scriptPath] }
+  } else if (ext === '.bat' || ext === '.ps1') {
+    throw new Error(
+      `Script "${path.basename(scriptPath)}" is a Windows-only script (${ext}) and cannot be run on ${platform}. ` +
+      `Please provide a .sh script for this platform.`,
+    )
   }
   if (ext === '.sh') return { cmd: 'sh', args: [scriptPath] }
   return { cmd: scriptPath, args: [] }
@@ -328,11 +333,15 @@ export async function startInstance(instanceId: string): Promise<{ port: number;
     : undefined
 
   if (customScript) {
+    // Fail early with a clear error if the script file is missing.
+    if (!existsSync(customScript.path)) {
+      throw new Error(`Custom script not found: ${customScript.path}. Check the path in Settings → Custom launch scripts.`)
+    }
     // Custom script — don't inject GPU env vars; the script owns device selection.
     const { cmd, args: scriptArgs } = buildScriptSpawnArgs(customScript.path)
     spawnCmd = cmd
     spawnArgs = scriptArgs
-    spawnCwd = path.dirname(customScript.path)
+    spawnCwd = path.dirname(path.resolve(customScript.path))
     env = { ...process.env }
   } else {
     // Managed launch — AIOS builds the command.
@@ -554,7 +563,7 @@ export function killAllByPidFiles(): void {
       try {
         const pid = parseInt(readFileSync(fullPath, 'utf-8').trim(), 10)
         if (!isNaN(pid) && pid > 0) {
-          try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
+          killProcessTree(pid)
         }
       } catch { /* ignore */ }
       try { unlinkSync(fullPath) } catch { /* ignore */ }

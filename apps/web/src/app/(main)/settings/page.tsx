@@ -1623,13 +1623,32 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       return;
     }
     const newScript = { id: crypto.randomUUID(), label, path: scriptPath };
-    saveCustomScriptsMutation.mutate([...customScripts, newScript]);
-    setScriptLabelInput("");
-    setScriptPathInput("");
+    saveCustomScriptsMutation.mutate([...customScripts, newScript], {
+      onSuccess: () => {
+        setScriptLabelInput("");
+        setScriptPathInput("");
+      },
+    });
   };
 
   const removeScript = (id: string): void => {
-    saveCustomScriptsMutation.mutate(customScripts.filter((s) => s.id !== id));
+    saveCustomScriptsMutation.mutate(customScripts.filter((s) => s.id !== id), {
+      onSuccess: () => {
+        // Clear launchScriptId from any instances that referenced the deleted script.
+        const affected = managedInstances.filter((i) => i.launchScriptId === id);
+        if (affected.length > 0) {
+          fetch("/api/settings/comfy-instances", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              instances: affected.map((i) => ({ id: i.id, launchScriptId: null })),
+            }),
+          }).then(() => {
+            queryClient.invalidateQueries({ queryKey: ["comfy-manage"] });
+          }).catch(() => {/* ignore — next manage poll will reconcile */});
+        }
+      },
+    });
   };
 
   const saveLaunchScriptMutation = useMutation({
@@ -1771,8 +1790,13 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                             scriptId: e.target.value || null,
                           })
                         }
-                        className="text-[10px] font-mono bg-zinc-800 border border-white/5 rounded px-1.5 py-0.5 text-zinc-400 focus:outline-none focus:border-zinc-600 cursor-pointer"
-                        title="Launch mode"
+                        disabled={saveLaunchScriptMutation.isPending}
+                        className="text-[10px] font-mono bg-zinc-800 border border-white/5 rounded px-1.5 py-0.5 text-zinc-400 focus:outline-none focus:border-zinc-600 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        title={
+                          inst.status === "running" || inst.status === "starting"
+                            ? "Launch mode — takes effect on next restart"
+                            : "Launch mode"
+                        }
                       >
                         <option value="">AIOS managed</option>
                         {customScripts.map((s) => (

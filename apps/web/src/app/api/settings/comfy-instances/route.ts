@@ -3,6 +3,7 @@ import { getRequestUser } from '@/lib/auth'
 import {
   getComfyInstances,
   setComfyInstances,
+  getCustomScripts,
   type ComfyInstanceConfig,
 } from '@/lib/providerSettings'
 
@@ -20,17 +21,25 @@ export async function POST(req: NextRequest) {
   const existing = getComfyInstances()
   const updates = body.instances as Array<{ id: string; launchScriptId?: string | null }>
 
-  const merged: ComfyInstanceConfig[] = existing.map((inst) => {
+  const scripts = getCustomScripts()
+  const merged: ComfyInstanceConfig[] = []
+  for (const inst of existing) {
     const update = updates.find((u) => u.id === inst.id)
-    if (!update) return inst
+    if (!update) { merged.push(inst); continue }
     const next = { ...inst }
     if (update.launchScriptId === null || update.launchScriptId === '') {
       delete next.launchScriptId
     } else if (typeof update.launchScriptId === 'string') {
+      if (!scripts.some((s) => s.id === update.launchScriptId)) {
+        return NextResponse.json(
+          { error: `Custom script '${update.launchScriptId}' not found in registry` },
+          { status: 400 },
+        )
+      }
       next.launchScriptId = update.launchScriptId
     }
-    return next
-  })
+    merged.push(next)
+  }
 
   setComfyInstances(merged)
   return NextResponse.json({ instances: getComfyInstances() })

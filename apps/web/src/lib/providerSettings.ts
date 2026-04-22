@@ -174,7 +174,8 @@ export function getComfyInstances(): ComfyInstanceConfig[] {
         typeof i.id === 'string' &&
         typeof i.port === 'number' && Number.isInteger(i.port) && i.port >= 1024 && i.port <= 65535 &&
         typeof i.device === 'string' &&
-        typeof i.label === 'string',
+        typeof i.label === 'string' &&
+        (typeof i.launchScriptId === 'undefined' || typeof i.launchScriptId === 'string'),
     )
     if (validated.length > 0) return validated
   }
