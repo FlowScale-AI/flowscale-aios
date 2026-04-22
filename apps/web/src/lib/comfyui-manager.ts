@@ -465,26 +465,36 @@ export function getInstanceLogTail(instanceId: string, bytes = 16_384): string |
   }
 }
 
-/** Sends SIGTERM to a managed ComfyUI instance (SIGKILL after 5 s). */
+/**
+ * Terminates a process and all its children.
+ * On Windows, uses `taskkill /F /T` to kill the entire tree (needed because
+ * custom scripts spawn via cmd.exe whose Python child won't die on cmd kill).
+ * On Unix, sends SIGTERM with a SIGKILL fallback after 5 s.
+ */
+function killProcessTree(pid: number): void {
+  if (process.platform === 'win32') {
+    try {
+      execSync(`taskkill /F /T /PID ${pid}`, { timeout: 5000 })
+    } catch { /* process already gone */ }
+  } else {
+    try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
+    setTimeout(() => {
+      try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ }
+    }, 5000)
+  }
+}
+
+/** Stops a managed ComfyUI instance, killing the entire process tree. */
 export function stopInstance(instanceId: string): void {
   const proc = comfyProcesses.get(instanceId)
-  if (proc && !proc.killed) {
-    proc.kill('SIGTERM')
-    const p = proc
-    setTimeout(() => {
-      if (!p.killed) p.kill('SIGKILL')
-    }, 5000)
+  if (proc && !proc.killed && proc.pid) {
+    killProcessTree(proc.pid)
     comfyProcesses.delete(instanceId)
   } else {
     // Try via PID file (hot-reload case)
     const pid = readPid(instanceId)
     if (pid && isProcessAlive(pid)) {
-      try { process.kill(pid, 'SIGTERM') } catch { /* ignore */ }
-      setTimeout(() => {
-        if (isProcessAlive(pid)) {
-          try { process.kill(pid, 'SIGKILL') } catch { /* ignore */ }
-        }
-      }, 5000)
+      killProcessTree(pid)
     }
   }
   removePid(instanceId)
