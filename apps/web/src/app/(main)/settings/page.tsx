@@ -106,6 +106,7 @@ interface ComfyManagedInstance {
   port: number;
   device: string;
   label: string;
+  launchScriptId?: string;
 }
 
 interface ComfyManageResponse {
@@ -1761,6 +1762,26 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                       :{inst.port}
                     </span>
                     <InstanceStatusBadge status={inst.status} />
+                    {!inst.external && customScripts.length > 0 && (
+                      <select
+                        value={inst.launchScriptId ?? ""}
+                        onChange={(e) =>
+                          saveLaunchScriptMutation.mutate({
+                            instanceId: inst.id,
+                            scriptId: e.target.value || null,
+                          })
+                        }
+                        className="text-[10px] font-mono bg-zinc-800 border border-white/5 rounded px-1.5 py-0.5 text-zinc-400 focus:outline-none focus:border-zinc-600 cursor-pointer"
+                        title="Launch mode"
+                      >
+                        <option value="">AIOS managed</option>
+                        {customScripts.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     {inst.external && (
                       <span className="text-[10px] font-mono text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-800/70 border border-white/5">
                         External

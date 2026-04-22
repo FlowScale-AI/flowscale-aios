@@ -8,7 +8,7 @@ import {
   startAll,
   stopAll,
 } from '@/lib/comfyui-manager'
-import { getComfyManagedPath, getComfyInstallType } from '@/lib/providerSettings'
+import { getComfyManagedPath, getComfyInstallType, getComfyInstanceById } from '@/lib/providerSettings'
 import { probePort } from '@/lib/comfy-probe'
 import { getRequestUser } from '@/lib/auth'
 
@@ -43,6 +43,7 @@ export async function GET(req: NextRequest) {
         port: st.port,
         device: st.device,
         label: st.label,
+        launchScriptId: getComfyInstanceById(st.id)?.launchScriptId,
       }
     }),
   )
