@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, readdir
 import { createConnection, createServer } from 'net'
 import path from 'path'
 import os from 'os'
-import { getComfyManagedPath, getComfyInstances, getComfyInstanceById, getComfyPythonPath, getComfyBaseDirectory } from './providerSettings'
+import { getComfyManagedPath, getComfyInstances, getComfyInstanceById, getComfyPythonPath, getComfyBaseDirectory, getCustomScripts } from './providerSettings'
 import { WELL_KNOWN_COMFY_PORTS } from './comfy-probe'
 
 const AIOS_DIR = path.join(os.homedir(), '.flowscale', 'aios')
@@ -62,6 +62,20 @@ function removePid(instanceId: string): void {
 
 function isProcessAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true } catch { return false }
+}
+
+/** Determine the spawn command and args for a custom script based on its extension. */
+export function buildScriptSpawnArgs(
+  scriptPath: string,
+  platform: string = process.platform,
+): { cmd: string; args: string[] } {
+  const ext = path.extname(scriptPath).toLowerCase()
+  if (platform === 'win32') {
+    if (ext === '.bat') return { cmd: 'cmd.exe', args: ['/c', scriptPath] }
+    if (ext === '.ps1') return { cmd: 'powershell.exe', args: ['-ExecutionPolicy', 'Bypass', '-File', scriptPath] }
+  }
+  if (ext === '.sh') return { cmd: 'sh', args: [scriptPath] }
+  return { cmd: scriptPath, args: [] }
 }
 
 /** Returns the best Python executable for the given ComfyUI installation. */
@@ -303,37 +317,59 @@ export async function startInstance(instanceId: string): Promise<{ port: number;
     throw new Error(`Port ${config.port} is already in use — a ComfyUI instance may already be running for ${config.label}`)
   }
 
-  const comfyPath = getComfyManagedPath()
-  if (!comfyPath) throw new Error('ComfyUI path not configured. Please complete the setup first.')
-  if (!existsSync(comfyPath)) throw new Error(`ComfyUI directory not found: ${comfyPath}`)
+  // ── Resolve launch: custom script OR managed python launch ────────────────
+  let spawnCmd: string
+  let spawnArgs: string[]
+  let spawnCwd: string
+  let env: NodeJS.ProcessEnv
 
-  const mainPy = path.join(comfyPath, 'main.py')
-  if (!existsSync(mainPy)) {
-    throw new Error(`ComfyUI main.py not found at: ${mainPy}. Is this a valid ComfyUI installation?`)
+  const customScript = config.launchScriptId
+    ? getCustomScripts().find((s) => s.id === config.launchScriptId)
+    : undefined
+
+  if (customScript) {
+    // Custom script — don't inject GPU env vars; the script owns device selection.
+    const { cmd, args: scriptArgs } = buildScriptSpawnArgs(customScript.path)
+    spawnCmd = cmd
+    spawnArgs = scriptArgs
+    spawnCwd = path.dirname(customScript.path)
+    env = { ...process.env }
+  } else {
+    // Managed launch — AIOS builds the command.
+    const comfyPath = getComfyManagedPath()
+    if (!comfyPath) throw new Error('ComfyUI path not configured. Please complete the setup first.')
+    if (!existsSync(comfyPath)) throw new Error(`ComfyUI directory not found: ${comfyPath}`)
+
+    const mainPy = path.join(comfyPath, 'main.py')
+    if (!existsSync(mainPy)) {
+      throw new Error(`ComfyUI main.py not found at: ${mainPy}. Is this a valid ComfyUI installation?`)
+    }
+
+    const python = findPythonExec(comfyPath)
+    env = buildDeviceEnv(config.device)
+
+    // ComfyUI Desktop ships its frontend as a bundled web dir instead of the
+    // pip `comfyui-frontend-package`. When that layout is detected, point
+    // main.py at the bundled frontend so it doesn't crash on startup.
+    const desktopFrontEnd = path.join(comfyPath, 'web_custom_versions', 'desktop_app')
+    const frontEndArgs = existsSync(desktopFrontEnd) ? ['--front-end-root', desktopFrontEnd] : []
+
+    // User-configured data directory — passed as --base-directory so the managed
+    // instance shares models/input/output/user with an external ComfyUI workspace.
+    const baseDir = getComfyBaseDirectory()
+    const baseDirArgs = baseDir && existsSync(baseDir) ? ['--base-directory', baseDir] : []
+
+    spawnCmd = python
+    spawnArgs = [
+      mainPy,
+      '--port', String(config.port),
+      '--listen', '127.0.0.1',
+      ...frontEndArgs,
+      ...baseDirArgs,
+      ...(config.device === 'cpu' ? ['--cpu'] : []),
+    ]
+    spawnCwd = comfyPath
   }
-
-  const python = findPythonExec(comfyPath)
-  const env = buildDeviceEnv(config.device)
-
-  // ComfyUI Desktop ships its frontend as a bundled web dir instead of the
-  // pip `comfyui-frontend-package`. When that layout is detected, point
-  // main.py at the bundled frontend so it doesn't crash on startup.
-  const desktopFrontEnd = path.join(comfyPath, 'web_custom_versions', 'desktop_app')
-  const frontEndArgs = existsSync(desktopFrontEnd) ? ['--front-end-root', desktopFrontEnd] : []
-
-  // User-configured data directory — passed as --base-directory so the managed
-  // instance shares models/input/output/user with an external ComfyUI workspace.
-  const baseDir = getComfyBaseDirectory()
-  const baseDirArgs = baseDir && existsSync(baseDir) ? ['--base-directory', baseDir] : []
-
-  const args = [
-    mainPy,
-    '--port', String(config.port),
-    '--listen', '127.0.0.1',
-    ...frontEndArgs,
-    ...baseDirArgs,
-    ...(config.device === 'cpu' ? ['--cpu'] : []),
-  ]
 
   // Truncate the per-instance log on each start and write a banner so we can
   // distinguish runs. Keeps only the latest boot — rotation isn't needed for
@@ -358,17 +394,19 @@ export async function startInstance(instanceId: string): Promise<{ port: number;
     logStream.write(chunk)
   }
   writeLog(
-    `[${new Date().toISOString()}] spawn: ${python} ${args.map((a) => (a.includes(' ') ? `"${a}"` : a)).join(' ')}\n` +
-    `[cwd] ${comfyPath}\n` +
-    `[device] ${config.device}\n\n`,
+    `[${new Date().toISOString()}] spawn: ${spawnCmd} ${spawnArgs.map((a) => (a.includes(' ') ? `"${a}"` : a)).join(' ')}\n` +
+    `[cwd] ${spawnCwd}\n` +
+    `[device] ${config.device}\n` +
+    (customScript ? `[script] ${customScript.label} (${customScript.path})\n` : '') +
+    '\n',
   )
 
   // Any failure between stream creation and handler wiring must not leak the
   // open file descriptor — close it and rethrow.
   let child: ChildProcess
   try {
-    child = spawn(python, args, {
-      cwd: comfyPath,
+    child = spawn(spawnCmd, spawnArgs, {
+      cwd: spawnCwd,
       detached: false,
       stdio: 'pipe',
       env,
