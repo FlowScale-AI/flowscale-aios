@@ -66,11 +66,12 @@ Everything related to instance management (start/stop, launch scripts, logs) is 
 
 Lists all managed + external instances (existing `allInstances` logic).
 
-**Each instance row (unchanged from current):**
+**Each instance row:**
 - Device icon (GPU/CPU), label, port, device name chip, status badge
 - Launch script dropdown (if custom scripts configured)
 - External badge for non-managed instances
 - Action buttons: Start / Restart / Stop / View Log (managed); Stop (external)
+- **Delete button (trash icon)** — managed instances only; disabled (greyed out) when instance is running or starting. On click: stops the instance if needed, removes it from `comfyInstances` in settings, triggers refetch. Calls `DELETE /api/comfy/instances/{id}`.
 
 **"Add Instance" button**
 - Appears in the card header
@@ -126,13 +127,19 @@ Each section saves individually (existing save mutations). No "Save All" — sam
 
 **`ComfyUITab` function** becomes a thin router: checks `isSetup`, renders either `ComfyUIBlankState` or `ComfyUIDashboard`.
 
-### New API endpoint
+### New API endpoints
 
 `POST /api/comfy/instances/add`
 - Body: `{ gpuIndex: number }`
 - Creates a single new managed ComfyUI instance for the specified GPU index
 - Returns the new instance record
 - Implementation: thin wrapper around existing instance creation logic in `comfyui-manager.ts`
+
+`DELETE /api/comfy/instances/[id]`
+- Stops the instance process if running (reuses existing stop logic)
+- Removes the instance from `comfyInstances` in `settings.json` via `setComfyInstances`
+- Cleans up the PID file
+- Returns `{ ok: true }`
 
 ---
 
@@ -144,3 +151,5 @@ Each section saves individually (existing save mutations). No "Save All" — sam
 - **Existing `/integrations/comfyui` page:** Not removed or changed by this spec. The blank state wizard supersedes it for the settings tab entry point; the integrations page can be cleaned up separately.
 - **External ComfyUI stop confirmation modal:** Unchanged — still a separate `<Modal>` triggered from the instance row.
 - **Spawn-log viewer modal:** Unchanged.
+- **Delete instance — disabled while running:** The trash icon is greyed out when `status === 'running' || status === 'starting'`. User must stop the instance first. No auto-stop-then-delete to avoid accidental data loss.
+- **External stop detection:** The backend already calls `isProcessAlive(pid)` on every `GET /api/comfy/manage` poll, cleaning up stale PID files automatically. The UI fix is to widen the auto-refetch condition from `anyStarting` only to `anyStarting || anyRunning`, polling every 5s whenever any managed instance is running. This ensures externally-killed instances are reflected in the UI within ~5s.
