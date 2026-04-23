@@ -29,6 +29,10 @@ export async function POST(req: NextRequest) {
   const maxPort = existing.reduce((m, i) => Math.max(m, i.port), 41187)
   const newPort = maxPort + 1
 
+  if (newPort > 65535) {
+    return NextResponse.json({ error: 'No available port in valid range (all ports up to 65535 are in use)' }, { status: 409 })
+  }
+
   const devicePrefix = gpu.backend === 'rocm' ? 'rocm' : 'cuda'
   const newInstance: ComfyInstanceConfig = {
     id: instanceId,

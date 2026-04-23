@@ -60,6 +60,8 @@ interface ComfyManageResponse {
 
 // ─── ComfyUI Tab ─────────────────────────────────────────────────────────────
 
+const DESKTOP_DEFAULT_PATH = "/Applications/ComfyUI.app/Contents/Resources/ComfyUI";
+
 function InstanceStatusBadge({ status }: { status: string }) {
   if (status === "starting") {
     return (
@@ -93,6 +95,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const [showAddDropdown, setShowAddDropdown] = useState(false);
   const addDropdownRef = useRef<HTMLDivElement>(null);
   const labelEditCancelledRef = useRef(false);
+  const setupCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: gpuData } = useQuery<{ gpus: Array<{ index: number; name: string; vramMB: number; backend: string }>; cpu: unknown }>({
     queryKey: ["gpu-detect"],
@@ -117,6 +120,12 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
             isSetup: false,
           };
         return res.json();
+      },
+      placeholderData: {
+        instances: [],
+        managedPath: null,
+        installType: null,
+        isSetup: true,
       },
       refetchInterval: (q) => {
         const data = q.state.data;
@@ -554,7 +563,6 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const [setupJustCompleted, setSetupJustCompleted] = useState(false);
 
   // Desktop App option
-  const DESKTOP_DEFAULT_PATH = "/Applications/ComfyUI.app/Contents/Resources/ComfyUI";
   const [desktopComfyPath, setDesktopComfyPath] = useState(DESKTOP_DEFAULT_PATH);
   const [desktopUserDataPath, setDesktopUserDataPath] = useState("");
   const [desktopPathValid, setDesktopPathValid] = useState<boolean | null>(null);
@@ -591,7 +599,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   };
 
   const saveComfySetup = async (installType: string, managedPath: string, desktopDataPath?: string) => {
-    await fetch("/api/settings/comfyui-setup", {
+    const res = await fetch("/api/settings/comfyui-setup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -600,6 +608,10 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
         ...(desktopDataPath ? { desktopUserDataPath: desktopDataPath } : {}),
       }),
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error || "Failed to save ComfyUI configuration");
+    }
   };
 
   const streamInstall = async (targetPath?: string): Promise<boolean> => {
@@ -622,7 +634,12 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       buf = lines.pop() ?? "";
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
-        const payload = JSON.parse(line.slice(6)) as { msg?: string; done?: boolean; error?: string };
+        let payload: { msg?: string; done?: boolean; error?: string };
+        try {
+          payload = JSON.parse(line.slice(6));
+        } catch {
+          continue;
+        }
         if (payload.msg) setInstallLog((prev) => [...prev, payload.msg!]);
         if (payload.error) { setInstallError(payload.error); return false; }
         if (payload.done) return true;
@@ -635,7 +652,8 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     setSetupPhase("detecting");
     await fetch("/api/comfy/instances/detect", { method: "POST" });
     setSetupJustCompleted(true);
-    setTimeout(() => setSetupJustCompleted(false), 5000);
+    if (setupCompleteTimerRef.current) clearTimeout(setupCompleteTimerRef.current);
+    setupCompleteTimerRef.current = setTimeout(() => setSetupJustCompleted(false), 5000);
     queryClient.invalidateQueries({ queryKey: ["comfy-manage"] });
     refetchManage();
   };
@@ -670,8 +688,13 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     const pathToUse = resolvedCustomPath || customPath.trim();
     if (!pathToUse || !customPathValid) { showError("Enter a valid ComfyUI installation path"); return; }
     setSetupPhase("detecting");
-    await saveComfySetup("flowscale-managed", pathToUse);
-    await finishSetup();
+    try {
+      await saveComfySetup("flowscale-managed", pathToUse);
+      await finishSetup();
+    } catch (err: unknown) {
+      setSetupPhase("choose");
+      showError(err instanceof Error ? err.message : "Setup failed");
+    }
   };
 
   useEffect(() => {
@@ -682,6 +705,12 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       setDesktopComfyPath,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (setupCompleteTimerRef.current) clearTimeout(setupCompleteTimerRef.current);
+    };
   }, []);
 
   // ── Spawn-log viewer ────────────────────────────────────────────────────────
@@ -819,7 +848,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                               className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
                             />
                           </div>
-                          {window.desktop?.dialog?.openDirectory && (
+                          {typeof window !== "undefined" && window.desktop?.dialog?.openDirectory && (
                             <button
                               onClick={async () => {
                                 const dir = await window.desktop!.dialog.openDirectory!();
@@ -904,7 +933,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                               className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
                             />
                           </div>
-                          {window.desktop?.dialog?.openDirectory && (
+                          {typeof window !== "undefined" && window.desktop?.dialog?.openDirectory && (
                             <button
                               onClick={async () => {
                                 const dir = await window.desktop!.dialog.openDirectory!();
@@ -972,9 +1001,6 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                     </span>
                   )}
                 </div>
-                {!comfyManage?.isSetup && (
-                  <p className="text-xs text-zinc-600 mt-0.5">Setup required</p>
-                )}
               </div>
             </div>
 
@@ -1171,7 +1197,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                         }
                         disabled={comfyActionMutation.isPending}
                         className="p-1 text-zinc-600 hover:text-emerald-400 transition-colors disabled:opacity-40"
-                        title={`Start ${inst.label}`}
+                        title={`Start ${getInstanceDisplayLabel(inst)}`}
                       >
                         <Play size={12} weight="fill" />
                       </button>
@@ -1191,7 +1217,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                             inst.status === "starting"
                           }
                           className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors disabled:opacity-40"
-                          title={`Restart ${inst.label}`}
+                          title={`Restart ${getInstanceDisplayLabel(inst)}`}
                         >
                           <ArrowCounterClockwise size={12} />
                         </button>
@@ -1204,7 +1230,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                           }
                           disabled={comfyActionMutation.isPending}
                           className="p-1 text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-40"
-                          title={`Stop ${inst.label}`}
+                          title={`Stop ${getInstanceDisplayLabel(inst)}`}
                         >
                           <Stop size={12} weight="fill" />
                         </button>
@@ -1214,7 +1240,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                       <button
                         onClick={() => setLogInstanceId(inst.id)}
                         className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
-                        title={`View log for ${inst.label}`}
+                        title={`View log for ${getInstanceDisplayLabel(inst)}`}
                       >
                         <FileText size={12} />
                       </button>
@@ -1231,7 +1257,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                         title={
                           inst.status === "running" || inst.status === "starting"
                             ? "Stop the instance before deleting"
-                            : `Delete ${inst.label}`
+                            : `Delete ${getInstanceDisplayLabel(inst)}`
                         }
                       >
                         <Trash size={12} />
