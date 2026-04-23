@@ -19,6 +19,7 @@ import {
   PencilSimple,
   Trash,
   GearSix,
+  Warning,
 } from "phosphor-react";
 import { Modal } from "@flowscale/ui";
 import { useModalStatus } from "@/hooks/useModalStatus";
@@ -538,6 +539,150 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     },
   });
 
+  // ── Blank setup state ──────────────────────────────────────────────────────
+  type SetupPhase =
+    | "choose"
+    | "configuring-desktop"
+    | "configuring-custom"
+    | "installing"
+    | "detecting";
+
+  const [setupPhase, setSetupPhase] = useState<SetupPhase>("choose");
+  const [installLog, setInstallLog] = useState<string[]>([]);
+  const [installError, setInstallError] = useState("");
+  const [setupJustCompleted, setSetupJustCompleted] = useState(false);
+
+  // Desktop App option
+  const DESKTOP_DEFAULT_PATH = "/Applications/ComfyUI.app/Contents/Resources/ComfyUI";
+  const [desktopComfyPath, setDesktopComfyPath] = useState(DESKTOP_DEFAULT_PATH);
+  const [desktopUserDataPath, setDesktopUserDataPath] = useState("");
+  const [desktopPathValid, setDesktopPathValid] = useState<boolean | null>(null);
+  const [desktopPathValidating, setDesktopPathValidating] = useState(false);
+
+  // Custom path option
+  const [customPath, setCustomPath] = useState("");
+  const [customPathValid, setCustomPathValid] = useState<boolean | null>(null);
+  const [customPathValidating, setCustomPathValidating] = useState(false);
+  const [resolvedCustomPath, setResolvedCustomPath] = useState("");
+
+  // ── Setup helpers ──────────────────────────────────────────────────────────
+
+  const validatePath = async (
+    pathStr: string,
+    setValid: (v: boolean | null) => void,
+    setValidating: (v: boolean) => void,
+    onResolved?: (p: string) => void,
+  ) => {
+    if (!pathStr.trim()) { setValid(null); return; }
+    setValidating(true);
+    try {
+      const res = await fetch(
+        `/api/comfy/setup/validate-path?path=${encodeURIComponent(pathStr.trim())}`,
+      );
+      const data = await res.json() as { valid: boolean; resolvedPath?: string };
+      setValid(data.valid);
+      if (data.valid && data.resolvedPath && onResolved) onResolved(data.resolvedPath);
+    } catch {
+      setValid(false);
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const saveComfySetup = async (installType: string, managedPath: string, desktopDataPath?: string) => {
+    await fetch("/api/settings/comfyui-setup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        installType,
+        managedPath,
+        ...(desktopDataPath ? { desktopUserDataPath: desktopDataPath } : {}),
+      }),
+    });
+  };
+
+  const streamInstall = async (targetPath?: string): Promise<boolean> => {
+    setInstallLog([]);
+    setInstallError("");
+    const res = await fetch("/api/comfy/setup/install", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(targetPath ? { targetPath } : {}),
+    });
+    if (!res.body) { setInstallError("No response body"); return false; }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = JSON.parse(line.slice(6)) as { msg?: string; done?: boolean; error?: string };
+        if (payload.msg) setInstallLog((prev) => [...prev, payload.msg!]);
+        if (payload.error) { setInstallError(payload.error); return false; }
+        if (payload.done) return true;
+      }
+    }
+    return true;
+  };
+
+  const finishSetup = async () => {
+    setSetupPhase("detecting");
+    await fetch("/api/comfy/instances/detect", { method: "POST" });
+    setSetupJustCompleted(true);
+    setTimeout(() => setSetupJustCompleted(false), 5000);
+    queryClient.invalidateQueries({ queryKey: ["comfy-manage"] });
+    refetchManage();
+  };
+
+  const handleDesktopSetup = async () => {
+    if (!desktopUserDataPath.trim()) { showError("Desktop user data path is required"); return; }
+    setSetupPhase("installing");
+    try {
+      await saveComfySetup("desktop-app", desktopPathValid ? desktopComfyPath : "", desktopUserDataPath.trim());
+      const ok = await streamInstall(desktopPathValid ? desktopComfyPath : undefined);
+      if (!ok) return;
+      await fetch("/api/comfy/setup/copy-assets", { method: "POST" });
+      await finishSetup();
+    } catch (err: unknown) {
+      setInstallError(err instanceof Error ? err.message : "Setup failed");
+    }
+  };
+
+  const handleInstallSetup = async () => {
+    setSetupPhase("installing");
+    try {
+      await saveComfySetup("github", "");
+      const ok = await streamInstall();
+      if (!ok) return;
+      await finishSetup();
+    } catch (err: unknown) {
+      setInstallError(err instanceof Error ? err.message : "Install failed");
+    }
+  };
+
+  const handleCustomSetup = async () => {
+    const pathToUse = resolvedCustomPath || customPath.trim();
+    if (!pathToUse || !customPathValid) { showError("Enter a valid ComfyUI installation path"); return; }
+    setSetupPhase("detecting");
+    await saveComfySetup("custom", pathToUse);
+    await finishSetup();
+  };
+
+  useEffect(() => {
+    validatePath(
+      DESKTOP_DEFAULT_PATH,
+      setDesktopPathValid,
+      setDesktopPathValidating,
+      setDesktopComfyPath,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Spawn-log viewer ────────────────────────────────────────────────────────
   const [logInstanceId, setLogInstanceId] = useState<string | null>(null);
   const { data: logData } = useQuery<{ log: string | null }>({
@@ -555,8 +700,241 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
 
   return (
     <div className="px-10 pb-8">
-      <div className="max-w-3xl">
-        <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+      {!comfyManage?.isSetup ? (
+        <div className="max-w-2xl">
+          {/* ── Detecting phase ─────────────────────────────────────────────── */}
+          {setupPhase === "detecting" && (
+            <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)] flex items-center gap-3">
+              <CircleNotch size={18} className="animate-spin text-emerald-400 shrink-0" />
+              <span className="text-sm text-zinc-300">Detecting GPUs and configuring instances…</span>
+            </div>
+          )}
+
+          {/* ── Installing phase ─────────────────────────────────────────────── */}
+          {setupPhase === "installing" && (
+            <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+              <div className="mb-3">
+                <h3 className="font-tech text-sm font-semibold text-zinc-200">Installing ComfyUI</h3>
+                <p className="text-xs text-zinc-500 mt-0.5">This may take a few minutes…</p>
+              </div>
+              <div className="rounded-lg bg-black/60 border border-white/5 p-3 max-h-64 overflow-auto">
+                <pre className="text-[11px] font-mono text-zinc-300 whitespace-pre-wrap">
+                  {installLog.join("\n") || "Starting…"}
+                </pre>
+              </div>
+              {installError && (
+                <div className="mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-950/30 border border-red-500/20">
+                  <Warning size={14} className="text-red-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-300">{installError}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Choose / Configuring phases ──────────────────────────────────── */}
+          {(setupPhase === "choose" || setupPhase === "configuring-desktop" || setupPhase === "configuring-custom") && (
+            <>
+              <div className="mb-6">
+                <h2 className="font-tech text-xl font-semibold text-zinc-100">Connect your ComfyUI Workspace</h2>
+                <p className="text-sm text-zinc-500 mt-1">
+                  Link your local ComfyUI installation to FlowScale AIOS to manage instances and orchestrate generative workflows.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                {/* Option A — ComfyUI Desktop App */}
+                <div className={`p-4 rounded-xl border transition-colors ${setupPhase === "configuring-desktop" ? "border-emerald-500/30 bg-[var(--color-background-panel)]" : "border-white/8 bg-[var(--color-background-panel)]/50"}`}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-semibold text-zinc-200">ComfyUI Desktop App</span>
+                        {desktopPathValid === true && (
+                          <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                            <CheckCircle size={10} weight="fill" /> Detected
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-zinc-500">Use your existing ComfyUI Desktop App installation.</p>
+                    </div>
+                    {setupPhase !== "configuring-desktop" && (
+                      <button
+                        onClick={() => setSetupPhase("configuring-desktop")}
+                        className="px-3 py-1.5 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors shrink-0"
+                      >
+                        Select
+                      </button>
+                    )}
+                  </div>
+
+                  {setupPhase === "configuring-desktop" && (
+                    <div className="mt-4 space-y-3">
+                      <div>
+                        <label className="block text-[11px] text-zinc-500 mb-1">ComfyUI App path</label>
+                        <div className="flex gap-2 items-center">
+                          <div className="relative flex-1">
+                            <FolderOpen size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                            <input
+                              type="text"
+                              value={desktopComfyPath}
+                              onChange={(e) => {
+                                setDesktopComfyPath(e.target.value);
+                                setDesktopPathValid(null);
+                              }}
+                              onBlur={() => validatePath(desktopComfyPath, setDesktopPathValid, setDesktopPathValidating, setDesktopComfyPath)}
+                              className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
+                            />
+                          </div>
+                          {desktopPathValidating && <CircleNotch size={14} className="animate-spin text-zinc-500 shrink-0" />}
+                          {desktopPathValid === true && <CheckCircle size={14} className="text-emerald-400 shrink-0" weight="fill" />}
+                          {desktopPathValid === false && <span className="text-[10px] text-red-400 shrink-0">Not found</span>}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-zinc-500 mb-1">
+                          User data folder <span className="text-zinc-600">(models, custom_nodes, etc.)</span>
+                        </label>
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <FolderOpen size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                            <input
+                              type="text"
+                              value={desktopUserDataPath}
+                              onChange={(e) => setDesktopUserDataPath(e.target.value)}
+                              placeholder="e.g. ~/Library/Application Support/ComfyUI"
+                              className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
+                            />
+                          </div>
+                          {window.desktop?.dialog?.openDirectory && (
+                            <button
+                              onClick={async () => {
+                                const dir = await window.desktop!.dialog.openDirectory!();
+                                if (dir) setDesktopUserDataPath(dir);
+                              }}
+                              className="px-2.5 py-1.5 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg hover:border-zinc-600 transition-colors shrink-0"
+                            >
+                              Browse
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button onClick={() => setSetupPhase("choose")} className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Back</button>
+                        <button
+                          onClick={handleDesktopSetup}
+                          disabled={!desktopUserDataPath.trim()}
+                          className="px-4 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded-lg transition-colors"
+                        >
+                          Use Desktop App
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Option B — Install via AIOS */}
+                <div className="p-4 rounded-xl border border-white/8 bg-[var(--color-background-panel)]/50">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-200 mb-1">Install via FlowScale AIOS</p>
+                      <p className="text-xs text-zinc-500">Clone ComfyUI from GitHub into <span className="font-mono text-zinc-400">~/.flowscale/comfyui</span> and set it up automatically.</p>
+                    </div>
+                    <button
+                      onClick={handleInstallSetup}
+                      className="px-3 py-1.5 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors shrink-0"
+                    >
+                      Install
+                    </button>
+                  </div>
+                </div>
+
+                {/* Option C — Custom path */}
+                <div className={`p-4 rounded-xl border transition-colors ${setupPhase === "configuring-custom" ? "border-emerald-500/30 bg-[var(--color-background-panel)]" : "border-white/8 bg-[var(--color-background-panel)]/50"}`}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-zinc-200 mb-1">Existing Custom Installation</p>
+                      <p className="text-xs text-zinc-500">Point AIOS to a ComfyUI folder you already have on disk.</p>
+                    </div>
+                    {setupPhase !== "configuring-custom" && (
+                      <button
+                        onClick={() => setSetupPhase("configuring-custom")}
+                        className="px-3 py-1.5 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors shrink-0"
+                      >
+                        Select
+                      </button>
+                    )}
+                  </div>
+
+                  {setupPhase === "configuring-custom" && (
+                    <div className="mt-4 space-y-3">
+                      <div>
+                        <label className="block text-[11px] text-zinc-500 mb-1">ComfyUI installation folder</label>
+                        <div className="flex gap-2 items-center">
+                          <div className="relative flex-1">
+                            <FolderOpen size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                            <input
+                              type="text"
+                              value={customPath}
+                              onChange={(e) => {
+                                setCustomPath(e.target.value);
+                                setCustomPathValid(null);
+                                setResolvedCustomPath("");
+                              }}
+                              onBlur={() => validatePath(
+                                customPath,
+                                setCustomPathValid,
+                                setCustomPathValidating,
+                                setResolvedCustomPath,
+                              )}
+                              placeholder="/path/to/ComfyUI"
+                              className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
+                            />
+                          </div>
+                          {window.desktop?.dialog?.openDirectory && (
+                            <button
+                              onClick={async () => {
+                                const dir = await window.desktop!.dialog.openDirectory!();
+                                if (dir) {
+                                  setCustomPath(dir);
+                                  validatePath(dir, setCustomPathValid, setCustomPathValidating, setResolvedCustomPath);
+                                }
+                              }}
+                              className="px-2.5 py-1.5 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg hover:border-zinc-600 transition-colors shrink-0"
+                            >
+                              Browse
+                            </button>
+                          )}
+                          {customPathValidating && <CircleNotch size={14} className="animate-spin text-zinc-500 shrink-0" />}
+                          {customPathValid === true && <CheckCircle size={14} className="text-emerald-400 shrink-0" weight="fill" />}
+                          {customPathValid === false && <span className="text-[10px] text-red-400 shrink-0 whitespace-nowrap">Not a valid ComfyUI folder</span>}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button onClick={() => setSetupPhase("choose")} className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Back</button>
+                        <button
+                          onClick={handleCustomSetup}
+                          disabled={!customPathValid}
+                          className="px-4 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded-lg transition-colors"
+                        >
+                          Connect
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <>
+          {setupJustCompleted && (
+            <div className="max-w-3xl mb-4 flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300">
+              <CheckCircle size={14} weight="fill" className="text-emerald-400 shrink-0" />
+              ComfyUI connected — instances are ready. Start them below.
+            </div>
+          )}
+          <div className="max-w-3xl">
+            <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
           {/* Header row */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
@@ -853,11 +1231,11 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
 
         </div>
 
-        {/* Cloud Instances section — shown when Modal is authenticated */}
-        {modalStatus?.authenticated && <ModalComfySection />}
-      </div>
+          {/* Cloud Instances section — shown when Modal is authenticated */}
+          {modalStatus?.authenticated && <ModalComfySection />}
+        </div>
 
-      {/* Configuration Modal */}
+        {/* Configuration Modal */}
       <Modal
         isOpen={configModalOpen}
         onClose={() => setConfigModalOpen(false)}
@@ -1148,6 +1526,8 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
           </div>
         </div>
       </Modal>
+        </>
+      )}
     </div>
   );
 }
