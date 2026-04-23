@@ -48,7 +48,9 @@ export async function POST() {
       port: basePort + i,
       device: `${devicePrefix}:${gpu.index}`,
       label: `GPU ${gpu.index} — ${gpu.name}`,
+      gpuName: gpu.name,
       ...(prior?.launchScriptId ? { launchScriptId: prior.launchScriptId } : {}),
+      ...(prior?.customLabel ? { customLabel: prior.customLabel } : {}),
     })
   }
 
