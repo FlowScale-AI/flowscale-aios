@@ -67,10 +67,12 @@ Everything related to instance management (start/stop, launch scripts, logs) is 
 Lists all managed + external instances (existing `allInstances` logic).
 
 **Each instance row:**
-- Device icon (GPU/CPU), label, port, device name chip, status badge
+- Device icon (GPU/CPU), label (custom or fallback), port, device name chip, status badge
 - Launch script dropdown (if custom scripts configured)
 - External badge for non-managed instances
 - Action buttons: Start / Restart / Stop / View Log (managed); Stop (external)
+- **Editable label** — pencil icon on each managed instance row. Click → field goes inline-editable (input replaces the label text), Enter or blur saves. Calls existing `/api/settings/comfy-instances` endpoint with the updated label for that instance. If the saved label is empty, it is cleared and the fallback display is used.
+- **Label fallback** — when no custom label is set, display `{gpuName} :{port}` (e.g. `RTX 4090 :41188`) or `CPU :{port}`. Uses the GPU name from the detected `devices` field on the instance, not the GPU index. This fallback applies everywhere the instance is shown: the settings row, the ComputePicker dropdown in the tool page, and the build-tool test step.
 - **Delete button (trash icon)** — managed instances only; disabled (greyed out) when instance is running or starting. On click: stops the instance if needed, removes it from `comfyInstances` in settings, triggers refetch. Calls `DELETE /api/comfy/instances/{id}`.
 
 **"Add Instance" button**
