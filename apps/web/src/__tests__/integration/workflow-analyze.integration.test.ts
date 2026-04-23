@@ -156,7 +156,7 @@ describe('POST /api/workflow/analyze (integration)', () => {
     const res = await POST(req)
     expect(res.status).toBe(200)
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://localhost:8188/object_info',
+      'http://127.0.0.1:8188/object_info',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
   })
