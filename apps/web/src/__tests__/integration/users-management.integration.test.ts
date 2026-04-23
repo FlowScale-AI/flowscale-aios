@@ -47,7 +47,7 @@ describe('Users management integration', () => {
     expect(res.status).toBe(403)
   })
 
-  it('GET /api/users returns 403 for non-manager role', async () => {
+  it('GET /api/users returns only own record for non-manager role', async () => {
     // Create an artist user
     const artistReq = authedReq('/api/users', {
       method: 'POST',
@@ -59,7 +59,10 @@ describe('Users management integration', () => {
 
     const artistToken = createTestSession(db, artist.id)
     const res = await getUsers(makeRequest('/api/users', { cookies: { fs_session: artistToken } }))
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.length).toBe(1)
+    expect(body[0].username).toBe('artist1')
   })
 
   // ── POST /api/users ──────────────────────────────────────────────────

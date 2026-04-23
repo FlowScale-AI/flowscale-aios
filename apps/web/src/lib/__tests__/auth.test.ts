@@ -158,18 +158,16 @@ describe('ROLE_NAV', () => {
     expect(ROLE_NAV.dev).not.toContain('/users')
   })
 
-  it('artist has /home, /canvas, /explore, /outputs, and /apps', () => {
-    expect(ROLE_NAV.artist).toEqual(['/home', '/canvas', '/explore', '/outputs', '/apps'])
+  it('artist has /home, /tools, and /jobs', () => {
+    expect(ROLE_NAV.artist).toEqual(['/home', '/tools', '/jobs'])
   })
 
   it('admin and pipeline_td have the same routes', () => {
     expect(ROLE_NAV.admin).toEqual(ROLE_NAV.pipeline_td)
   })
 
-  it('all roles have /apps', () => {
-    for (const role of Object.keys(ROLE_NAV) as Role[]) {
-      expect(ROLE_NAV[role]).toContain('/apps')
-    }
+  it('admin has /apps', () => {
+    expect(ROLE_NAV.admin).toContain('/apps')
   })
 })
 
