@@ -147,8 +147,12 @@ export interface ComfyInstanceConfig {
   port: number
   /** Device specifier: 'cuda:0', 'rocm:1', 'cpu' */
   device: string
-  /** Human-readable label, e.g. 'GPU 0 — RTX 4090' */
+  /** Human-readable label, e.g. 'GPU 0 — RTX 4090' — kept for backwards compat */
   label: string
+  /** GPU model name only, e.g. 'RTX 4090' — absent for CPU instances */
+  gpuName?: string
+  /** User-editable display name — takes priority over fallback when non-empty */
+  customLabel?: string
   /** References CustomScript.id; absent = AIOS managed launch */
   launchScriptId?: string
 }
@@ -175,6 +179,8 @@ export function getComfyInstances(): ComfyInstanceConfig[] {
         typeof i.port === 'number' && Number.isInteger(i.port) && i.port >= 1024 && i.port <= 65535 &&
         typeof i.device === 'string' &&
         typeof i.label === 'string' &&
+        (typeof i.gpuName === 'undefined' || typeof i.gpuName === 'string') &&
+        (typeof i.customLabel === 'undefined' || typeof i.customLabel === 'string') &&
         (typeof i.launchScriptId === 'undefined' || typeof i.launchScriptId === 'string'),
     )
     if (validated.length > 0) return validated

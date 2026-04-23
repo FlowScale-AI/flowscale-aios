@@ -59,3 +59,36 @@ describe('ComfyInstanceConfig.launchScriptId', () => {
     expect(getComfyInstances()[0].launchScriptId).toBeUndefined()
   })
 })
+
+describe('ComfyInstanceConfig.gpuName and customLabel', () => {
+  it('persists and retrieves gpuName', () => {
+    setComfyInstances([
+      { id: 'gpu-0', port: 41188, device: 'cuda:0', label: 'GPU 0 — RTX 4090', gpuName: 'RTX 4090' },
+    ])
+    expect(getComfyInstances()[0].gpuName).toBe('RTX 4090')
+  })
+
+  it('persists and retrieves customLabel', () => {
+    setComfyInstances([
+      { id: 'gpu-0', port: 41188, device: 'cuda:0', label: 'GPU 0 — RTX 4090', customLabel: 'Image Gen' },
+    ])
+    expect(getComfyInstances()[0].customLabel).toBe('Image Gen')
+  })
+
+  it('allows gpuName and customLabel to be absent', () => {
+    setComfyInstances([
+      { id: 'gpu-0', port: 41188, device: 'cuda:0', label: 'GPU 0 — RTX 4090' },
+    ])
+    const inst = getComfyInstances()[0]
+    expect(inst.gpuName).toBeUndefined()
+    expect(inst.customLabel).toBeUndefined()
+  })
+
+  it('clears customLabel when set to empty string and re-read', () => {
+    setComfyInstances([
+      { id: 'gpu-0', port: 41188, device: 'cuda:0', label: 'GPU 0', customLabel: '' },
+    ])
+    // empty string should survive the round-trip (filtering is at display layer)
+    expect(getComfyInstances()[0].customLabel).toBe('')
+  })
+})
