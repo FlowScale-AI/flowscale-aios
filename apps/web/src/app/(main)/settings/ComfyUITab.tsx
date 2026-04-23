@@ -15,10 +15,13 @@ import {
   FileText,
   ArrowRight,
   CheckCircle,
+  PencilSimple,
+  Trash,
 } from "phosphor-react";
 import { Modal } from "@flowscale/ui";
 import { useModalStatus } from "@/hooks/useModalStatus";
 import { ModalComfySection } from "@/components/ModalComfySection";
+import { getInstanceDisplayLabel } from "@/lib/instanceLabel";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -101,10 +104,10 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       refetchInterval: (q) => {
         const data = q.state.data;
         if (!data) return false;
-        const anyStarting = data.instances?.some(
-          (i: ComfyManagedInstance) => i.status === "starting",
+        const anyActive = data.instances?.some(
+          (i: ComfyManagedInstance) => i.status === "starting" || i.status === "running",
         );
-        return anyStarting ? 2000 : false;
+        return anyActive ? 5000 : false;
       },
     });
 
@@ -173,6 +176,56 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     onError: (err: Error) => {
       showError(err.message);
     },
+  });
+
+  // ── Editable instance label ─────────────────────────────────────────────────
+  const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
+  const [labelInput, setLabelInput] = useState("");
+
+  const saveLabelMutation = useMutation({
+    mutationFn: async ({ instanceId, customLabel }: { instanceId: string; customLabel: string }) => {
+      const res = await fetch("/api/settings/comfy-instances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instances: [{ id: instanceId, customLabel: customLabel || null }] }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error || "Failed to save label");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["comfy-manage"] });
+      setEditingLabelId(null);
+    },
+    onError: (err: Error) => { showError(err.message); },
+  });
+
+  const startEditLabel = (inst: ComfyManagedInstance) => {
+    setEditingLabelId(inst.id);
+    setLabelInput(inst.customLabel ?? "");
+  };
+
+  const commitLabel = (instanceId: string) => {
+    saveLabelMutation.mutate({ instanceId, customLabel: labelInput });
+  };
+
+  // ── Delete managed instance ─────────────────────────────────────────────────
+  const deleteInstanceMutation = useMutation({
+    mutationFn: async (instanceId: string) => {
+      const res = await fetch(`/api/comfy/instances/${encodeURIComponent(instanceId)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error || "Delete failed");
+      }
+    },
+    onSuccess: () => {
+      refetchManage();
+      queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
+    },
+    onError: (err: Error) => { showError(err.message); },
   });
 
   const { data: comfyPathData } = useQuery<{ comfyuiPath: string | null }>({
@@ -528,9 +581,33 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                     ) : (
                       <Lightning size={14} className="text-zinc-500" />
                     )}
-                    <span className="text-xs font-medium text-zinc-300">
-                      {inst.label}
-                    </span>
+                    {!inst.external && editingLabelId === inst.id ? (
+                      <input
+                        autoFocus
+                        value={labelInput}
+                        onChange={(e) => setLabelInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitLabel(inst.id);
+                          if (e.key === "Escape") setEditingLabelId(null);
+                        }}
+                        onBlur={() => commitLabel(inst.id)}
+                        className="text-xs font-medium bg-zinc-800 border border-emerald-500/50 rounded px-1.5 py-0.5 text-zinc-200 w-32 focus:outline-none"
+                        placeholder="Custom label"
+                      />
+                    ) : (
+                      <span className="text-xs font-medium text-zinc-300">
+                        {inst.external ? inst.label : getInstanceDisplayLabel(inst)}
+                      </span>
+                    )}
+                    {!inst.external && editingLabelId !== inst.id && (
+                      <button
+                        onClick={() => startEditLabel(inst)}
+                        className="p-0.5 text-zinc-700 hover:text-zinc-400 transition-colors"
+                        title="Edit label"
+                      >
+                        <PencilSimple size={11} />
+                      </button>
+                    )}
                     <span
                       className="text-[10px] font-mono text-zinc-600"
                       title={
@@ -638,6 +715,24 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                         title={`View log for ${inst.label}`}
                       >
                         <FileText size={12} />
+                      </button>
+                    )}
+                    {!inst.external && (
+                      <button
+                        onClick={() => deleteInstanceMutation.mutate(inst.id)}
+                        disabled={
+                          deleteInstanceMutation.isPending ||
+                          inst.status === "running" ||
+                          inst.status === "starting"
+                        }
+                        className="p-1 text-zinc-700 hover:text-red-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        title={
+                          inst.status === "running" || inst.status === "starting"
+                            ? "Stop the instance before deleting"
+                            : `Delete ${inst.label}`
+                        }
+                      >
+                        <Trash size={12} />
                       </button>
                     )}
                     {inst.external && (
