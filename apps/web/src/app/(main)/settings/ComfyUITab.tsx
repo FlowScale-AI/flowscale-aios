@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Cpu,
   Lightning,
   Play,
+  Plus,
   Stop,
   ArrowCounterClockwise,
   CircleNotch,
@@ -86,6 +87,18 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const [pathInput, setPathInput] = useState("");
   const [pathSaved, setPathSaved] = useState(false);
   const { data: modalStatus } = useModalStatus();
+  const [showAddDropdown, setShowAddDropdown] = useState(false);
+  const addDropdownRef = useRef<HTMLDivElement>(null);
+
+  const { data: gpuData } = useQuery<{ gpus: Array<{ index: number; name: string; vramMB: number; backend: string }>; cpu: unknown }>({
+    queryKey: ["gpu-detect"],
+    queryFn: async () => {
+      const res = await fetch("/api/gpu");
+      if (!res.ok) return { gpus: [] };
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
 
   const { data: comfyManage, refetch: refetchManage } =
     useQuery<ComfyManageResponse>({
@@ -150,6 +163,19 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const anyStopped = managedInstances.some((i) => i.status === "stopped");
   const anyStarting = managedInstances.some((i) => i.status === "starting");
 
+  const assignedGpuIndices = new Set(
+    managedInstances
+      .map((i) => {
+        const m = i.id.match(/^gpu-(\d+)$/);
+        return m ? parseInt(m[1], 10) : null;
+      })
+      .filter((n): n is number => n !== null),
+  );
+  const unassignedGpus = (gpuData?.gpus ?? []).filter(
+    (g) => !assignedGpuIndices.has(g.index),
+  );
+  const allGpusAssigned = (gpuData?.gpus ?? []).length > 0 && unassignedGpus.length === 0;
+
   const comfyActionMutation = useMutation({
     mutationFn: async ({
       action,
@@ -177,6 +203,38 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       showError(err.message);
     },
   });
+
+  const addInstanceMutation = useMutation({
+    mutationFn: async (gpuIndex: number) => {
+      const res = await fetch("/api/comfy/instances/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gpuIndex }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error || "Failed to add instance");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      setShowAddDropdown(false);
+      refetchManage();
+      queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
+    },
+    onError: (err: Error) => { showError(err.message); },
+  });
+
+  useEffect(() => {
+    if (!showAddDropdown) return;
+    const handler = (e: MouseEvent) => {
+      if (addDropdownRef.current && !addDropdownRef.current.contains(e.target as Node)) {
+        setShowAddDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showAddDropdown]);
 
   // ── Editable instance label ─────────────────────────────────────────────────
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
@@ -556,6 +614,39 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                     </button>
                   )}
                 </>
+              )}
+              {comfyManage?.isSetup && (gpuData?.gpus ?? []).length > 0 && (
+                <div className="relative" ref={addDropdownRef}>
+                  <button
+                    onClick={() => setShowAddDropdown((v) => !v)}
+                    disabled={allGpusAssigned || addInstanceMutation.isPending}
+                    title={allGpusAssigned ? "All GPUs are in use" : "Add instance for another GPU"}
+                    className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-300 text-[11px] font-medium rounded-lg transition-colors border border-zinc-700"
+                  >
+                    <Plus size={10} weight="bold" />
+                    Add Instance
+                  </button>
+                  {showAddDropdown && unassignedGpus.length > 0 && (
+                    <div className="absolute right-0 top-full mt-1 z-20 bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl overflow-hidden min-w-[180px]">
+                      {unassignedGpus.map((gpu) => (
+                        <button
+                          key={gpu.index}
+                          onClick={() => addInstanceMutation.mutate(gpu.index)}
+                          disabled={addInstanceMutation.isPending}
+                          className="w-full text-left flex items-start gap-2 px-3 py-2.5 hover:bg-zinc-800 transition-colors disabled:opacity-50"
+                        >
+                          <Lightning size={13} className="text-zinc-500 mt-0.5 shrink-0" />
+                          <div>
+                            <div className="text-xs font-medium text-zinc-200">{gpu.name}</div>
+                            <div className="text-[10px] text-zinc-500">
+                              {(gpu.vramMB / 1024).toFixed(0)} GB · GPU {gpu.index}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
               <Link
                 href="/integrations/comfyui"
