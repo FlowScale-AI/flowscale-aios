@@ -18,6 +18,7 @@ import {
   CheckCircle,
   PencilSimple,
   Trash,
+  GearSix,
 } from "phosphor-react";
 import { Modal } from "@flowscale/ui";
 import { useModalStatus } from "@/hooks/useModalStatus";
@@ -84,6 +85,7 @@ function InstanceStatusBadge({ status }: { status: string }) {
 
 function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const queryClient = useQueryClient();
+  const [configModalOpen, setConfigModalOpen] = useState(false);
   const [pathInput, setPathInput] = useState("");
   const [pathSaved, setPathSaved] = useState(false);
   const { data: modalStatus } = useModalStatus();
@@ -584,6 +586,13 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setConfigModalOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 bg-transparent hover:bg-zinc-800 border border-transparent hover:border-zinc-700 rounded-lg transition-colors"
+              >
+                <GearSix size={13} />
+                Edit Configuration
+              </button>
               {/* Bulk controls */}
               {comfyManage?.isSetup && managedInstances.length > 0 && (
                 <>
@@ -842,26 +851,202 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
             </div>
           )}
 
-          {/* Custom launch scripts — top of the section so users see launch
-              options before installation paths. */}
+        </div>
+
+        {/* Cloud Instances section — shown when Modal is authenticated */}
+        {modalStatus?.authenticated && <ModalComfySection />}
+      </div>
+
+      {/* Configuration Modal */}
+      <Modal
+        isOpen={configModalOpen}
+        onClose={() => setConfigModalOpen(false)}
+        title="ComfyUI Configuration"
+        maxWidth="max-w-xl"
+      >
+        <div className="space-y-6">
+          {/* Installation path */}
+          <div>
+            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+              Installation path
+            </label>
+            {savedPath && (
+              <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
+                <CheckCircle size={11} weight="fill" />
+                {savedPath}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <FolderOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                <input
+                  type="text"
+                  value={pathInput}
+                  onChange={(e) => setPathInput(e.target.value)}
+                  placeholder={savedPath ?? "/path/to/ComfyUI"}
+                  className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+                />
+              </div>
+              <button
+                disabled={!pathInput.trim() || savePathMutation.isPending}
+                onClick={() => savePathMutation.mutate(pathInput.trim())}
+                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {pathSaved ? "Saved ✓" : "Save"}
+              </button>
+            </div>
+            <p className="text-[11px] text-zinc-600 mt-1.5">
+              Root directory of your ComfyUI install. Models downloaded into <span className="font-mono">models/</span> subdirectories.
+            </p>
+          </div>
+
+          {/* Python executable */}
           <div className="border-t border-white/5 pt-4">
-            <label className="block text-xs font-medium text-zinc-500 mb-1.5">
-              Custom launch scripts{" "}
-              <span className="text-zinc-600 font-normal">(optional)</span>
+            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+              Python executable <span className="text-zinc-600 font-normal">(optional)</span>
+            </label>
+            {savedPythonPath && (
+              <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
+                <CheckCircle size={11} weight="fill" />
+                {savedPythonPath}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <FolderOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                <input
+                  type="text"
+                  value={pythonInput}
+                  onChange={(e) => setPythonInput(e.target.value)}
+                  placeholder={savedPythonPath ?? "e.g. /path/to/.venv/bin/python"}
+                  className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+                />
+              </div>
+              <button
+                disabled={!pythonInput.trim() || savePythonPathMutation.isPending}
+                onClick={() => savePythonPathMutation.mutate(pythonInput.trim())}
+                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {pythonSaved ? "Saved ✓" : "Save"}
+              </button>
+              {savedPythonPath && (
+                <button
+                  disabled={savePythonPathMutation.isPending}
+                  onClick={() => savePythonPathMutation.mutate("")}
+                  className="px-3 py-2 text-xs text-zinc-400 hover:text-zinc-200 bg-transparent hover:bg-zinc-800 border border-zinc-800 rounded-lg transition-colors disabled:opacity-40"
+                  title="Clear override"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-600 mt-1.5">
+              Point to the <span className="font-mono">python</span> inside your venv when it lives outside the ComfyUI source tree. Leave blank to auto-detect.
+            </p>
+          </div>
+
+          {/* Data directory */}
+          <div className="border-t border-white/5 pt-4">
+            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+              Data directory <span className="text-zinc-600 font-normal">(optional)</span>
+            </label>
+            {savedBaseDir && (
+              <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
+                <CheckCircle size={11} weight="fill" />
+                {savedBaseDir}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <FolderOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                <input
+                  type="text"
+                  value={baseDirInput}
+                  onChange={(e) => setBaseDirInput(e.target.value)}
+                  placeholder={savedBaseDir ?? "e.g. ~/Documents/ComfyUI"}
+                  className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+                />
+              </div>
+              <button
+                disabled={!baseDirInput.trim() || saveBaseDirMutation.isPending}
+                onClick={() => saveBaseDirMutation.mutate(baseDirInput.trim())}
+                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {baseDirSaved ? "Saved ✓" : "Save"}
+              </button>
+              {savedBaseDir && (
+                <button
+                  disabled={saveBaseDirMutation.isPending}
+                  onClick={() => saveBaseDirMutation.mutate("")}
+                  className="px-3 py-2 text-xs text-zinc-400 hover:text-zinc-200 bg-transparent hover:bg-zinc-800 border border-zinc-800 rounded-lg transition-colors disabled:opacity-40"
+                  title="Clear override"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-600 mt-1.5">
+              Passed as <span className="font-mono">--base-directory</span> to main.py. Leave blank to use the installation path.
+            </p>
+          </div>
+
+          {/* Additional scan ports */}
+          <div className="border-t border-white/5 pt-4">
+            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+              Additional ports to scan <span className="text-zinc-600 font-normal">(optional)</span>
+            </label>
+            {extraPorts.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {extraPorts.map((p) => (
+                  <span key={p} className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded">
+                    :{p}
+                    <button
+                      onClick={() => saveExtraPortsMutation.mutate(extraPorts.filter((x) => x !== p))}
+                      disabled={saveExtraPortsMutation.isPending}
+                      className="text-emerald-400/60 hover:text-emerald-200 transition-colors"
+                    >×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="number"
+                min={1024}
+                max={65535}
+                value={portInput}
+                onChange={(e) => setPortInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addPort(); }}
+                placeholder="e.g. 9000"
+                className="flex-1 px-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+              />
+              <button
+                disabled={!portInput.trim() || saveExtraPortsMutation.isPending}
+                onClick={addPort}
+                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Add
+              </button>
+            </div>
+            {allScannedPorts.length > 0 && (
+              <div className="mt-2 text-[11px] text-zinc-500">
+                Scanning: <span className="font-mono text-zinc-400">{allScannedPorts.join(", ")}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Custom launch scripts */}
+          <div className="border-t border-white/5 pt-4">
+            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+              Custom launch scripts <span className="text-zinc-600 font-normal">(optional)</span>
             </label>
             <p className="text-[11px] text-zinc-600 mb-3">
-              Register <span className="font-mono text-zinc-500">.bat</span>,{" "}
-              <span className="font-mono text-zinc-500">.sh</span>, or{" "}
-              <span className="font-mono text-zinc-500">.ps1</span> scripts to use instead of AIOS&apos;s built-in launch. Assign one per instance above.
+              Register <span className="font-mono">.bat</span>, <span className="font-mono">.sh</span>, or <span className="font-mono">.ps1</span> scripts to use instead of AIOS&apos;s built-in launch. Assign one per instance via the dropdown on each instance row.
             </p>
-
             {customScripts.length > 0 && (
               <div className="space-y-1.5 mb-3">
                 {customScripts.map((s) => (
-                  <div
-                    key={s.id}
-                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-zinc-900/50 border border-white/5"
-                  >
+                  <div key={s.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-zinc-900/50 border border-white/5">
                     <div className="flex flex-col gap-0.5 min-w-0">
                       <span className="text-xs font-medium text-zinc-300 truncate">{s.label}</span>
                       <span className="text-[10px] font-mono text-zinc-600 truncate">{s.path}</span>
@@ -877,7 +1062,6 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                 ))}
               </div>
             )}
-
             <div className="flex gap-2">
               <input
                 type="text"
@@ -887,10 +1071,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                 className="w-32 px-3 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors shrink-0"
               />
               <div className="relative flex-1">
-                <FolderOpen
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none"
-                />
+                <FolderOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
                 <input
                   type="text"
                   value={scriptPathInput}
@@ -909,246 +1090,8 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
               </button>
             </div>
           </div>
-
-          {/* Collapsed by default — most users only need to set these once
-              during onboarding. Keeping them out of the way reduces page noise. */}
-          <details className="group border-t border-white/5 pt-4 mt-4">
-            <summary className="flex items-center gap-1.5 cursor-pointer select-none text-xs font-medium text-zinc-400 hover:text-zinc-200 transition-colors list-none [&::-webkit-details-marker]:hidden">
-              <ArrowRight
-                size={12}
-                className="transition-transform group-open:rotate-90 text-zinc-500"
-              />
-              Advanced paths
-              <span className="text-zinc-600 font-normal">(installation, python, data, scan ports)</span>
-            </summary>
-
-            <div className="mt-4 space-y-4">
-          {/* ComfyUI installation path */}
-          <div>
-            <label className="block text-xs font-medium text-zinc-500 mb-1.5">
-              Installation path
-            </label>
-            {savedPath && (
-              <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
-                <CheckCircle size={11} weight="fill" />
-                {savedPath}
-              </p>
-            )}
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <FolderOpen
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none"
-                />
-                <input
-                  type="text"
-                  value={pathInput}
-                  onChange={(e) => setPathInput(e.target.value)}
-                  placeholder={savedPath ?? "/path/to/ComfyUI"}
-                  className="w-full pl-8 pr-3 py-2 text-xs font-mono-custom bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
-                />
-              </div>
-              <button
-                disabled={!pathInput.trim() || savePathMutation.isPending}
-                onClick={() => savePathMutation.mutate(pathInput.trim())}
-                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {pathSaved ? "Saved ✓" : "Save"}
-              </button>
-            </div>
-            <p className="text-[11px] text-zinc-600 mt-1.5">
-              The root directory of your ComfyUI install. Models will be
-              downloaded into <span className="font-mono-custom">models/</span>{" "}
-              subdirectories.
-            </p>
-          </div>
-
-          {/* Python executable override */}
-          <div className="border-t border-white/5 pt-4">
-            <label className="block text-xs font-medium text-zinc-500 mb-1.5">
-              Python executable{" "}
-              <span className="text-zinc-600 font-normal">(optional)</span>
-            </label>
-            {savedPythonPath && (
-              <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
-                <CheckCircle size={11} weight="fill" />
-                {savedPythonPath}
-              </p>
-            )}
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <FolderOpen
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none"
-                />
-                <input
-                  type="text"
-                  value={pythonInput}
-                  onChange={(e) => setPythonInput(e.target.value)}
-                  placeholder={
-                    savedPythonPath ??
-                    "e.g. C:\\Users\\you\\Documents\\ComfyUI\\.venv\\Scripts\\python.exe"
-                  }
-                  className="w-full pl-8 pr-3 py-2 text-xs font-mono-custom bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
-                />
-              </div>
-              <button
-                disabled={!pythonInput.trim() || savePythonPathMutation.isPending}
-                onClick={() =>
-                  savePythonPathMutation.mutate(pythonInput.trim())
-                }
-                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {pythonSaved ? "Saved ✓" : "Save"}
-              </button>
-              {savedPythonPath && (
-                <button
-                  disabled={savePythonPathMutation.isPending}
-                  onClick={() => savePythonPathMutation.mutate("")}
-                  className="px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 bg-transparent hover:bg-zinc-800 border border-zinc-800 rounded-lg transition-colors disabled:opacity-40"
-                  title="Clear override"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-            <p className="text-[11px] text-zinc-600 mt-1.5">
-              Point to the <span className="font-mono-custom">python</span> /{" "}
-              <span className="font-mono-custom">python.exe</span> inside your
-              venv when it lives outside the ComfyUI source tree (e.g. ComfyUI
-              Desktop at{" "}
-              <span className="font-mono-custom">~/Documents/ComfyUI/.venv</span>
-              ). Leave blank to auto-detect.
-            </p>
-          </div>
-
-          {/* Data directory override (--base-directory) */}
-          <div className="border-t border-white/5 pt-4">
-            <label className="block text-xs font-medium text-zinc-500 mb-1.5">
-              Data directory{" "}
-              <span className="text-zinc-600 font-normal">(optional)</span>
-            </label>
-            {savedBaseDir && (
-              <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
-                <CheckCircle size={11} weight="fill" />
-                {savedBaseDir}
-              </p>
-            )}
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <FolderOpen
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none"
-                />
-                <input
-                  type="text"
-                  value={baseDirInput}
-                  onChange={(e) => setBaseDirInput(e.target.value)}
-                  placeholder={
-                    savedBaseDir ??
-                    "e.g. C:\\Users\\you\\Documents\\ComfyUI"
-                  }
-                  className="w-full pl-8 pr-3 py-2 text-xs font-mono-custom bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
-                />
-              </div>
-              <button
-                disabled={!baseDirInput.trim() || saveBaseDirMutation.isPending}
-                onClick={() => saveBaseDirMutation.mutate(baseDirInput.trim())}
-                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {baseDirSaved ? "Saved ✓" : "Save"}
-              </button>
-              {savedBaseDir && (
-                <button
-                  disabled={saveBaseDirMutation.isPending}
-                  onClick={() => saveBaseDirMutation.mutate("")}
-                  className="px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 bg-transparent hover:bg-zinc-800 border border-zinc-800 rounded-lg transition-colors disabled:opacity-40"
-                  title="Clear override"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-            <p className="text-[11px] text-zinc-600 mt-1.5">
-              Passed to main.py as{" "}
-              <span className="font-mono-custom">--base-directory</span>. Point
-              this at your existing ComfyUI workspace (containing{" "}
-              <span className="font-mono-custom">models/</span>,{" "}
-              <span className="font-mono-custom">input/</span>,{" "}
-              <span className="font-mono-custom">output/</span>,{" "}
-              <span className="font-mono-custom">user/</span>) so the managed
-              instance shares data with your other ComfyUI. Leave blank to use
-              the installation path above.
-            </p>
-          </div>
-
-          {/* Extra ports to scan for external ComfyUI instances */}
-          <div className="border-t border-white/5 pt-4">
-            <label className="block text-xs font-medium text-zinc-500 mb-1.5">
-              Additional ports to scan{" "}
-              <span className="text-zinc-600 font-normal">(optional)</span>
-            </label>
-            {extraPorts.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {extraPorts.map((p) => (
-                  <span
-                    key={p}
-                    className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-mono-custom bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded"
-                  >
-                    :{p}
-                    <button
-                      onClick={() =>
-                        saveExtraPortsMutation.mutate(extraPorts.filter((x) => x !== p))
-                      }
-                      disabled={saveExtraPortsMutation.isPending}
-                      className="text-emerald-400/60 hover:text-emerald-200 transition-colors"
-                      title={`Remove port ${p}`}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-2">
-              <input
-                type="number"
-                min={1024}
-                max={65535}
-                value={portInput}
-                onChange={(e) => setPortInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") addPort(); }}
-                placeholder="e.g. 9000"
-                className="flex-1 px-3 py-2 text-xs font-mono-custom bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
-              />
-              <button
-                disabled={!portInput.trim() || saveExtraPortsMutation.isPending}
-                onClick={addPort}
-                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Add
-              </button>
-            </div>
-            <p className="text-[11px] text-zinc-600 mt-1.5">
-              Add ports where you run ComfyUI outside the default range.
-              Scanned on top of well-known ports for auto-discovery.
-            </p>
-            {allScannedPorts.length > 0 && (
-              <div className="mt-2 text-[11px] text-zinc-500">
-                Currently scanning:{" "}
-                <span className="font-mono-custom text-zinc-400">
-                  {allScannedPorts.join(", ")}
-                </span>
-              </div>
-            )}
-          </div>
-            </div>
-          </details>
         </div>
-
-        {/* Cloud Instances section — shown when Modal is authenticated */}
-        {modalStatus?.authenticated && <ModalComfySection />}
-      </div>
+      </Modal>
 
       {/* Spawn-log viewer */}
       <Modal
