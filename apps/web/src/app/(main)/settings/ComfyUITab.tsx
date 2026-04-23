@@ -92,6 +92,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const { data: modalStatus } = useModalStatus();
   const [showAddDropdown, setShowAddDropdown] = useState(false);
   const addDropdownRef = useRef<HTMLDivElement>(null);
+  const labelEditCancelledRef = useRef(false);
 
   const { data: gpuData } = useQuery<{ gpus: Array<{ index: number; name: string; vramMB: number; backend: string }>; cpu: unknown }>({
     queryKey: ["gpu-detect"],
@@ -669,7 +670,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     const pathToUse = resolvedCustomPath || customPath.trim();
     if (!pathToUse || !customPathValid) { showError("Enter a valid ComfyUI installation path"); return; }
     setSetupPhase("detecting");
-    await saveComfySetup("custom", pathToUse);
+    await saveComfySetup("flowscale-managed", pathToUse);
     await finishSetup();
   };
 
@@ -726,6 +727,20 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                 <div className="mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-950/30 border border-red-500/20">
                   <Warning size={14} className="text-red-400 shrink-0 mt-0.5" />
                   <p className="text-xs text-red-300">{installError}</p>
+                </div>
+              )}
+              {installError && (
+                <div className="mt-3 flex justify-end">
+                  <button
+                    onClick={() => {
+                      setInstallError("");
+                      setInstallLog([]);
+                      setSetupPhase("choose");
+                    }}
+                    className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors"
+                  >
+                    ← Back
+                  </button>
                 </div>
               )}
             </div>
@@ -1066,9 +1081,18 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                         onChange={(e) => setLabelInput(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") commitLabel(inst.id);
-                          if (e.key === "Escape") setEditingLabelId(null);
+                          if (e.key === "Escape") {
+                            labelEditCancelledRef.current = true;
+                            setEditingLabelId(null);
+                          }
                         }}
-                        onBlur={() => commitLabel(inst.id)}
+                        onBlur={() => {
+                          if (labelEditCancelledRef.current) {
+                            labelEditCancelledRef.current = false;
+                            return;
+                          }
+                          commitLabel(inst.id);
+                        }}
                         className="text-xs font-medium bg-zinc-800 border border-emerald-500/50 rounded px-1.5 py-0.5 text-zinc-200 w-32 focus:outline-none"
                         placeholder="Custom label"
                       />
