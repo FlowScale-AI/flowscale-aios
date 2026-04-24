@@ -92,3 +92,60 @@ describe('ComfyInstanceConfig.gpuName and customLabel', () => {
     expect(getComfyInstances()[0].customLabel).toBe('')
   })
 })
+
+describe('getComfyInstances — validation filter', () => {
+  // Note: when ALL instances are invalid, getComfyInstances falls back to a
+  // legacy synthetic CPU instance — so we test filtering by mixing valid with
+  // invalid entries and asserting only valid ones survive.
+
+  it('excludes instance where gpuName is a number', () => {
+    setComfyInstances([
+      { id: 'gpu-0', port: 41188, device: 'cuda:0', label: 'GPU 0' },
+      { id: 'gpu-1', port: 41189, device: 'cuda:1', label: 'GPU 1', gpuName: 42 } as never,
+    ])
+    const result = getComfyInstances()
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('gpu-0')
+  })
+
+  it('excludes instance where customLabel is a number', () => {
+    setComfyInstances([
+      { id: 'gpu-0', port: 41188, device: 'cuda:0', label: 'GPU 0' },
+      { id: 'gpu-1', port: 41189, device: 'cuda:1', label: 'GPU 1', customLabel: 99 } as never,
+    ])
+    const result = getComfyInstances()
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('gpu-0')
+  })
+
+  it('excludes instance where port is out of valid range', () => {
+    setComfyInstances([
+      { id: 'gpu-0', port: 41188, device: 'cuda:0', label: 'GPU 0' },
+      { id: 'bad', port: 80, device: 'cuda:1', label: 'Bad port' },
+    ])
+    const result = getComfyInstances()
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('gpu-0')
+  })
+
+  it('excludes instance missing required id field', () => {
+    setComfyInstances([
+      { id: 'gpu-0', port: 41188, device: 'cuda:0', label: 'GPU 0' },
+      { port: 41189, device: 'cuda:1', label: 'No id' } as never,
+    ])
+    const result = getComfyInstances()
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('gpu-0')
+  })
+
+  it('keeps all valid instances in a mixed array', () => {
+    setComfyInstances([
+      { id: 'gpu-0', port: 41188, device: 'cuda:0', label: 'GPU 0' },
+      { id: 'gpu-1', port: 41189, device: 'cuda:1', label: 'GPU 1', gpuName: 'RTX 4090' },
+      { id: 'bad', port: 80, device: 'cuda:2', label: 'Bad' },
+    ])
+    const result = getComfyInstances()
+    expect(result).toHaveLength(2)
+    expect(result.map(r => r.id)).toEqual(['gpu-0', 'gpu-1'])
+  })
+})
