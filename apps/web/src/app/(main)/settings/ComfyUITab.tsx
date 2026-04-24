@@ -1090,8 +1090,10 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                                 const dir = await window.desktop!.dialog.openDirectory!();
                                 if (dir) {
                                   setPortablePath(dir);
-                                  await validatePath(dir, setPortablePathValid, setPortablePathValidating, setResolvedPortablePath);
-                                  const base = dir.replace(/[/\\]ComfyUI[/\\]?$/, "");
+                                  let resolved = "";
+                                  await validatePath(dir, setPortablePathValid, setPortablePathValidating,
+                                    (p) => { resolved = p; setResolvedPortablePath(p); });
+                                  const base = (resolved || dir).replace(/[/\\]ComfyUI[/\\]?$/, "");
                                   const res = await fetch(`/api/comfy/setup/validate-path?path=${encodeURIComponent(base + "/python_embeded")}`).catch(() => null);
                                   setPortablePythonDetected(!!res?.ok && (await res.json().catch(() => ({}))).valid === true);
                                 }
