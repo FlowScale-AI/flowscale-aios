@@ -20,11 +20,31 @@ import {
   Trash,
   GearSix,
   Warning,
+  Info,
 } from "phosphor-react";
 import { Modal } from "@flowscale/ui";
 import { useModalStatus } from "@/hooks/useModalStatus";
 import { ModalComfySection } from "@/components/ModalComfySection";
 import { getInstanceDisplayLabel } from "@/lib/instanceLabel";
+
+function InfoPopover({ lines }: { lines: { label: string; value: string }[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <Info size={13} className="text-zinc-600 hover:text-zinc-400 cursor-help transition-colors" />
+      {open && (
+        <div className="absolute left-5 top-0 z-50 w-64 rounded-lg border border-white/10 bg-zinc-900 shadow-xl p-3 text-[11px]">
+          {lines.map((l) => (
+            <div key={l.label} className="mb-1.5 last:mb-0">
+              <span className="text-zinc-500">{l.label}: </span>
+              <span className="font-mono text-zinc-300">{l.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -96,6 +116,11 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const addDropdownRef = useRef<HTMLDivElement>(null);
   const labelEditCancelledRef = useRef(false);
   const setupCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedFlagTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const scheduleReset = (fn: () => void, ms: number) => {
+    const id = setTimeout(fn, ms);
+    savedFlagTimersRef.current.push(id);
+  };
 
   const { data: gpuData } = useQuery<{ gpus: Array<{ index: number; name: string; vramMB: number; backend: string }>; cpu: unknown }>({
     queryKey: ["gpu-detect"],
@@ -210,7 +235,6 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     },
     onSuccess: () => {
       refetchManage();
-      queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
     },
     onError: (err: Error) => {
       showError(err.message);
@@ -233,7 +257,6 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     onSuccess: () => {
       setShowAddDropdown(false);
       refetchManage();
-      queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
     },
     onError: (err: Error) => { showError(err.message); },
   });
@@ -294,7 +317,6 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     },
     onSuccess: () => {
       refetchManage();
-      queryClient.invalidateQueries({ queryKey: ["comfy-instances"] });
     },
     onError: (err: Error) => { showError(err.message); },
   });
@@ -321,7 +343,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       setPathInput("");
       setPathSaved(true);
       queryClient.invalidateQueries({ queryKey: ["comfyui-path"] });
-      setTimeout(() => setPathSaved(false), 2500);
+      scheduleReset(() => setPathSaved(false), 2500);
     },
   });
 
@@ -354,7 +376,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       setPythonInput("");
       setPythonSaved(true);
       queryClient.invalidateQueries({ queryKey: ["comfyui-python-path"] });
-      setTimeout(() => setPythonSaved(false), 2500);
+      scheduleReset(() => setPythonSaved(false), 2500);
     },
     onError: (err: Error) => { showError(err.message); },
   });
@@ -387,7 +409,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       setBaseDirInput("");
       setBaseDirSaved(true);
       queryClient.invalidateQueries({ queryKey: ["comfyui-base-directory"] });
-      setTimeout(() => setBaseDirSaved(false), 2500);
+      scheduleReset(() => setBaseDirSaved(false), 2500);
     },
     onError: (err: Error) => { showError(err.message); },
   });
@@ -554,6 +576,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     | "choose"
     | "configuring-desktop"
     | "configuring-custom"
+    | "configuring-portable"
     | "installing"
     | "detecting";
 
@@ -561,6 +584,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const [installLog, setInstallLog] = useState<string[]>([]);
   const [installError, setInstallError] = useState("");
   const [setupJustCompleted, setSetupJustCompleted] = useState(false);
+  const [wizardSkipped, setWizardSkipped] = useState(false);
 
   // Desktop App option
   const [desktopComfyPath, setDesktopComfyPath] = useState(DESKTOP_DEFAULT_PATH);
@@ -573,6 +597,13 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const [customPathValid, setCustomPathValid] = useState<boolean | null>(null);
   const [customPathValidating, setCustomPathValidating] = useState(false);
   const [resolvedCustomPath, setResolvedCustomPath] = useState("");
+
+  // Portable option
+  const [portablePath, setPortablePath] = useState("");
+  const [portablePathValid, setPortablePathValid] = useState<boolean | null>(null);
+  const [portablePathValidating, setPortablePathValidating] = useState(false);
+  const [resolvedPortablePath, setResolvedPortablePath] = useState("");
+  const [portablePythonDetected, setPortablePythonDetected] = useState(false);
 
   // ── Setup helpers ──────────────────────────────────────────────────────────
 
@@ -598,7 +629,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     }
   };
 
-  const saveComfySetup = async (installType: string, managedPath: string, desktopDataPath?: string) => {
+  const saveComfySetup = async (installType: 'github' | 'desktop-app' | 'flowscale-managed', managedPath: string, desktopDataPath?: string) => {
     const res = await fetch("/api/settings/comfyui-setup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -697,7 +728,33 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     }
   };
 
+  const handlePortableSetup = async () => {
+    const pathToUse = resolvedPortablePath || portablePath.trim();
+    if (!pathToUse || !portablePathValid) { showError("Enter a valid ComfyUI installation path"); return; }
+    setSetupPhase("detecting");
+    try {
+      await saveComfySetup("flowscale-managed", pathToUse);
+      if (portablePythonDetected) {
+        // Auto-save bundled python — best-effort, don't block setup if it fails
+        const pythonPath = pathToUse.replace(/[/\\]ComfyUI[/\\]?$/, "") + "/python_embeded/python.exe";
+        await fetch("/api/settings/comfyui-python-path", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pythonPath }),
+        }).catch(() => null);
+      }
+      await finishSetup();
+    } catch (err: unknown) {
+      setSetupPhase("choose");
+      showError(err instanceof Error ? err.message : "Setup failed");
+    }
+  };
+
+  const [isWindows, setIsWindows] = useState(false);
+
   useEffect(() => {
+    const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform;
+    setIsWindows(/Win/i.test(platform));
     validatePath(
       DESKTOP_DEFAULT_PATH,
       setDesktopPathValid,
@@ -710,6 +767,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   useEffect(() => {
     return () => {
       if (setupCompleteTimerRef.current) clearTimeout(setupCompleteTimerRef.current);
+      savedFlagTimersRef.current.forEach(clearTimeout);
     };
   }, []);
 
@@ -731,6 +789,17 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   return (
     <div className="px-10 pb-8">
       {!comfyManage?.isSetup ? (
+        wizardSkipped ? (
+          <div className="max-w-2xl flex flex-col items-center justify-center py-16 text-center gap-4">
+            <p className="text-sm text-zinc-500">ComfyUI is not configured.</p>
+            <button
+              onClick={() => setWizardSkipped(false)}
+              className="px-4 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors"
+            >
+              Set up ComfyUI
+            </button>
+          </div>
+        ) : (
         <div className="max-w-2xl">
           {/* ── Detecting phase ─────────────────────────────────────────────── */}
           {setupPhase === "detecting" && (
@@ -776,7 +845,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
           )}
 
           {/* ── Choose / Configuring phases ──────────────────────────────────── */}
-          {(setupPhase === "choose" || setupPhase === "configuring-desktop" || setupPhase === "configuring-custom") && (
+          {(setupPhase === "choose" || setupPhase === "configuring-desktop" || setupPhase === "configuring-custom" || setupPhase === "configuring-portable") && (
             <>
               <div className="mb-6">
                 <h2 className="font-tech text-xl font-semibold text-zinc-100">Connect your ComfyUI Workspace</h2>
@@ -965,10 +1034,110 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                     </div>
                   )}
                 </div>
+
+                {/* Option D — ComfyUI Portable (Windows only) */}
+                {isWindows && <div className={`p-4 rounded-xl border transition-colors ${setupPhase === "configuring-portable" ? "border-emerald-500/30 bg-[var(--color-background-panel)]" : "border-white/8 bg-[var(--color-background-panel)]/50"}`}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-sm font-semibold text-zinc-200">ComfyUI Portable</p>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700">Windows</span>
+                      </div>
+                      <p className="text-xs text-zinc-500">Point AIOS to the <span className="font-mono text-zinc-400">ComfyUI</span> subfolder inside your portable package. Bundled Python is detected automatically.</p>
+                    </div>
+                    {setupPhase !== "configuring-portable" && (
+                      <button
+                        onClick={() => setSetupPhase("configuring-portable")}
+                        className="px-3 py-1.5 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors shrink-0"
+                      >
+                        Select
+                      </button>
+                    )}
+                  </div>
+
+                  {setupPhase === "configuring-portable" && (
+                    <div className="mt-4 space-y-3">
+                      <div>
+                        <label className="block text-[11px] text-zinc-500 mb-1">ComfyUI folder inside portable package</label>
+                        <div className="flex gap-2 items-center">
+                          <div className="relative flex-1">
+                            <FolderOpen size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                            <input
+                              type="text"
+                              value={portablePath}
+                              onChange={(e) => {
+                                setPortablePath(e.target.value);
+                                setPortablePathValid(null);
+                                setResolvedPortablePath("");
+                                setPortablePythonDetected(false);
+                              }}
+                              onBlur={async () => {
+                                let resolved = "";
+                                await validatePath(portablePath, setPortablePathValid, setPortablePathValidating,
+                                  (p) => { resolved = p; setResolvedPortablePath(p); });
+                                // Check for bundled python_embeded one level up (use resolved path, not stale closure)
+                                const base = (resolved || portablePath.trim()).replace(/[/\\]ComfyUI[/\\]?$/, "");
+                                const res = await fetch(`/api/comfy/setup/validate-path?path=${encodeURIComponent(base + "/python_embeded")}`).catch(() => null);
+                                setPortablePythonDetected(!!res?.ok && (await res.json().catch(() => ({}))).valid === true);
+                              }}
+                              placeholder="C:\ComfyUI_windows_portable\ComfyUI"
+                              className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
+                            />
+                          </div>
+                          {typeof window !== "undefined" && window.desktop?.dialog?.openDirectory && (
+                            <button
+                              onClick={async () => {
+                                const dir = await window.desktop!.dialog.openDirectory!();
+                                if (dir) {
+                                  setPortablePath(dir);
+                                  await validatePath(dir, setPortablePathValid, setPortablePathValidating, setResolvedPortablePath);
+                                  const base = dir.replace(/[/\\]ComfyUI[/\\]?$/, "");
+                                  const res = await fetch(`/api/comfy/setup/validate-path?path=${encodeURIComponent(base + "/python_embeded")}`).catch(() => null);
+                                  setPortablePythonDetected(!!res?.ok && (await res.json().catch(() => ({}))).valid === true);
+                                }
+                              }}
+                              className="px-2.5 py-1.5 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg hover:border-zinc-600 transition-colors shrink-0"
+                            >
+                              Browse
+                            </button>
+                          )}
+                          {portablePathValidating && <CircleNotch size={14} className="animate-spin text-zinc-500 shrink-0" />}
+                          {portablePathValid === true && <CheckCircle size={14} className="text-emerald-400 shrink-0" weight="fill" />}
+                          {portablePathValid === false && <span className="text-[10px] text-red-400 shrink-0 whitespace-nowrap">Not a valid ComfyUI folder</span>}
+                        </div>
+                        {portablePathValid === true && portablePythonDetected && (
+                          <p className="mt-1.5 text-[10px] text-emerald-400 flex items-center gap-1">
+                            <CheckCircle size={10} weight="fill" /> Bundled Python detected — will be set automatically
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button onClick={() => setSetupPhase("choose")} className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Back</button>
+                        <button
+                          onClick={handlePortableSetup}
+                          disabled={!portablePathValid}
+                          className="px-4 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded-lg transition-colors"
+                        >
+                          Connect
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>}
+              </div>
+
+              <div className="mt-4 text-center">
+                <button
+                  onClick={() => setWizardSkipped(true)}
+                  className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                >
+                  Skip for now
+                </button>
               </div>
             </>
           )}
         </div>
+        )
       ) : (
         <>
           {setupJustCompleted && (
@@ -1293,10 +1462,78 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
         maxWidth="max-w-xl"
       >
         <div className="space-y-6">
-          {/* Installation path */}
+          {/* Custom launch scripts */}
           <div>
-            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+            <label className="flex items-center gap-1.5 text-xs font-medium text-zinc-400 mb-1.5">
+              Custom launch scripts <span className="text-zinc-600 font-normal">(optional)</span>
+              <InfoPopover lines={[
+                { label: "What", value: ".bat / .sh / .ps1 scripts that replace AIOS's built-in ComfyUI launch" },
+                { label: "Windows", value: "run_nvidia_gpu.bat  or  a custom .bat with extra flags" },
+                { label: "macOS/Linux", value: "a .sh script with custom env vars or --listen flags" },
+                { label: "Usage", value: "assign one per instance via the dropdown on each instance row" },
+              ]} />
+            </label>
+            <p className="text-[11px] text-zinc-600 mb-3">
+              Register <span className="font-mono">.bat</span>, <span className="font-mono">.sh</span>, or <span className="font-mono">.ps1</span> scripts to use instead of AIOS&apos;s built-in launch. Assign one per instance via the dropdown on each instance row.
+            </p>
+            {customScripts.length > 0 && (
+              <div className="space-y-1.5 mb-3">
+                {customScripts.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-zinc-900/50 border border-white/5">
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <span className="text-xs font-medium text-zinc-300 truncate">{s.label}</span>
+                      <span className="text-[10px] font-mono text-zinc-600 truncate">{s.path}</span>
+                    </div>
+                    <button
+                      onClick={() => removeScript(s.id)}
+                      className="ml-3 p-1 text-zinc-600 hover:text-red-400 transition-colors shrink-0"
+                      title="Remove script"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={scriptLabelInput}
+                onChange={(e) => setScriptLabelInput(e.target.value)}
+                placeholder="Label (e.g. RTX 4060 Ti)"
+                className="w-32 px-3 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors shrink-0"
+              />
+              <div className="relative flex-1">
+                <FolderOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                <input
+                  type="text"
+                  value={scriptPathInput}
+                  onChange={(e) => setScriptPathInput(e.target.value)}
+                  placeholder="Path to .bat / .sh / .ps1"
+                  onKeyDown={(e) => { if (e.key === "Enter") addScript(); }}
+                  className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+                />
+              </div>
+              <button
+                disabled={!scriptLabelInput.trim() || !scriptPathInput.trim() || saveCustomScriptsMutation.isPending}
+                onClick={addScript}
+                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          {/* Installation path */}
+          <div className="border-t border-white/5 pt-4">
+            <label className="flex items-center gap-1.5 text-xs font-medium text-zinc-400 mb-1.5">
               Installation path
+              <InfoPopover lines={[
+                { label: "Windows", value: "C:\\Users\\<you>\\ComfyUI" },
+                { label: "macOS", value: "~/ComfyUI  or  /Applications/ComfyUI.app/…/ComfyUI" },
+                { label: "Linux", value: "~/ComfyUI" },
+                { label: "Tip", value: "cd into ComfyUI and run pwd" },
+              ]} />
             </label>
             {savedPath && (
               <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
@@ -1330,8 +1567,14 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
 
           {/* Python executable */}
           <div className="border-t border-white/5 pt-4">
-            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+            <label className="flex items-center gap-1.5 text-xs font-medium text-zinc-400 mb-1.5">
               Python executable <span className="text-zinc-600 font-normal">(optional)</span>
+              <InfoPopover lines={[
+                { label: "Windows venv", value: "<install>\\venv\\Scripts\\python.exe" },
+                { label: "Windows portable", value: "auto-detected (python_embeded\\python.exe)" },
+                { label: "macOS/Linux venv", value: "<install>/.venv/bin/python" },
+                { label: "Tip", value: "activate venv → which python (macOS/Linux) / where python (Windows)" },
+              ]} />
             </label>
             {savedPythonPath && (
               <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
@@ -1375,8 +1618,14 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
 
           {/* Data directory */}
           <div className="border-t border-white/5 pt-4">
-            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+            <label className="flex items-center gap-1.5 text-xs font-medium text-zinc-400 mb-1.5">
               Data directory <span className="text-zinc-600 font-normal">(optional)</span>
+              <InfoPopover lines={[
+                { label: "Windows", value: "C:\\Users\\<you>\\Documents\\ComfyUI" },
+                { label: "macOS", value: "~/Documents/ComfyUI" },
+                { label: "Linux", value: "~/ComfyUI-data" },
+                { label: "Purpose", value: "keeps models/outputs separate from the install folder" },
+              ]} />
             </label>
             {savedBaseDir && (
               <p className="text-xs text-emerald-400 font-mono mb-2 flex items-center gap-1.5">
@@ -1463,61 +1712,6 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
             )}
           </div>
 
-          {/* Custom launch scripts */}
-          <div className="border-t border-white/5 pt-4">
-            <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-              Custom launch scripts <span className="text-zinc-600 font-normal">(optional)</span>
-            </label>
-            <p className="text-[11px] text-zinc-600 mb-3">
-              Register <span className="font-mono">.bat</span>, <span className="font-mono">.sh</span>, or <span className="font-mono">.ps1</span> scripts to use instead of AIOS&apos;s built-in launch. Assign one per instance via the dropdown on each instance row.
-            </p>
-            {customScripts.length > 0 && (
-              <div className="space-y-1.5 mb-3">
-                {customScripts.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-zinc-900/50 border border-white/5">
-                    <div className="flex flex-col gap-0.5 min-w-0">
-                      <span className="text-xs font-medium text-zinc-300 truncate">{s.label}</span>
-                      <span className="text-[10px] font-mono text-zinc-600 truncate">{s.path}</span>
-                    </div>
-                    <button
-                      onClick={() => removeScript(s.id)}
-                      className="ml-3 p-1 text-zinc-600 hover:text-red-400 transition-colors shrink-0"
-                      title="Remove script"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={scriptLabelInput}
-                onChange={(e) => setScriptLabelInput(e.target.value)}
-                placeholder="Label (e.g. RTX 4060 Ti)"
-                className="w-32 px-3 py-2 text-xs bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors shrink-0"
-              />
-              <div className="relative flex-1">
-                <FolderOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
-                <input
-                  type="text"
-                  value={scriptPathInput}
-                  onChange={(e) => setScriptPathInput(e.target.value)}
-                  placeholder="Path to .bat / .sh / .ps1"
-                  onKeyDown={(e) => { if (e.key === "Enter") addScript(); }}
-                  className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
-                />
-              </div>
-              <button
-                disabled={!scriptLabelInput.trim() || !scriptPathInput.trim() || saveCustomScriptsMutation.isPending}
-                onClick={addScript}
-                className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-              >
-                Add
-              </button>
-            </div>
-          </div>
         </div>
       </Modal>
 
