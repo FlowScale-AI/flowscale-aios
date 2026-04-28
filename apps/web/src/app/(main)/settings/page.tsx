@@ -48,6 +48,7 @@ import { PageTransition, Modal } from "@/components/ui";
 import { useUpdateStore } from "@/store/updateStore";
 import { useModalStatus } from "@/hooks/useModalStatus";
 import { ComfyUITab } from "./ComfyUITab";
+import { useGpuAvailability, writeGpuAvailability } from "@/lib/gpuAvailability";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -388,6 +389,9 @@ function ModalComputeCard() {
     "idle" | "installing" | "authenticating" | "connected" | "error"
   >("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<"generic" | "bin-missing">("generic");
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
+  const [urlCopied, setUrlCopied] = useState(false);
 
   const { data: modalStatus } = useQuery<{
     installed: boolean;
@@ -437,15 +441,21 @@ function ModalComputeCard() {
     },
   });
 
-  async function handleLogin() {
+  async function handleLogin(opts?: { forceReinstall?: boolean }) {
     setErrorMsg(null);
+    setErrorKind("generic");
+    setAuthUrl(null);
+    setUrlCopied(false);
     try {
       // Step 1: Install if needed
-      if (!modalStatus?.installed) {
+      if (opts?.forceReinstall || !modalStatus?.installed) {
         setPhase("installing");
         const result = await setupMutation.mutateAsync("install");
         if (!result.success) {
           setPhase("error");
+          if (/not found on PATH|MODAL_BIN/i.test(result.error || "")) {
+            setErrorKind("bin-missing");
+          }
           setErrorMsg(result.error || "Failed to install Modal CLI");
           return;
         }
@@ -474,16 +484,28 @@ function ModalComputeCard() {
         }
       }
       if (authUrl) {
-        window.open(authUrl, "_blank");
+        setAuthUrl(authUrl);
+        openExternalUrl(authUrl);
       } else {
         // Failed to get URL — show debug info
         setPhase("error");
-        const errParts = ["Failed to get auth URL from Modal CLI."];
-        if (debugInfo?.error) errParts.push(`Error: ${debugInfo.error}`);
-        if (debugInfo?.output)
-          errParts.push(`Output: ${debugInfo.output.slice(0, 200)}`);
-        if (debugInfo?.modalBin) errParts.push(`Binary: ${debugInfo.modalBin}`);
-        setErrorMsg(errParts.join(" "));
+        const combined = [debugInfo?.error, debugInfo?.output].filter(Boolean).join(" ");
+        const binMissing =
+          /not recognized|ENOENT|command not found|no such file/i.test(combined);
+        if (binMissing) {
+          setErrorKind("bin-missing");
+          setErrorMsg(
+            `Modal CLI not found on PATH${debugInfo?.modalBin ? ` (looked for "${debugInfo.modalBin}")` : ""}. Reinstall, or set the MODAL_BIN environment variable to the full path of the modal binary and restart AIOS.`,
+          );
+        } else {
+          setErrorKind("generic");
+          const errParts = ["Failed to get auth URL from Modal CLI."];
+          if (debugInfo?.error) errParts.push(`Error: ${debugInfo.error}`);
+          if (debugInfo?.output)
+            errParts.push(`Output: ${debugInfo.output.slice(0, 200)}`);
+          if (debugInfo?.modalBin) errParts.push(`Binary: ${debugInfo.modalBin}`);
+          setErrorMsg(errParts.join(" "));
+        }
         return;
       }
       // Polling will detect when auth completes
@@ -497,6 +519,7 @@ function ModalComputeCard() {
     try {
       await setupMutation.mutateAsync("disconnect");
       setPhase("idle");
+      setAuthUrl(null);
     } catch (err: any) {
       setErrorMsg(err.message);
     }
@@ -536,7 +559,7 @@ function ModalComputeCard() {
         {/* Disconnected / idle */}
         {phase === "idle" && (
           <button
-            onClick={handleLogin}
+            onClick={() => handleLogin()}
             disabled={setupMutation.isPending}
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 transition-all disabled:opacity-50"
           >
@@ -557,11 +580,55 @@ function ModalComputeCard() {
 
         {/* Authenticating */}
         {phase === "authenticating" && (
-          <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-zinc-900/50 border border-white/5">
-            <CircleNotch size={14} className="animate-spin text-purple-400" />
-            <span className="text-sm text-zinc-300">
-              Waiting for browser authentication...
-            </span>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-zinc-900/50 border border-white/5">
+              <CircleNotch size={14} className="animate-spin text-purple-400" />
+              <span className="text-sm text-zinc-300">
+                Waiting for browser authentication...
+              </span>
+            </div>
+            {authUrl && (
+              <div className="px-3 py-2.5 rounded-lg bg-zinc-900/50 border border-white/5 space-y-1.5">
+                <p className="text-[11px] text-zinc-500">
+                  Browser didn&apos;t open, or opened in the wrong profile? Copy this URL and paste it into the browser/profile you want to sign in with:
+                </p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 min-w-0 truncate px-2 py-1 text-[11px] font-mono text-zinc-300 bg-black/40 border border-white/5 rounded">
+                    {authUrl}
+                  </code>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(authUrl);
+                        setUrlCopied(true);
+                        setTimeout(() => setUrlCopied(false), 2000);
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded transition-colors shrink-0"
+                  >
+                    {urlCopied ? (
+                      <>
+                        <CheckCircle size={11} weight="fill" className="text-emerald-400" />
+                        Copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={11} />
+                        Copy
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => openExternalUrl(authUrl)}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded transition-colors shrink-0"
+                  >
+                    Open
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -582,20 +649,33 @@ function ModalComputeCard() {
         {/* Error */}
         {phase === "error" && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-950/30 border border-red-500/20">
-              <Warning size={14} className="text-red-400 shrink-0" />
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-950/30 border border-red-500/20">
+              <Warning size={14} className="text-red-400 shrink-0 mt-0.5" />
               <span className="text-xs text-red-300">{errorMsg}</span>
             </div>
-            <button
-              onClick={() => {
-                setPhase("idle");
-                setErrorMsg(null);
-              }}
-              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              <ArrowCounterClockwise size={12} />
-              Retry
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  setPhase("idle");
+                  setErrorMsg(null);
+                  setErrorKind("generic");
+                }}
+                className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                <ArrowCounterClockwise size={12} />
+                Retry
+              </button>
+              {errorKind === "bin-missing" && (
+                <button
+                  onClick={() => handleLogin({ forceReinstall: true })}
+                  disabled={setupMutation.isPending}
+                  className="flex items-center gap-1.5 text-xs text-purple-300 hover:text-purple-200 transition-colors disabled:opacity-40"
+                >
+                  <CloudArrowUp size={12} />
+                  Reinstall Modal CLI
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -804,31 +884,20 @@ function ModalDeploymentsSection() {
 function ComputeTab() {
   const queryClient = useQueryClient();
 
-  // Per-GPU "Available for jobs" toggle — UI-only, stored in localStorage
-  const [gpuAvailability, setGpuAvailability] = useState<
-    Record<string, boolean>
-  >({});
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem("flowscale-gpu-availability");
-      if (stored) setGpuAvailability(JSON.parse(stored));
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  // Per-device "Available for jobs" toggle — persisted in localStorage and
+  // observed by other surfaces (ComfyUI tab, ComputePicker) via a custom event.
+  const gpuAvailability = useGpuAvailability();
 
   const toggleGpuAvailability = (key: string) => {
-    setGpuAvailability((prev) => {
-      const next = { ...prev, [key]: prev[key] === false ? true : false };
-      localStorage.setItem("flowscale-gpu-availability", JSON.stringify(next));
-      return next;
-    });
+    const next = { ...gpuAvailability };
+    if (next[key] === false) delete next[key];
+    else next[key] = false;
+    writeGpuAvailability(next);
   };
 
   const isGpuAvailable = (key: string) => gpuAvailability[key] !== false; // default true
 
-  const { data: gpuData } = useQuery<{ gpus: GpuInfo[]; cpu: CpuInfo }>({
+  const { data: gpuData, isLoading: gpuLoading } = useQuery<{ gpus: GpuInfo[]; cpu: CpuInfo }>({
     queryKey: ["gpu-detect"],
     queryFn: async () => {
       const res = await fetch("/api/gpu");
@@ -923,6 +992,12 @@ function ComputeTab() {
                 Detect GPUs
               </button>
             </div>
+            {gpuLoading && detectedGpus.length === 0 && !cpuInfo && (
+              <div className="mt-3 flex items-center justify-center gap-2 py-6 rounded-lg bg-zinc-900/50 border border-white/5">
+                <CircleNotch size={14} className="animate-spin text-emerald-400" />
+                <span className="text-xs text-zinc-400">Detecting devices...</span>
+              </div>
+            )}
             {(detectedGpus.length > 0 || cpuInfo) && (
               <div className="mt-3 space-y-1.5">
                 {detectedGpus.map((gpu) => {

@@ -23,8 +23,15 @@ afterAll(() => {
   }
 })
 
-const { getCustomScripts, setCustomScripts, getComfyInstances, setComfyInstances } =
-  await import('../providerSettings')
+const {
+  getCustomScripts,
+  setCustomScripts,
+  getComfyInstances,
+  setComfyInstances,
+  getComfyManagedPath,
+  setComfyManagedPath,
+  setComfyUIPath,
+} = await import('../providerSettings')
 
 describe('customScripts', () => {
   it('returns empty array when no scripts saved', () => {
@@ -147,5 +154,36 @@ describe('getComfyInstances — validation filter', () => {
     const result = getComfyInstances()
     expect(result).toHaveLength(2)
     expect(result.map(r => r.id)).toEqual(['gpu-0', 'gpu-1'])
+  })
+})
+
+describe('comfy managed path / UI path interaction', () => {
+  it('setComfyManagedPath updates both keys so getComfyManagedPath sees the new value', () => {
+    setComfyManagedPath('/new/path/ComfyUI')
+    expect(getComfyManagedPath()).toBe('/new/path/ComfyUI')
+  })
+
+  it('REGRESSION: setComfyUIPath alone does NOT override stale comfyManagedPath', () => {
+    // The bug from the field: Edit Configuration UI was wired to setComfyUIPath
+    // (legacy key only). With a stale comfyManagedPath set by a previous failed
+    // install, the spawn read the OLD path even after the user "saved" a new one.
+    setComfyManagedPath('/stale/.flowscale/comfyui')
+    setComfyUIPath('/new/desktop-app/ComfyUI')
+    // The bug: spawns use getComfyManagedPath which prefers comfyManagedPath,
+    // so it returns the stale value.
+    expect(getComfyManagedPath()).toBe('/stale/.flowscale/comfyui')
+  })
+
+  it('FIX: setComfyManagedPath after a stale value overrides for spawns', () => {
+    // After the route fix, the UI calls setComfyManagedPath which writes both
+    // keys, so spawns see the saved value.
+    setComfyManagedPath('/stale/.flowscale/comfyui')
+    setComfyManagedPath('/new/desktop-app/ComfyUI')
+    expect(getComfyManagedPath()).toBe('/new/desktop-app/ComfyUI')
+  })
+
+  it('falls back to legacy comfyuiPath when comfyManagedPath is unset', () => {
+    setComfyUIPath('/legacy/only/path')
+    expect(getComfyManagedPath()).toBe('/legacy/only/path')
   })
 })

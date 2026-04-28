@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import Link from "next/link"
 import { CaretDown, Lightning, Cpu, Cloud } from "phosphor-react"
 import { getInstanceDisplayLabel } from "@/lib/instanceLabel"
+import { useGpuAvailability, isDeviceAvailable, deviceKeyForInstance } from "@/lib/gpuAvailability"
 
 interface ComputeInstance {
   id: string
@@ -54,7 +55,7 @@ function matchGpuToInstance(
 }
 
 export function ComputePicker({
-  instances,
+  instances: rawInstances,
   gpuInfo,
   value,
   onChange,
@@ -64,6 +65,14 @@ export function ComputePicker({
 }: ComputePickerProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const gpuAvailability = useGpuAvailability()
+  // Hide instances backed by a device the user disabled in Compute settings.
+  // External instances (device "external" or anything we can't map) are never
+  // filtered — the user didn't bring those up via AIOS.
+  const instances = rawInstances.filter((i) => {
+    const key = deviceKeyForInstance(i.device)
+    return key == null || isDeviceAvailable(key, gpuAvailability)
+  })
   const running = instances.filter((i) => i.status === "running")
   const showAuto = running.length > 1
 

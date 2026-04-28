@@ -106,7 +106,7 @@ function VramBar({ vramMB, utilization }: { vramMB: number; utilization?: GpuUti
 export default function HomePage() {
   const router = useRouter()
 
-  const { data: gpuData } = useQuery<{ gpus: GpuInfo[]; cpu: CpuInfo }>({
+  const { data: gpuData, isLoading: gpuLoading } = useQuery<{ gpus: GpuInfo[]; cpu: CpuInfo }>({
     queryKey: ['gpu-detect'],
     queryFn: async () => {
       const res = await fetch('/api/gpu')
@@ -188,6 +188,12 @@ export default function HomePage() {
         <section className="mb-8">
           <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-4">GPU Pool</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {gpuLoading && gpus.length === 0 && !cpuInfo && (
+              <div className="col-span-full flex flex-col items-center justify-center py-8 text-zinc-500 gap-2">
+                <CircleNotch size={20} className="text-emerald-400 animate-spin" />
+                <p className="text-sm">Detecting devices...</p>
+              </div>
+            )}
             {gpus.map((gpu) => {
               const status = getGpuStatus(gpu.index)
               return (
@@ -269,7 +275,7 @@ export default function HomePage() {
               </div>
             )}
 
-            {gpus.length === 0 && !cpuInfo && (
+            {!gpuLoading && gpus.length === 0 && !cpuInfo && (
               <div className="col-span-full flex flex-col items-center justify-center py-8 text-zinc-600">
                 <Lightning size={24} className="opacity-40 mb-2" />
                 <p className="text-sm">No devices detected</p>

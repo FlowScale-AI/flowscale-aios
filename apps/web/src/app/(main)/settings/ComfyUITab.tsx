@@ -26,6 +26,7 @@ import { Modal } from "@flowscale/ui";
 import { useModalStatus } from "@/hooks/useModalStatus";
 import { ModalComfySection } from "@/components/ModalComfySection";
 import { getInstanceDisplayLabel } from "@/lib/instanceLabel";
+import { useGpuAvailability, isDeviceAvailable, deviceKeyForInstance } from "@/lib/gpuAvailability";
 
 function InfoPopover({ lines }: { lines: { label: string; value: string }[] }) {
   const [open, setOpen] = useState(false);
@@ -80,7 +81,20 @@ interface ComfyManageResponse {
 
 // ─── ComfyUI Tab ─────────────────────────────────────────────────────────────
 
-const DESKTOP_DEFAULT_PATH = "/Applications/ComfyUI.app/Contents/Resources/ComfyUI";
+const DESKTOP_CANDIDATE_PATHS: Record<"mac" | "win" | "linux", string[]> = {
+  mac: ["/Applications/ComfyUI.app/Contents/Resources/ComfyUI"],
+  win: [
+    // ComfyUI Desktop (Electron) per-user install
+    "%LOCALAPPDATA%\\Programs\\@comfyorgcomfyui-electron\\resources\\ComfyUI",
+    "%LOCALAPPDATA%\\Programs\\ComfyUI\\resources\\ComfyUI",
+    // Less common: Program Files install
+    "C:\\Program Files\\ComfyUI\\resources\\ComfyUI",
+  ],
+  linux: [
+    "/opt/ComfyUI/resources/ComfyUI",
+    "/usr/lib/ComfyUI/resources/ComfyUI",
+  ],
+};
 
 function InstanceStatusBadge({ status }: { status: string }) {
   if (status === "starting") {
@@ -171,12 +185,20 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     refetchInterval: 10_000,
   });
 
-  const managedInstances = comfyManage?.instances ?? [];
+  const gpuAvailability = useGpuAvailability();
+  const allManagedInstances = comfyManage?.instances ?? [];
+  // Hide instances backed by a device the user disabled in Compute settings.
+  // External instances and devices we can't map (e.g. unknown shapes) are
+  // never filtered.
+  const managedInstances = allManagedInstances.filter((i) => {
+    const key = deviceKeyForInstance(i.device);
+    return key == null || isDeviceAvailable(key, gpuAvailability);
+  });
   // A managed instance "owns" both its runtime port AND its configured port
   // (which may differ for custom-script launches). Excluding both from the
   // external list prevents the same ComfyUI from showing up twice.
   const managedPorts = new Set<number>();
-  for (const i of managedInstances) {
+  for (const i of allManagedInstances) {
     managedPorts.add(i.port);
     if (i.configuredPort != null) managedPorts.add(i.configuredPort);
   }
@@ -202,7 +224,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const anyStarting = managedInstances.some((i) => i.status === "starting");
 
   const assignedGpuIndices = new Set(
-    managedInstances
+    allManagedInstances
       .map((i) => {
         const m = i.id.match(/^gpu-(\d+)$/);
         return m ? parseInt(m[1], 10) : null;
@@ -210,9 +232,14 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       .filter((n): n is number => n !== null),
   );
   const unassignedGpus = (gpuData?.gpus ?? []).filter(
-    (g) => !assignedGpuIndices.has(g.index),
+    (g) =>
+      !assignedGpuIndices.has(g.index) &&
+      isDeviceAvailable(`${g.backend}:${g.index}`, gpuAvailability),
   );
-  const allGpusAssigned = (gpuData?.gpus ?? []).length > 0 && unassignedGpus.length === 0;
+  const enabledGpuCount = (gpuData?.gpus ?? []).filter((g) =>
+    isDeviceAvailable(`${g.backend}:${g.index}`, gpuAvailability),
+  ).length;
+  const allGpusAssigned = enabledGpuCount > 0 && unassignedGpus.length === 0;
 
   const comfyActionMutation = useMutation({
     mutationFn: async ({
@@ -337,7 +364,10 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ comfyuiPath: p }),
       });
-      if (!res.ok) throw new Error("Failed to save path");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error || "Failed to save path");
+      }
     },
     onSuccess: () => {
       setPathInput("");
@@ -345,6 +375,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       queryClient.invalidateQueries({ queryKey: ["comfyui-path"] });
       scheduleReset(() => setPathSaved(false), 2500);
     },
+    onError: (err: Error) => { showError(err.message); },
   });
 
   const savedPath = comfyPathData?.comfyuiPath;
@@ -509,7 +540,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     saveCustomScriptsMutation.mutate(customScripts.filter((s) => s.id !== id), {
       onSuccess: () => {
         // Clear launchScriptId from any instances that referenced the deleted script.
-        const affected = managedInstances.filter((i) => i.launchScriptId === id);
+        const affected = allManagedInstances.filter((i) => i.launchScriptId === id);
         if (affected.length > 0) {
           fetch("/api/settings/comfy-instances", {
             method: "POST",
@@ -587,7 +618,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const [wizardSkipped, setWizardSkipped] = useState(false);
 
   // Desktop App option
-  const [desktopComfyPath, setDesktopComfyPath] = useState(DESKTOP_DEFAULT_PATH);
+  const [desktopComfyPath, setDesktopComfyPath] = useState("");
   const [desktopUserDataPath, setDesktopUserDataPath] = useState("");
   const [desktopPathValid, setDesktopPathValid] = useState<boolean | null>(null);
   const [desktopPathValidating, setDesktopPathValidating] = useState(false);
@@ -604,6 +635,9 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   const [portablePathValidating, setPortablePathValidating] = useState(false);
   const [resolvedPortablePath, setResolvedPortablePath] = useState("");
   const [portablePythonDetected, setPortablePythonDetected] = useState(false);
+  const [portableBaseDir, setPortableBaseDir] = useState("");
+  const [desktopDetectedPython, setDesktopDetectedPython] = useState<string | null>(null);
+  const [desktopPythonProbing, setDesktopPythonProbing] = useState(false);
 
   // ── Setup helpers ──────────────────────────────────────────────────────────
 
@@ -690,11 +724,17 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
   };
 
   const handleDesktopSetup = async () => {
+    if (desktopPathValid !== true) {
+      showError(
+        "ComfyUI App path is not a valid ComfyUI install. Browse to the right folder, or choose another option below.",
+      );
+      return;
+    }
     if (!desktopUserDataPath.trim()) { showError("Desktop user data path is required"); return; }
     setSetupPhase("installing");
     try {
-      await saveComfySetup("desktop-app", desktopPathValid ? desktopComfyPath : "", desktopUserDataPath.trim());
-      const ok = await streamInstall(desktopPathValid ? desktopComfyPath : undefined);
+      await saveComfySetup("desktop-app", desktopComfyPath, desktopUserDataPath.trim());
+      const ok = await streamInstall(desktopComfyPath);
       if (!ok) return;
       await fetch("/api/comfy/setup/copy-assets", { method: "POST" });
       await finishSetup();
@@ -743,6 +783,14 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
           body: JSON.stringify({ pythonPath }),
         }).catch(() => null);
       }
+      const baseDir = portableBaseDir.trim();
+      if (baseDir) {
+        await fetch("/api/settings/comfyui-base-directory", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ baseDirectory: baseDir }),
+        }).catch(() => null);
+      }
       await finishSetup();
     } catch (err: unknown) {
       setSetupPhase("choose");
@@ -754,14 +802,35 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
 
   useEffect(() => {
     const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform;
-    setIsWindows(/Win/i.test(platform));
-    validatePath(
-      DESKTOP_DEFAULT_PATH,
-      setDesktopPathValid,
-      setDesktopPathValidating,
-      setDesktopComfyPath,
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const isWin = /Win/i.test(platform);
+    const isMac = /Mac/i.test(platform);
+    setIsWindows(isWin);
+    const candidates = isWin
+      ? DESKTOP_CANDIDATE_PATHS.win
+      : isMac
+        ? DESKTOP_CANDIDATE_PATHS.mac
+        : DESKTOP_CANDIDATE_PATHS.linux;
+    // Probe each candidate; first one that validates becomes the default. If
+    // none match, leave the field empty so the user types or browses — better
+    // than autofilling a path that obviously doesn't exist on this OS.
+    let cancelled = false;
+    (async () => {
+      for (const candidate of candidates) {
+        if (cancelled) return;
+        try {
+          const res = await fetch(`/api/comfy/setup/validate-path?path=${encodeURIComponent(candidate)}`);
+          if (!res.ok) continue;
+          const data = await res.json().catch(() => ({}));
+          if (data?.valid) {
+            if (cancelled) return;
+            setDesktopComfyPath(data.resolvedPath ?? candidate);
+            setDesktopPathValid(true);
+            return;
+          }
+        } catch { /* try next candidate */ }
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -770,6 +839,35 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
       savedFlagTimersRef.current.forEach(clearTimeout);
     };
   }, []);
+
+  // Probe the Desktop user-data folder for its bundled venv Python. Debounced
+  // so we don't hammer the API while the user is typing.
+  useEffect(() => {
+    const trimmed = desktopUserDataPath.trim();
+    if (!trimmed) {
+      setDesktopDetectedPython(null);
+      setDesktopPythonProbing(false);
+      return;
+    }
+    let cancelled = false;
+    setDesktopPythonProbing(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/comfy/setup/detect-python?root=${encodeURIComponent(trimmed)}`);
+        if (!res.ok) {
+          if (!cancelled) setDesktopDetectedPython(null);
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled) setDesktopDetectedPython(data?.pythonPath ?? null);
+      } catch {
+        if (!cancelled) setDesktopDetectedPython(null);
+      } finally {
+        if (!cancelled) setDesktopPythonProbing(false);
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [desktopUserDataPath]);
 
   // ── Spawn-log viewer ────────────────────────────────────────────────────────
   const [logInstanceId, setLogInstanceId] = useState<string | null>(null);
@@ -790,14 +888,130 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
     <div className="px-10 pb-8">
       {!comfyManage?.isSetup ? (
         wizardSkipped ? (
-          <div className="max-w-2xl flex flex-col items-center justify-center py-16 text-center gap-4">
-            <p className="text-sm text-zinc-500">ComfyUI is not configured.</p>
-            <button
-              onClick={() => setWizardSkipped(false)}
-              className="px-4 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors"
-            >
-              Set up ComfyUI
-            </button>
+          <div className="max-w-3xl space-y-4">
+            <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)] flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="size-9 rounded-lg border border-white/10 bg-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+                  <img src="/comfyui-logo.png" alt="ComfyUI" className="size-5 object-contain" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-zinc-200">Local ComfyUI not configured</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    Use a detected external ComfyUI or Modal Cloud below — or connect a local install.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setWizardSkipped(false)}
+                className="px-3 py-1.5 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors shrink-0"
+              >
+                Set up local
+              </button>
+            </div>
+
+            {externalInstances.length > 0 && (
+              <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-semibold text-zinc-200">External ComfyUI instances</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">
+                      Detected ComfyUI processes not managed by AIOS — use these as-is.
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono text-zinc-600">
+                    {externalInstances.length} detected
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {externalInstances.map((inst) => (
+                    <div
+                      key={inst.id}
+                      className="flex items-center justify-between py-2 px-3 rounded-lg bg-zinc-900/50 border border-white/5"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Lightning size={14} className="text-zinc-500 shrink-0" />
+                        <span className="text-xs font-medium text-zinc-300 truncate">{inst.label}</span>
+                        <span className="text-[10px] font-mono text-zinc-600 shrink-0">:{inst.port}</span>
+                        {inst.devices && inst.devices.length > 0 && (
+                          <span
+                            className="text-[10px] font-mono text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-800/70 border border-white/5 truncate max-w-[180px]"
+                            title={inst.devices.map((d) => d.name).join(", ")}
+                          >
+                            {inst.devices[0].name}
+                          </span>
+                        )}
+                        <InstanceStatusBadge status={inst.status} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="p-5 rounded-xl border border-white/10 bg-[var(--color-background-panel)]">
+              <div className="mb-3">
+                <p className="text-sm font-semibold text-zinc-200">Additional ports to scan</p>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  Add ports where ComfyUI is running outside the default range so AIOS can detect it.
+                </p>
+              </div>
+              {extraPorts.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {extraPorts.map((p) => (
+                    <span
+                      key={p}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded"
+                    >
+                      :{p}
+                      <button
+                        onClick={() => saveExtraPortsMutation.mutate(extraPorts.filter((x) => x !== p))}
+                        disabled={saveExtraPortsMutation.isPending}
+                        className="text-emerald-400/60 hover:text-emerald-200 transition-colors"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min={1024}
+                  max={65535}
+                  value={portInput}
+                  onChange={(e) => setPortInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addPort(); }}
+                  placeholder="e.g. 9000"
+                  className="flex-1 px-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
+                />
+                <button
+                  disabled={!portInput.trim() || saveExtraPortsMutation.isPending}
+                  onClick={addPort}
+                  className="px-3 py-2 text-xs font-medium text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Add
+                </button>
+              </div>
+              {allScannedPorts.length > 0 && (
+                <div className="mt-2 text-[11px] text-zinc-500">
+                  Scanning: <span className="font-mono text-zinc-400">{allScannedPorts.join(", ")}</span>
+                </div>
+              )}
+            </div>
+
+            {modalStatus?.authenticated && <ModalComfySection />}
+
+            {externalInstances.length === 0 && !modalStatus?.authenticated && (
+              <div className="p-5 rounded-xl border border-dashed border-white/10 bg-[var(--color-background-panel)]/50 text-center">
+                <p className="text-xs text-zinc-500">
+                  No external ComfyUI detected and Modal Cloud isn&apos;t connected.
+                </p>
+                <p className="text-[11px] text-zinc-600 mt-1">
+                  Start ComfyUI elsewhere on your network, connect Modal in the Compute tab, or set up local above.
+                </p>
+              </div>
+            )}
           </div>
         ) : (
         <div className="max-w-2xl">
@@ -894,9 +1108,28 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                                 setDesktopPathValid(null);
                               }}
                               onBlur={() => validatePath(desktopComfyPath, setDesktopPathValid, setDesktopPathValidating, setDesktopComfyPath)}
+                              placeholder={
+                                isWindows
+                                  ? "C:\\Users\\<you>\\AppData\\Local\\Programs\\ComfyUI"
+                                  : "/Applications/ComfyUI.app/Contents/Resources/ComfyUI"
+                              }
                               className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
                             />
                           </div>
+                          {typeof window !== "undefined" && window.desktop?.dialog?.openDirectory && (
+                            <button
+                              onClick={async () => {
+                                const dir = await window.desktop!.dialog.openDirectory!();
+                                if (dir) {
+                                  setDesktopComfyPath(dir);
+                                  validatePath(dir, setDesktopPathValid, setDesktopPathValidating, setDesktopComfyPath);
+                                }
+                              }}
+                              className="px-2.5 py-1.5 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg hover:border-zinc-600 transition-colors shrink-0"
+                            >
+                              Browse
+                            </button>
+                          )}
                           {desktopPathValidating && <CircleNotch size={14} className="animate-spin text-zinc-500 shrink-0" />}
                           {desktopPathValid === true && <CheckCircle size={14} className="text-emerald-400 shrink-0" weight="fill" />}
                           {desktopPathValid === false && <span className="text-[10px] text-red-400 shrink-0">Not found</span>}
@@ -913,7 +1146,11 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                               type="text"
                               value={desktopUserDataPath}
                               onChange={(e) => setDesktopUserDataPath(e.target.value)}
-                              placeholder="e.g. ~/Library/Application Support/ComfyUI"
+                              placeholder={
+                                isWindows
+                                  ? "e.g. C:\\Users\\<you>\\AppData\\Roaming\\ComfyUI"
+                                  : "e.g. ~/Library/Application Support/ComfyUI"
+                              }
                               className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
                             />
                           </div>
@@ -929,13 +1166,42 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                             </button>
                           )}
                         </div>
+                        {desktopUserDataPath.trim() && (
+                          <div className="mt-1.5 text-[10px]">
+                            {desktopPythonProbing ? (
+                              <span className="text-zinc-500 flex items-center gap-1">
+                                <CircleNotch size={10} className="animate-spin" />
+                                Probing for Python venv...
+                              </span>
+                            ) : desktopDetectedPython ? (
+                              <span className="text-emerald-400 flex items-center gap-1">
+                                <CheckCircle size={10} weight="fill" />
+                                Detected Python:{" "}
+                                <span className="font-mono text-emerald-300/80 truncate" title={desktopDetectedPython}>
+                                  {desktopDetectedPython}
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="text-amber-400">
+                                No <span className="font-mono">.venv</span> found here. ComfyUI Desktop creates its venv inside the user data folder — double-check this is the right path, or launch ComfyUI Desktop once to let it set up the venv.
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="flex gap-2 pt-1">
                         <button onClick={() => setSetupPhase("choose")} className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Back</button>
                         <button
                           onClick={handleDesktopSetup}
-                          disabled={!desktopUserDataPath.trim()}
-                          className="px-4 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded-lg transition-colors"
+                          disabled={desktopPathValid !== true || !desktopUserDataPath.trim()}
+                          title={
+                            desktopPathValid !== true
+                              ? "Set a valid ComfyUI App path first"
+                              : !desktopUserDataPath.trim()
+                                ? "User data folder is required"
+                                : undefined
+                          }
+                          className="px-4 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors"
                         >
                           Use Desktop App
                         </button>
@@ -998,7 +1264,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                                 setCustomPathValidating,
                                 setResolvedCustomPath,
                               )}
-                              placeholder="/path/to/ComfyUI"
+                              placeholder={isWindows ? "C:\\path\\to\\ComfyUI" : "/path/to/ComfyUI"}
                               className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
                             />
                           </div>
@@ -1112,6 +1378,35 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                             <CheckCircle size={10} weight="fill" /> Bundled Python detected — will be set automatically
                           </p>
                         )}
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-zinc-500 mb-1">
+                          Data directory <span className="text-zinc-600">(optional)</span>
+                        </label>
+                        <div className="flex gap-2 items-center">
+                          <div className="relative flex-1">
+                            <FolderOpen size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" />
+                            <input
+                              type="text"
+                              value={portableBaseDir}
+                              onChange={(e) => setPortableBaseDir(e.target.value)}
+                              placeholder="e.g. C:\Users\you\Documents\ComfyUI"
+                              className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600"
+                            />
+                          </div>
+                          {typeof window !== "undefined" && window.desktop?.dialog?.openDirectory && (
+                            <button
+                              onClick={async () => {
+                                const dir = await window.desktop!.dialog.openDirectory!();
+                                if (dir) setPortableBaseDir(dir);
+                              }}
+                              className="px-2.5 py-1.5 text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg hover:border-zinc-600 transition-colors shrink-0"
+                            >
+                              Browse
+                            </button>
+                          )}
+                        </div>
+                        <p className="mt-1 text-[10px] text-zinc-600">Passed as <span className="font-mono text-zinc-500">--base-directory</span> to share <span className="font-mono text-zinc-500">models/</span>, <span className="font-mono text-zinc-500">input/</span>, <span className="font-mono text-zinc-500">output/</span> with another ComfyUI.</p>
                       </div>
                       <div className="flex gap-2 pt-1">
                         <button onClick={() => setSetupPhase("choose")} className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Back</button>
@@ -1550,7 +1845,7 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                   type="text"
                   value={pathInput}
                   onChange={(e) => setPathInput(e.target.value)}
-                  placeholder={savedPath ?? "/path/to/ComfyUI"}
+                  placeholder={savedPath ?? (isWindows ? "C:\\path\\to\\ComfyUI" : "/path/to/ComfyUI")}
                   className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
                 />
               </div>
@@ -1591,7 +1886,12 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                   type="text"
                   value={pythonInput}
                   onChange={(e) => setPythonInput(e.target.value)}
-                  placeholder={savedPythonPath ?? "e.g. /path/to/.venv/bin/python"}
+                  placeholder={
+                    savedPythonPath ??
+                    (isWindows
+                      ? "e.g. C:\\Users\\<you>\\Documents\\ComfyUI\\.venv\\Scripts\\python.exe"
+                      : "e.g. /path/to/.venv/bin/python")
+                  }
                   className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
                 />
               </div>
@@ -1642,7 +1942,10 @@ function ComfyUITab({ showError }: { showError: (msg: string) => void }) {
                   type="text"
                   value={baseDirInput}
                   onChange={(e) => setBaseDirInput(e.target.value)}
-                  placeholder={savedBaseDir ?? "e.g. ~/Documents/ComfyUI"}
+                  placeholder={
+                    savedBaseDir ??
+                    (isWindows ? "e.g. C:\\Users\\<you>\\Documents\\ComfyUI" : "e.g. ~/Documents/ComfyUI")
+                  }
                   className="w-full pl-8 pr-3 py-2 text-xs font-mono bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 transition-colors"
                 />
               </div>

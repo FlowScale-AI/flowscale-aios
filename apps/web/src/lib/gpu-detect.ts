@@ -119,6 +119,40 @@ function detectRocmGpus(): GpuInfo[] {
  * for cards >4 GB) instead of `Win32_VideoController.AdapterRAM` (32-bit,
  * wraps at ~4 GB).
  */
+/**
+ * Parse PowerShell registry output (NAME\tVRAM_BYTES per line) into AMD GPUs
+ * ordered to match HIP's enumeration on Windows. Exported for testing.
+ *
+ * HIP on Windows enumerates discrete GPUs before integrated ones — using
+ * Windows registry enumeration order gives the *opposite* of HIP, which
+ * causes AIOS to point HIP_VISIBLE_DEVICES at the wrong card. Sorting by
+ * VRAM descending matches HIP's order in practice (discrete cards have
+ * more dedicated VRAM than iGPUs, which share system memory).
+ */
+export function parseAmdGpusFromRegistry(raw: string): GpuInfo[] {
+  if (!raw) return []
+  const parsed: Array<{ name: string; vramMB: number }> = []
+  for (const line of raw.split(/\r?\n/)) {
+    const [name, vramStr] = line.split('\t')
+    if (!name || !vramStr) continue
+    if (!/amd|radeon|ati/i.test(name)) continue
+    const vramBytes = Number(vramStr.trim())
+    if (!Number.isFinite(vramBytes)) continue
+    const vramMB = Math.round(vramBytes / (1024 * 1024))
+    parsed.push({ name: name.trim(), vramMB })
+  }
+  // Sort by VRAM descending so the discrete card lands at index 0 — matches
+  // HIP_VISIBLE_DEVICES enumeration. Stable for ties on the off chance of
+  // matched VRAM (rare for iGPU + discrete).
+  parsed.sort((a, b) => b.vramMB - a.vramMB)
+  return parsed.map((g, index) => ({
+    index,
+    name: g.name,
+    vramMB: g.vramMB,
+    backend: 'rocm' as const,
+  }))
+}
+
 function detectAmdGpusWindows(): GpuInfo[] {
   try {
     // PowerShell snippet outputs lines: NAME\tVRAM_BYTES.
@@ -137,20 +171,7 @@ function detectAmdGpusWindows(): GpuInfo[] {
       timeout: 5000,
     }).trim()
 
-    if (!raw) return []
-
-    const gpus: GpuInfo[] = []
-    let index = 0
-    for (const line of raw.split(/\r?\n/)) {
-      const [name, vramStr] = line.split('\t')
-      if (!name || !vramStr) continue
-      if (!/amd|radeon|ati/i.test(name)) continue
-      const vramBytes = Number(vramStr.trim())
-      if (!Number.isFinite(vramBytes)) continue
-      const vramMB = Math.round(vramBytes / (1024 * 1024))
-      gpus.push({ index: index++, name: name.trim(), vramMB, backend: 'rocm' })
-    }
-    return gpus
+    return parseAmdGpusFromRegistry(raw)
   } catch {
     return []
   }
@@ -220,10 +241,13 @@ function detectGpusViaTorch(): GpuInfo[] | null {
 
 /**
  * Returns all detected GPUs on the system.
- * Result is cached for the lifetime of the Node process.
+ * Successful detections (non-empty) are cached for the lifetime of the Node
+ * process. Empty results are NOT cached — early-startup calls before ComfyUI
+ * is configured shouldn't poison detection forever, and downstream conflict
+ * checks rely on fresh data once a torch venv becomes available.
  */
 export function detectGpus(): GpuInfo[] {
-  if (cachedGpus !== null) return cachedGpus
+  if (cachedGpus !== null && cachedGpus.length > 0) return cachedGpus
 
   // Prefer torch — authoritative and correctly indexed for ComfyUI (HIP and
   // CUDA both expose devices in the same order torch sees them).

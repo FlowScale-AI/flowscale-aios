@@ -11,7 +11,8 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, readdir
 import { createConnection, createServer } from 'net'
 import path from 'path'
 import os from 'os'
-import { getComfyManagedPath, getComfyInstances, getComfyInstanceById, getComfyPythonPath, getComfyBaseDirectory, getCustomScripts } from './providerSettings'
+import { getComfyManagedPath, getComfyInstances, getComfyInstanceById, getComfyPythonPath, getComfyBaseDirectory, getCustomScripts, getComfyDesktopUserDataPath, getExtraComfyPorts } from './providerSettings'
+import { detectGpus } from './gpu-detect'
 import { WELL_KNOWN_COMFY_PORTS } from './comfy-probe'
 
 const AIOS_DIR = path.join(os.homedir(), '.flowscale', 'aios')
@@ -91,21 +92,34 @@ export function findPythonExec(comfyPath: string): string {
 
   const isWin = process.platform === 'win32'
 
-  const candidates = isWin
-    ? [
-        path.join(comfyPath, 'venv', 'Scripts', 'python.exe'),
-        path.join(comfyPath, '.venv', 'Scripts', 'python.exe'),
-      ]
-    : [
-        path.join(comfyPath, 'venv', 'bin', 'python3'),
-        path.join(comfyPath, 'venv', 'bin', 'python'),
-        path.join(comfyPath, '.venv', 'bin', 'python3'),
-        path.join(comfyPath, '.venv', 'bin', 'python'),
-        // macOS Desktop App bundles Python in the .app Resources sibling dirs:
-        path.join(comfyPath, '..', 'python_embeds', 'bin', 'python3'),
-        path.join(comfyPath, '..', 'venv', 'bin', 'python3'),
-        path.join(comfyPath, '..', 'venv', 'bin', 'python'),
-      ]
+  // ComfyUI Desktop puts its venv inside the user data directory (managed by uv),
+  // not next to main.py. Probe that first when a Desktop user-data path is set.
+  const desktopUserData = getComfyDesktopUserDataPath()
+
+  const venvNames = ['venv', '.venv']
+  const buildVenvCandidates = (root: string): string[] =>
+    isWin
+      ? venvNames.map((v) => path.join(root, v, 'Scripts', 'python.exe'))
+      : venvNames.flatMap((v) => [
+          path.join(root, v, 'bin', 'python3'),
+          path.join(root, v, 'bin', 'python'),
+        ])
+
+  const candidates: string[] = []
+
+  if (desktopUserData) {
+    candidates.push(...buildVenvCandidates(desktopUserData))
+  }
+  candidates.push(...buildVenvCandidates(comfyPath))
+
+  if (!isWin) {
+    // macOS Desktop App bundles Python in the .app Resources sibling dirs:
+    candidates.push(
+      path.join(comfyPath, '..', 'python_embeds', 'bin', 'python3'),
+      path.join(comfyPath, '..', 'venv', 'bin', 'python3'),
+      path.join(comfyPath, '..', 'venv', 'bin', 'python'),
+    )
+  }
 
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate
@@ -252,6 +266,135 @@ function findExternalComfyOnDevice(device: string): number | null {
  * PyTorch-ROCm presents AMD GPUs as `type: "cuda"` in /system_stats, so a
  * managed `rocm:N` instance conflicts with an external `cuda:N` entry.
  */
+/**
+ * Defensively clean a stored ComfyUI path before using it at spawn time.
+ * Old AIOS versions (and the user's clipboard) sometimes left a trailing
+ * `main.py`, wrapping quotes, or trailing path separators in settings.json.
+ * Pure / synchronous / exported for tests.
+ */
+export function normalizeStoredComfyPath(input: string): string {
+  if (!input) return ''
+  let s = input.trim()
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    s = s.slice(1, -1).trim()
+  }
+  s = s.replace(/[\\/]+main\.py$/i, '')
+  s = s.replace(/[\\/]+$/, '')
+  return s
+}
+
+/**
+ * Normalize a GPU name for comparison across vendor / format variations.
+ * Handles:
+ *   - Vendor markers: (TM), (R), (C), ™, ®, ©
+ *   - Backend prefix: "cuda:0 " / "rocm:1 " (ComfyUI Desktop's /system_stats
+ *     prepends this to the device name)
+ *   - Backend suffix: " : native" / " : compiled" / similar (Desktop appends
+ *     the runtime mode)
+ *   - Whitespace normalization
+ */
+export function normalizeGpuName(s: string | undefined): string {
+  return (s ?? '')
+    .toLowerCase()
+    .replace(/\((?:tm|r|c)\)/g, '')
+    .replace(/[®™©]/g, '')
+    // Strip leading "cuda:N " / "rocm:N " (Desktop /system_stats format)
+    .replace(/^(?:cuda|rocm|hip)\s*:\s*\d+\s+/, '')
+    // Strip trailing " : <anything>" runtime tag (Desktop /system_stats format)
+    .replace(/\s+:\s+\S.*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export interface ExternalDeviceReport { type?: string; index?: number; name?: string }
+export interface LocalGpuInfo { index: number; name: string }
+
+/**
+ * Merge live GPU detection with persisted instance configs to produce the
+ * "what GPUs do we know about" list used by conflict detection. Instance
+ * configs are the durable source — `gpuName` is set at setup time and
+ * survives detectGpus() returning [] (which happens when ComfyUI's venv
+ * is unavailable or the cache was poisoned by an early-startup miss).
+ *
+ * Detected entries win on duplicate index because torch is authoritative
+ * for the current runtime.
+ */
+export function buildLocalGpuList(
+  detected: LocalGpuInfo[],
+  instances: Array<{ device: string; gpuName?: string }>,
+): LocalGpuInfo[] {
+  const detectedIndices = new Set(detected.map((g) => g.index))
+  const fromInstances: LocalGpuInfo[] = []
+  const seen = new Set<number>()
+  for (const inst of instances) {
+    if (!inst.gpuName || inst.device === 'cpu') continue
+    const idxMatch = inst.device.match(/^(?:cuda|rocm):(\d+)$/)
+    if (!idxMatch) continue
+    const index = parseInt(idxMatch[1], 10)
+    if (detectedIndices.has(index) || seen.has(index)) continue
+    seen.add(index)
+    fromInstances.push({ index, name: inst.gpuName })
+  }
+  return [...detected, ...fromInstances]
+}
+
+/**
+ * Pure decision logic for "does this external ComfyUI conflict with the local
+ * device I'm trying to start?" — extracted so it can be unit tested.
+ *
+ * Returns true if the external should block the local spawn.
+ */
+export function shouldConflict(
+  device: string,
+  externalDevices: ExternalDeviceReport[],
+  localGpus: LocalGpuInfo[],
+): boolean {
+  if (device === 'cpu') {
+    // CPU instance: conflict only if external has *only* CPU devices.
+    return externalDevices.length > 0 && externalDevices.every((d) => d.type === 'cpu')
+  }
+  const wantIndex = parseInt(device.split(':')[1] ?? '', 10)
+  if (!Number.isFinite(wantIndex)) return false
+  const nonCpu = externalDevices.filter((d) => d.type !== 'cpu')
+  if (nonCpu.length === 0) return false
+
+  const targetGpu = localGpus.find((g) => g.index === wantIndex)
+  const targetName = normalizeGpuName(targetGpu?.name)
+  const localNames = new Set(localGpus.map((g) => normalizeGpuName(g.name)).filter(Boolean))
+  const externalAllNamed = nonCpu.every((d) => !!d.name)
+
+  // 1. Name match against the target — strongest signal, index-independent.
+  if (targetName && externalAllNamed) {
+    if (nonCpu.some((d) => normalizeGpuName(d.name) === targetName)) return true
+    // External names exist but none equal our target.
+    // If every external name maps to *some* local GPU (just not our target),
+    // we know which physical card it's on → definitely no conflict.
+    const allMatchOtherLocal = nonCpu.every((d) =>
+      localNames.has(normalizeGpuName(d.name)),
+    )
+    if (allMatchOtherLocal) return false
+    // External names don't match any known local GPU — fall through to
+    // index heuristics.
+  }
+
+  // 2. Direct index match — only meaningful when *we know* the external isn't
+  // env-isolated. PyTorch with HIP_VISIBLE_DEVICES / CUDA_VISIBLE_DEVICES
+  // remaps every visible device to index 0, so a single-device external
+  // reporting index 0 tells us nothing about which physical GPU it's on.
+  if (nonCpu.length > 1 && nonCpu.some((d) => d.index === wantIndex)) return true
+  // Multi-device external where one device matches our index AND we have name
+  // info that didn't disqualify it above → likely real match.
+  if (nonCpu.some((d) => d.index === wantIndex) && !externalAllNamed) return true
+
+  // 3. Single-GPU external with no usable name info — we genuinely cannot
+  // tell which physical GPU it's on. Don't conflict here: a false positive
+  // (blocking spawns on unrelated GPUs) has bitten users; a false negative
+  // (letting two fight for the same GPU) crashes loudly at startup, which
+  // the user can recover from. If we have target name but external is
+  // unnamed, same thing — we can't reason about it.
+  return false
+}
+
 async function findExternalComfyOnDeviceViaApi(
   device: string,
   ownInstanceId: string,
@@ -259,9 +402,21 @@ async function findExternalComfyOnDeviceViaApi(
   const ownPorts = new Set(
     getComfyInstances().filter((i) => i.id !== ownInstanceId).map((i) => i.port),
   )
-  const ports = Array.from(new Set<number>([...WELL_KNOWN_COMFY_PORTS, ...ownPorts]))
+  // Include user-configured extra scan ports — Desktop App or other launchers
+  // often run on non-default ports.
+  const extraPorts = getExtraComfyPorts()
+  const ports = Array.from(
+    new Set<number>([...WELL_KNOWN_COMFY_PORTS, ...ownPorts, ...extraPorts]),
+  )
 
-  const wantIndex = device === 'cpu' ? null : parseInt(device.split(':')[1] ?? '', 10)
+  const localGpus = buildLocalGpuList(
+    detectGpus().map((g) => ({ index: g.index, name: g.name })),
+    getComfyInstances().map((i) => ({ device: i.device, gpuName: i.gpuName })),
+  )
+
+  console.log(
+    `[ComfyUI Manager] Probing for external ComfyUI on ${device} (ports: ${ports.join(', ')}, local GPUs: ${localGpus.map((g) => `${g.index}:${g.name}`).join(', ') || 'unknown'})`,
+  )
 
   for (const port of ports) {
     try {
@@ -269,22 +424,22 @@ async function findExternalComfyOnDeviceViaApi(
         signal: AbortSignal.timeout(1500),
       })
       if (!res.ok) continue
-      const stats = (await res.json()) as {
-        devices?: Array<{ type?: string; index?: number }>
-      }
+      const stats = (await res.json()) as { devices?: ExternalDeviceReport[] }
       const devices = stats.devices ?? []
-      if (device === 'cpu') {
-        // CPU instance: conflict only if external has *only* CPU devices
-        if (devices.length > 0 && devices.every((d) => d.type === 'cpu')) return port
-      } else {
-        // GPU instance: conflict on matching index with a non-CPU device.
-        // `type: "cuda"` covers both NVIDIA CUDA and AMD ROCm in PyTorch.
-        if (Number.isFinite(wantIndex) && devices.some((d) => d.type !== 'cpu' && d.index === wantIndex)) {
-          return port
-        }
+      console.log(
+        `[ComfyUI Manager] :${port} reports devices:`,
+        devices.map((d) => `${d.type}:${d.index}${d.name ? ` (${d.name})` : ''}`).join(', '),
+      )
+      if (shouldConflict(device, devices, localGpus)) {
+        console.log(`[ComfyUI Manager] :${port} conflicts with ${device}`)
+        return port
       }
-    } catch {
+    } catch (err) {
       // port not open / not ComfyUI / timeout — skip
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!/fetch failed|ECONNREFUSED|aborted/i.test(msg)) {
+        console.log(`[ComfyUI Manager] :${port} probe error: ${msg}`)
+      }
     }
   }
   return null
@@ -345,13 +500,20 @@ export async function startInstance(instanceId: string): Promise<{ port: number;
     env = { ...process.env }
   } else {
     // Managed launch — AIOS builds the command.
-    const comfyPath = getComfyManagedPath()
-    if (!comfyPath) throw new Error('ComfyUI path not configured. Please complete the setup first.')
+    const rawComfyPath = getComfyManagedPath()
+    if (!rawComfyPath) throw new Error('ComfyUI path not configured. Please complete the setup first.')
+    // Defensively normalize stale settings written before path validation
+    // landed (e.g. trailing main.py copied from a stack trace, .app bundles,
+    // wrapping quotes). normalizeStoredComfyPath strips the easy mistakes,
+    // and existsSync below catches the rest.
+    const comfyPath = normalizeStoredComfyPath(rawComfyPath)
     if (!existsSync(comfyPath)) throw new Error(`ComfyUI directory not found: ${comfyPath}`)
 
     const mainPy = path.join(comfyPath, 'main.py')
     if (!existsSync(mainPy)) {
-      throw new Error(`ComfyUI main.py not found at: ${mainPy}. Is this a valid ComfyUI installation?`)
+      throw new Error(
+        `ComfyUI main.py not found at: ${mainPy}. Open Settings → ComfyUI → Edit Configuration and re-save the Installation path.`,
+      )
     }
 
     const python = findPythonExec(comfyPath)
