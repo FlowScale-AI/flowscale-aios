@@ -100,6 +100,16 @@ const DDL = `
     id INTEGER PRIMARY KEY DEFAULT 1,
     initial_password TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS models (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    path TEXT NOT NULL UNIQUE,
+    type TEXT NOT NULL DEFAULT 'other',
+    size_bytes INTEGER,
+    comfy_port INTEGER NOT NULL,
+    scanned_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  );
 `
 
 export function createTestDb() {
