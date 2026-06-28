@@ -23,7 +23,8 @@ function detectNvidiaGpus(): GpuInfo[] {
   try {
     const raw = execSync(
       'nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits',
-      { encoding: 'utf-8', timeout: 5000 },
+      // stdio stderr 'ignore': nvidia-smi is optional, so don't leak "command not found" to the parent's stderr.
+      { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
     ).trim()
     if (!raw) return []
     return raw.split('\n').map((line) => {
@@ -43,7 +44,7 @@ function detectNvidiaGpus(): GpuInfo[] {
 /** Get GPU names from lspci (works when rocm-smi can't resolve names). */
 function getGpuNamesFromLspci(): string[] {
   try {
-    const lspciOutput = execSync('lspci', { encoding: 'utf-8', timeout: 5000 }).trim()
+    const lspciOutput = execSync('lspci', { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()
     if (!lspciOutput) return []
     const raw = lspciOutput
       .split('\n')
@@ -78,6 +79,7 @@ function detectRocmGpus(): GpuInfo[] {
     const vramRaw = execSync('rocm-smi --showmeminfo vram', {
       encoding: 'utf-8',
       timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'], // rocm-smi is optional; suppress its stderr on absence.
     }).trim()
 
     // Parse lines like: "GPU[0]		: VRAM Total Memory (B): 12868124672"
@@ -296,7 +298,8 @@ export function getGpuUtilization(): GpuUtilization[] {
   try {
     const raw = execSync(
       'nvidia-smi --query-gpu=index,memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits',
-      { encoding: 'utf-8', timeout: 5000 },
+      // stdio stderr 'ignore': nvidia-smi is optional, so don't leak "command not found" to the parent's stderr.
+      { encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
     ).trim()
     if (!raw) return []
     return raw.split('\n').map((line) => {
