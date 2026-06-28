@@ -1,0 +1,12 @@
+{
+  "name": "image-generator",
+  "displayName": "Image Generator",
+  "description": "Generate images using AI tools with a simple interface",
+  "version": "1.0.0",
+  "sdk": "1.1.0",
+  "entry": "index.html",
+  "permissions": ["tools"],
+  "capabilities": {
+    "slots": ["main-app"]
+  }
+}

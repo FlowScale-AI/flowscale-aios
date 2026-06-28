@@ -39,6 +39,9 @@ export function getDb() {
   }
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')
+  // Give a retry window when another process (e.g. the AIOS CLI) holds the write lock,
+  // instead of failing immediately with SQLITE_BUSY. Per-connection; mirrors the CLI's setting.
+  sqlite.pragma('busy_timeout = 5000')
 
   // Init schema
   sqlite.exec(`

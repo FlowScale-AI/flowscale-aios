@@ -104,7 +104,7 @@ export default function InstalledAppPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['installed-apps'] })
-      router.push('/home')
+      router.push('/apps')
     },
   })
 
@@ -120,8 +120,8 @@ export default function InstalledAppPage() {
     return (
       <div className="h-full flex flex-col items-center justify-center bg-[var(--color-background)] text-zinc-600">
         <p className="text-sm">App not found</p>
-        <button onClick={() => router.push('/home')} className="mt-3 text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 transition-colors">
-          <ArrowLeft size={12} /> Back to Home
+        <button onClick={() => router.push('/apps')} className="mt-3 text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 transition-colors">
+          <ArrowLeft size={12} /> Back to Apps
         </button>
       </div>
     )
@@ -133,7 +133,7 @@ export default function InstalledAppPage() {
       <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 bg-[var(--color-background-panel)] shrink-0 relative">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => router.push('/home')}
+            onClick={() => router.push('/apps')}
             className="text-zinc-600 hover:text-zinc-400 transition-colors"
             title="Back"
           >

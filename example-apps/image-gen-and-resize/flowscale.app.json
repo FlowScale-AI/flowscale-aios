@@ -1,0 +1,12 @@
+{
+  "name": "image-gen-and-resize",
+  "displayName": "Image Gen & Resize",
+  "description": "Generate images and resize them in a pipeline workflow",
+  "version": "1.0.0",
+  "sdk": "1.1.0",
+  "entry": "index.html",
+  "permissions": ["tools"],
+  "capabilities": {
+    "slots": ["main-app"]
+  }
+}
