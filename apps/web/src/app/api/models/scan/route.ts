@@ -37,9 +37,19 @@ export async function POST(req: NextRequest) {
           comfyPort: m.comfyPort,
           scannedAt: m.scannedAt,
         })
+        // Reconcile on `path` (the table's UNIQUE key), not `id`. The id is sha256(port:filename),
+        // so the same model file scanned under a different port (shared models dir) yields a new id
+        // but the same path — an id-keyed upsert misses it and trips UNIQUE(path). Keying on path
+        // takes over the existing row for the latest scanner.
         .onConflictDoUpdate({
-          target: models.id,
-          set: { filename: m.filename, scannedAt: m.scannedAt },
+          target: models.path,
+          set: {
+            filename: m.filename,
+            type: m.type,
+            sizeBytes: m.sizeBytes,
+            comfyPort: m.comfyPort,
+            scannedAt: m.scannedAt,
+          },
         })
         .run()
     }

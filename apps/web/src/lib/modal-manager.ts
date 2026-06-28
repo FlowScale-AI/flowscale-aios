@@ -80,6 +80,12 @@ export function getPythonSpawnOptions(
 function findModalBin(): string {
   const isWin = process.platform === "win32";
 
+  // 0. Honor explicit override — useful when the user installed Modal into a
+  // non-standard Python (conda, pyenv, custom venv) that none of the heuristics
+  // below probe.
+  const override = process.env.MODAL_BIN?.trim();
+  if (override && existsSync(override)) return override;
+
   // 1. Check if `modal` is already on PATH
   try {
     const whichCmd = isWin ? "where modal" : "which modal";
@@ -91,89 +97,62 @@ function findModalBin(): string {
     if (firstLine) return firstLine;
   } catch {}
 
-  // 2. On Windows, ask Python for its scripts directory (most reliable)
-  if (isWin) {
+  // 2. Ask Python for its system AND user scripts directories — most reliable,
+  // since pip on Windows often does a `--user` install that lands in
+  // %APPDATA%\Roaming\Python\Python3XX\Scripts (NOT in %APPDATA%\Roaming\Python\Scripts).
+  const exeName = isWin ? "modal.exe" : "modal";
+  for (const pyCmd of isWin ? ["py", "python", "python3"] : ["python3", "python"]) {
     try {
-      // Try py launcher first, then python
-      for (const pyCmd of ["py", "python", "python3"]) {
-        try {
-          const scriptsDir = execSync(
-            `${pyCmd} -c "import sysconfig; print(sysconfig.get_path('scripts'))"`,
-            { timeout: 5000, stdio: "pipe" },
-          )
-            .toString()
-            .trim();
-          const modalPath = join(scriptsDir, "modal.exe");
-          if (existsSync(modalPath)) return modalPath;
-        } catch {}
+      const out = execSync(
+        `${pyCmd} -c "import sysconfig,os; sys_s=sysconfig.get_path('scripts'); user_s=sysconfig.get_path('scripts', 'nt_user' if os.name=='nt' else 'posix_user'); print(sys_s); print(user_s)"`,
+        { timeout: 5000, stdio: "pipe" },
+      )
+        .toString()
+        .trim();
+      for (const dir of out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
+        const p = join(dir, exeName);
+        if (existsSync(p)) return p;
       }
     } catch {}
   }
 
-  // 3. Check common pip user-install locations
+  // 3. Ask pip itself where it installed modal — most authoritative when pip
+  // succeeded but the binary is in an unusual layout (conda, pyenv, custom venvs).
+  for (const pyCmd of isWin ? ["py", "python", "python3"] : ["python3", "python"]) {
+    try {
+      const out = execSync(`${pyCmd} -m pip show -f modal`, {
+        timeout: 8000,
+        stdio: "pipe",
+      }).toString();
+      const locMatch = out.match(/^Location:\s*(.+)$/m);
+      if (!locMatch) continue;
+      const sitePackages = locMatch[1].trim();
+      const fileMatch = out
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .find((l) => /(^|[\\/])modal(\.exe)?$/i.test(l));
+      if (fileMatch) {
+        // Files are listed relative to site-packages; entry-point scripts use
+        // `..\..\Scripts\modal.exe` style paths.
+        const resolved = join(sitePackages, fileMatch);
+        if (existsSync(resolved)) return resolved;
+      }
+    } catch {}
+  }
+
+  // 4. Check common pip user-install locations
   const home = homedir();
+  const winPyVersions = ["Python39", "Python310", "Python311", "Python312", "Python313", "Python314"];
   const candidates: string[] = isWin
     ? [
+        // pip --user (default on Windows when no admin) → AppData\Roaming\Python\PythonXX\Scripts
+        ...winPyVersions.map((v) =>
+          join(home, "AppData", "Roaming", "Python", v, "Scripts", "modal.exe"),
+        ),
         join(home, "AppData", "Roaming", "Python", "Scripts", "modal.exe"),
-        join(
-          home,
-          "AppData",
-          "Local",
-          "Programs",
-          "Python",
-          "Python39",
-          "Scripts",
-          "modal.exe",
-        ),
-        join(
-          home,
-          "AppData",
-          "Local",
-          "Programs",
-          "Python",
-          "Python310",
-          "Scripts",
-          "modal.exe",
-        ),
-        join(
-          home,
-          "AppData",
-          "Local",
-          "Programs",
-          "Python",
-          "Python311",
-          "Scripts",
-          "modal.exe",
-        ),
-        join(
-          home,
-          "AppData",
-          "Local",
-          "Programs",
-          "Python",
-          "Python312",
-          "Scripts",
-          "modal.exe",
-        ),
-        join(
-          home,
-          "AppData",
-          "Local",
-          "Programs",
-          "Python",
-          "Python313",
-          "Scripts",
-          "modal.exe",
-        ),
-        join(
-          home,
-          "AppData",
-          "Local",
-          "Programs",
-          "Python",
-          "Python314",
-          "Scripts",
-          "modal.exe",
+        // System-installed Python (per-user, via python.org installer)
+        ...winPyVersions.map((v) =>
+          join(home, "AppData", "Local", "Programs", "Python", v, "Scripts", "modal.exe"),
         ),
       ]
     : [
@@ -243,6 +222,7 @@ export async function installModal(): Promise<{
   success: boolean;
   error?: string;
   logs?: string;
+  binary?: string;
 }> {
   return new Promise((resolve) => {
     const pip = findPipExec();
@@ -266,15 +246,41 @@ export async function installModal(): Promise<{
     proc.on("close", (code) => {
       // Clear cached modal binary path so it's re-detected after install
       _modalBin = null;
-      if (code === 0) {
-        resolve({ success: true, logs: stdout });
-      } else {
+      if (code !== 0) {
         resolve({
           success: false,
           error: stderr || `pip exited with code ${code}`,
           logs: stdout,
         });
+        return;
       }
+      // pip succeeded — verify the modal binary is now reachable. pip can install
+      // into a Scripts/bin directory that isn't on the Next.js server's PATH or in
+      // any of the locations findModalBin() probes (Microsoft Store Python, conda,
+      // pyenv, etc.). Surface a clear error here instead of letting auth blow up
+      // later with "'modal' is not recognized".
+      const bin = findModalBin();
+      const resolved = bin !== "modal" || (() => {
+        try {
+          execSync("modal --version", { timeout: 5000, stdio: "pipe" });
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      if (!resolved) {
+        const isWin = process.platform === "win32";
+        const hint = isWin
+          ? "pip installed Modal but its Scripts directory isn't on PATH. Try restarting AIOS, or set MODAL_BIN to the full path of modal.exe."
+          : "pip installed Modal but the bin directory isn't on PATH. Try restarting AIOS, or set MODAL_BIN to the full path of the modal binary.";
+        resolve({
+          success: false,
+          error: hint,
+          logs: stdout,
+        });
+        return;
+      }
+      resolve({ success: true, logs: stdout, binary: bin });
     });
   });
 }

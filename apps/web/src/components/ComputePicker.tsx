@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react"
 import Link from "next/link"
 import { CaretDown, Lightning, Cpu, Cloud } from "phosphor-react"
+import { getInstanceDisplayLabel } from "@/lib/instanceLabel"
+import { useGpuAvailability, isDeviceAvailable, deviceKeyForInstance } from "@/lib/gpuAvailability"
 
 interface ComputeInstance {
   id: string
@@ -10,6 +12,8 @@ interface ComputeInstance {
   port: number
   device: string
   label: string
+  gpuName?: string
+  customLabel?: string
 }
 
 interface GpuInfoItem {
@@ -51,7 +55,7 @@ function matchGpuToInstance(
 }
 
 export function ComputePicker({
-  instances,
+  instances: rawInstances,
   gpuInfo,
   value,
   onChange,
@@ -61,6 +65,14 @@ export function ComputePicker({
 }: ComputePickerProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const gpuAvailability = useGpuAvailability()
+  // Hide instances backed by a device the user disabled in Compute settings.
+  // External instances (device "external" or anything we can't map) are never
+  // filtered — the user didn't bring those up via AIOS.
+  const instances = rawInstances.filter((i) => {
+    const key = deviceKeyForInstance(i.device)
+    return key == null || isDeviceAvailable(key, gpuAvailability)
+  })
   const running = instances.filter((i) => i.status === "running")
   const showAuto = running.length > 1
 
@@ -73,12 +85,12 @@ export function ComputePicker({
         : instances[0]?.id
       : String(value)
 
-  const selectedLabel =
-    selected === "modal"
-      ? "Modal (Cloud)"
-      : selected === "auto"
-      ? "Auto"
-      : instances.find((i) => String(i.port) === selected)?.label ?? "Select"
+  const selectedLabel = (() => {
+    if (selected === "modal") return "Modal (Cloud)"
+    if (selected === "auto") return "Auto"
+    const inst = instances.find((i) => String(i.port) === selected)
+    return inst ? getInstanceDisplayLabel(inst) : "Select"
+  })()
 
   // Close on outside click
   useEffect(() => {
@@ -212,7 +224,7 @@ export function ComputePicker({
                             : "text-zinc-200"
                         }`}
                       >
-                        {gpu ? gpu.name : inst.label}
+                        {getInstanceDisplayLabel(inst)}
                       </span>
                       <span className="text-[10px] text-zinc-600 shrink-0">
                         :{inst.port}

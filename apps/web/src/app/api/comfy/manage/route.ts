@@ -51,7 +51,8 @@ export async function GET(req: NextRequest) {
   // - If PID is dead, still probe the port (catches externally-started or legacy-PID instances)
   const instances = await Promise.all(
     statuses.map(async (st) => {
-      const launchScriptId = getComfyInstanceById(st.id)?.launchScriptId
+      const instanceConfig = getComfyInstanceById(st.id)
+      const launchScriptId = instanceConfig?.launchScriptId
       let status: 'running' | 'starting' | 'stopped'
       let actualPort: number | undefined
       let devices: ComfyDevice[] | undefined
@@ -110,6 +111,8 @@ export async function GET(req: NextRequest) {
         configuredPort: actualPort != null ? st.port : undefined,
         device: st.device,
         label: st.label,
+        gpuName: instanceConfig?.gpuName,
+        customLabel: instanceConfig?.customLabel,
         launchScriptId,
         devices,
       }

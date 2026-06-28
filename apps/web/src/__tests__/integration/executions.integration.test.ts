@@ -8,9 +8,39 @@ vi.mock('../../lib/db', () => ({
   getDb: () => db,
 }))
 
-// Mock fetch for ComfyUI calls (used by POST executions and PATCH save-to-disk)
+// Skip the port-probe noise from autoRouteComfyPort. Without this, getRunningPorts
+// fires fetch(/system_stats) calls against well-known + configured ports — on a
+// developer machine where some of those ports are bound, those probes consume
+// the test's mockResolvedValueOnce mocks for /object_info + /prompt (since
+// once-mocks are consumed in call order, not by URL). The route always falls
+// back to the tool's stored comfyPort when this returns null.
+vi.mock('../../lib/comfyAutoRoute', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/comfyAutoRoute')>('../../lib/comfyAutoRoute')
+  return {
+    ...actual,
+    autoRouteComfyPort: vi.fn(async (fallback?: number | null) => fallback ?? null),
+  }
+})
+
+// Mock fetch for ComfyUI calls (used by POST executions and PATCH save-to-disk).
+// URL-routed defaults handle "noise" probes (e.g. autoRouteComfyPort scanning
+// well-known ports) so test mocks for /object_info and /prompt aren't consumed
+// by them. Tests can still override via mockResolvedValueOnce / mockImplementationOnce.
 const mockFetch = vi.fn()
 globalThis.fetch = mockFetch
+
+function defaultRoutedFetch(url: string | URL | Request): Promise<Response> {
+  const u = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url
+  // /system_stats probes from autoRouteComfyPort.getRunningPorts — return
+  // not-ok so probePort treats the port as unavailable and skips it. This
+  // makes tests deterministic regardless of which dev ports happen to be
+  // open on the host machine.
+  if (u.includes('/system_stats')) {
+    return Promise.resolve(new Response(null, { status: 503 }))
+  }
+  // Anything else: fail loudly so unmocked calls don't silently pass.
+  return Promise.resolve(new Response(JSON.stringify({ error: 'unmocked fetch' }), { status: 500 }))
+}
 
 // Mock fs/promises for saveOutputsToDisk
 vi.mock('fs/promises', () => ({
@@ -44,6 +74,10 @@ describe('Executions integration', () => {
   beforeEach(async () => {
     db = createTestDb()
     mockFetch.mockReset()
+    // Default to URL-routed responses so port-probe noise doesn't consume
+    // the test's `/object_info` and `/prompt` mocks. Tests can still queue
+    // mockResolvedValueOnce — those take priority over the default impl.
+    mockFetch.mockImplementation(defaultRoutedFetch as never)
 
     // Create a tool to attach executions to
     const req = makeRequest('/api/tools', {

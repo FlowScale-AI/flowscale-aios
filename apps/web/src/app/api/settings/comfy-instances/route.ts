@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   // Merge incoming launchScriptId values into existing configs — don't allow
   // callers to overwrite port/device/label (those come from detect flow).
   const existing = getComfyInstances()
-  const updates = body.instances as Array<{ id: string; launchScriptId?: string | null }>
+  const updates = body.instances as Array<{ id: string; launchScriptId?: string | null; customLabel?: string | null }>
 
   const scripts = getCustomScripts()
   const merged: ComfyInstanceConfig[] = []
@@ -37,6 +37,12 @@ export async function POST(req: NextRequest) {
         )
       }
       next.launchScriptId = update.launchScriptId
+    }
+    // customLabel
+    if (update.customLabel === null || update.customLabel === '') {
+      delete next.customLabel
+    } else if (typeof update.customLabel === 'string') {
+      next.customLabel = update.customLabel
     }
     merged.push(next)
   }
