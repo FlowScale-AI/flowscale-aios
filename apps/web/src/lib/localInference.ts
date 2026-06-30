@@ -3,6 +3,7 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync, openSyn
 import { join, resolve, normalize } from 'path'
 import { homedir } from 'os'
 import { getPlugin, getPluginDir } from './toolPlugins'
+import { detectTorchBackend, torchIndexUrl } from './torch-backend'
 
 const DEFAULT_PLUGIN_ID = 'z-image-turbo'
 
@@ -155,12 +156,6 @@ export async function getServerStatus(pluginId: string = DEFAULT_PLUGIN_ID): Pro
 
 // ── GPU / dependencies ───────────────────────────────────────────────────────
 
-function detectGpuType(): 'rocm' | 'cuda' | 'cpu' {
-  try { execSync('nvidia-smi', { stdio: 'ignore' }); return 'cuda' } catch { /* no nvidia */ }
-  try { if (existsSync('/dev/kfd')) return 'rocm' } catch { /* ignore */ }
-  return 'cpu'
-}
-
 export function areDepsInstalled(python: string, pluginId: string = DEFAULT_PLUGIN_ID): boolean {
   const plugin = getPlugin(pluginId)
   if (!plugin) return false
@@ -169,7 +164,7 @@ export function areDepsInstalled(python: string, pluginId: string = DEFAULT_PLUG
   try {
     const checks = packages.map((pkg) => `import ${pkg}`).join('; ')
     execSync(`${python} -c "${checks}"`, { stdio: 'ignore' })
-    const gpu = detectGpuType()
+    const gpu = detectTorchBackend()
     if (gpu === 'rocm') {
       execSync(`${python} -c "import torch; assert torch.version.hip is not None, 'not rocm'"`, { stdio: 'ignore' })
     } else if (gpu === 'cuda') {
@@ -198,11 +193,7 @@ export function spawnInstall(python: string, pluginId: string = DEFAULT_PLUGIN_I
   const pipNames = packages.map((p) => p === 'PIL' ? 'pillow' : p)
   const others = pipNames.join(' ')
 
-  const gpu = detectGpuType()
-  const torchIndex =
-    gpu === 'rocm' ? 'https://download.pytorch.org/whl/rocm6.3' :
-    gpu === 'cuda' ? 'https://download.pytorch.org/whl/cu124' :
-    'https://download.pytorch.org/whl/cpu'
+  const torchIndex = torchIndexUrl(detectTorchBackend())
   const pipFlags = '--break-system-packages'
   const cmd = [
     `${python} -m pip install ${pipFlags} --force-reinstall torch torchvision --index-url ${torchIndex}`,
