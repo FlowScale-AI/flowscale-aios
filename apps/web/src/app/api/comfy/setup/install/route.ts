@@ -19,6 +19,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { setComfyManagedPath, setComfyInstallType } from '@/lib/providerSettings'
+import { detectTorchBackend, torchIndexUrl } from '@/lib/torch-backend'
 import { isValidComfyInstall, resolveComfyPath } from '../utils'
 
 const FLOWSCALE_COMFY_PATH = path.join(os.homedir(), '.flowscale', 'comfyui')
@@ -112,11 +113,23 @@ export async function POST(req: Request) {
           send({ msg: 'Virtual environment created.' })
         }
 
-        // Step 3: Install requirements
+        // Step 3: Install dependencies
         const pipBin = process.platform === 'win32'
           ? path.join(venvPath, 'Scripts', 'pip.exe')
           : path.join(venvPath, 'bin', 'pip')
 
+        // Step 3a: Backend-matched torch (before requirements so pip doesn't pull the default CUDA wheel)
+        const backend = detectTorchBackend()
+        send({ msg: `Detected ${backend.toUpperCase()} — installing matching torch…` })
+        await runStreamed(
+          pipBin,
+          ['install', 'torch', 'torchvision', '--index-url', torchIndexUrl(backend)],
+          installPath,
+          (line) => send({ msg: line }),
+        )
+        send({ msg: 'Torch installed.' })
+
+        // Step 3b: Install requirements
         send({ msg: 'Installing Python dependencies (this may take a few minutes)…' })
         await runStreamed(
           pipBin,
