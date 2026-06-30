@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 const execSync = vi.fn()
-const existsSync = vi.fn(() => false)
+const existsSync = vi.fn((_p: string): boolean => false)
 vi.mock('child_process', () => ({ execSync: (...a: unknown[]) => execSync(...a) }))
 vi.mock('fs', () => ({ existsSync: (p: string) => existsSync(p) }))
 import { detectTorchBackend, torchIndexUrl } from '../torch-backend'
