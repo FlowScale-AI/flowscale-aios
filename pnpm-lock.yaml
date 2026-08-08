@@ -61,7 +61,7 @@ importers:
         specifier: ^5.90.20
         version: 5.90.21(react@19.2.4)
       axios:
-        specifier: ^1.13.6
+        specifier: 1.13.6
         version: 1.13.6
       better-sqlite3:
         specifier: ^12.6.2
